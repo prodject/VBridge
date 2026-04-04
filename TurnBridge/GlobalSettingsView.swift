@@ -24,9 +24,32 @@ struct GlobalSettingsView: View {
             }
 
             Section(header: Text("Routing")) {
-                Toggle("Allow LAN Access", isOn: $excludeLocalNetworks)
-                Toggle("Bypass APNs", isOn: $excludeAPNs)
-                Toggle("Bypass Cellular", isOn: $excludeCellularServices)
+                Toggle(isOn: $excludeLocalNetworks) {
+                    VStack(alignment: .leading) {
+                        Text("Allow LAN Access")
+                        Text("Access local network devices without routing through VPN")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle(isOn: $excludeAPNs) {
+                    VStack(alignment: .leading) {
+                        Text("Bypass APNs")
+                        Text("Send push notifications directly, bypassing the tunnel")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle(isOn: $excludeCellularServices) {
+                    VStack(alignment: .leading) {
+                        Text("Bypass Cellular")
+                        Text("Exclude calls, SMS, and voicemail from the tunnel")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
         }
         .navigationTitle("Settings")
