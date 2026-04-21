@@ -507,7 +507,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.prodject.vbridge.network-extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/../wireguard-apple/build/Release-iphoneos";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/wireguard-apple/build/Release-iphoneos";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -538,7 +538,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.prodject.vbridge.network-extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/../wireguard-apple/build/Release-iphoneos";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PROJECT_DIR)/wireguard-apple/build/Release-iphoneos";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
