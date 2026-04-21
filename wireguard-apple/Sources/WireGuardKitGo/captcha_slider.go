@@ -17,6 +17,7 @@ import (
 )
 
 const (
+    captchaDebugInfo     = "1d3e9babfd3a74f4588bf90cf5c30d3e8e89a0e2a4544da8de8bbf4d78a32f5c"
     sliderCaptchaType     = "slider"
     defaultSliderAttempts = 4
 )
@@ -45,11 +46,8 @@ func solveSliderCaptcha(
     baseParams string,
     browserFp string,
     hash string,
-    settingsResp map[string]interface{},
+    sliderSettings string,
 ) (string, error) {
-    // Extract slider settings from the settings response
-    sliderSettings := extractSliderSettings(settingsResp)
-
     log.Printf("slider: fetching captcha content (settings=%q)", sliderSettings)
 
     // Get scrambled image and swap instructions
@@ -105,7 +103,7 @@ func solveSliderCaptcha(
             neturl.QueryEscape(cursor),
             neturl.QueryEscape("[]"), neturl.QueryEscape("[]"), neturl.QueryEscape("[]"),
             browserFp, hash, neturl.QueryEscape(answer),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            captchaDebugInfo,
         )
 
         checkResp, err := vkReq("captchaNotRobot.check", checkData)
@@ -136,70 +134,6 @@ func solveSliderCaptcha(
     }
 
     return "", fmt.Errorf("slider: all %d guesses rejected", maxTries)
-}
-
-// extractSliderSettings extracts slider captcha_settings from settings API response.
-func extractSliderSettings(settingsResp map[string]interface{}) string {
-    if settingsResp == nil {
-        return ""
-    }
-    respObj, ok := settingsResp["response"].(map[string]interface{})
-    if !ok {
-        return ""
-    }
-
-    // Try to find captcha_settings for slider type
-    raw := respObj["captcha_settings"]
-    if raw == nil {
-        return ""
-    }
-
-    // captcha_settings can be array or map
-    switch v := raw.(type) {
-    case []interface{}:
-        for _, item := range v {
-            m, ok := item.(map[string]interface{})
-            if !ok {
-                continue
-            }
-            t, _ := m["type"].(string)
-            if t == sliderCaptchaType {
-                return normalizeSettings(m["settings"])
-            }
-        }
-    case map[string]interface{}:
-        if s, ok := v[sliderCaptchaType]; ok {
-            return normalizeSettings(s)
-        }
-    case string:
-        // Try JSON parse
-        trimmed := strings.TrimSpace(v)
-        if trimmed == "" {
-            return ""
-        }
-        var items []interface{}
-        if err := json.Unmarshal([]byte(trimmed), &items); err == nil {
-            return extractSliderSettings(map[string]interface{}{
-                "response": map[string]interface{}{"captcha_settings": items},
-            })
-        }
-    }
-    return ""
-}
-
-func normalizeSettings(raw interface{}) string {
-    switch v := raw.(type) {
-    case nil:
-        return ""
-    case string:
-        return v
-    default:
-        data, err := json.Marshal(v)
-        if err != nil {
-            return ""
-        }
-        return string(data)
-    }
 }
 
 // parseSliderContent parses the getContent API response.
