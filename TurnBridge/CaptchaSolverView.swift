@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 struct CaptchaSolverView: View {
     let request: CaptchaRequest
@@ -7,10 +6,9 @@ struct CaptchaSolverView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @State private var didOpenBrowser = false
 
-    private var captchaURL: URL? {
-        URL(string: request.url)
-    }
+    private var captchaURL: URL? { URL(string: request.url) }
 
     var body: some View {
         NavigationStack {
@@ -28,30 +26,20 @@ struct CaptchaSolverView: View {
                 }
                 .padding(.top, 8)
 
-                if let captchaURL {
-                    CaptchaWebView(url: captchaURL)
-                        .frame(maxWidth: .infinity, minHeight: 480, maxHeight: 640)
-                        .layoutPriority(1)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 8)
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 34, weight: .semibold))
-                            .foregroundStyle(.orange)
-                        Text("Invalid captcha URL")
-                            .font(.headline)
-                        Text("The extension published an invalid manual fallback payload.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 10) {
+                    Image(systemName: "safari.fill")
+                        .font(.system(size: 36, weight: .semibold))
+                        .foregroundStyle(.blue)
+                    Text("The captcha page opens in your browser.")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    Text("If it does not open automatically, use the button below.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
 
                 Text(request.url)
                     .font(.footnote.monospaced())
@@ -61,7 +49,7 @@ struct CaptchaSolverView: View {
 
                 if let captchaURL {
                     Button("Open in Browser") {
-                        openURL(captchaURL)
+                        openBrowser(captchaURL)
                     }
                     .font(.footnote.weight(.semibold))
                 }
@@ -77,70 +65,15 @@ struct CaptchaSolverView: View {
                     }
                 }
             }
+            .task {
+                guard !didOpenBrowser, let captchaURL else { return }
+                didOpenBrowser = true
+                openBrowser(captchaURL)
+            }
         }
     }
-}
 
-struct CaptchaWebView: View {
-    let url: URL
-
-    var body: some View {
-#if os(iOS)
-        UIKitCaptchaWebView(url: url)
-#elseif os(macOS)
-        AppKitCaptchaWebView(url: url)
-#endif
+    private func openBrowser(_ url: URL) {
+        _ = openURL(url)
     }
 }
-
-#if os(iOS)
-private struct UIKitCaptchaWebView: UIViewRepresentable {
-    let url: URL
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.navigationDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        guard uiView.url != url else { return }
-        uiView.load(URLRequest(url: url))
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate {}
-}
-#endif
-
-#if os(macOS)
-private struct AppKitCaptchaWebView: NSViewRepresentable {
-    let url: URL
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.navigationDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.isOpaque = false
-        return webView
-    }
-
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        guard nsView.url != url else { return }
-        nsView.load(URLRequest(url: url))
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate {}
-}
-#endif

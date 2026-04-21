@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/png"
 	"io"
 	"log"
 	"net"
@@ -23,7 +20,6 @@ import (
 
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "golang.org/x/image/webp"
 )
 
 const captchaListenPort = "8765"
@@ -34,7 +30,7 @@ type browserCommand struct {
 }
 
 func localCaptchaOrigin() string {
-	return "http://127.0.0.1:" + captchaListenPort
+	return "http://localhost:" + captchaListenPort
 }
 
 func localCaptchaListenAddrs() []string {
@@ -64,7 +60,7 @@ func isLocalCaptchaHost(host string) bool {
 func localCaptchaURLForTarget(targetURL *neturl.URL) string {
 	localURL := &neturl.URL{
 		Scheme:   "http",
-		Host:     "127.0.0.1:" + captchaListenPort,
+		Host:     "localhost:" + captchaListenPort,
 		Path:     targetURL.Path,
 		RawPath:  targetURL.RawPath,
 		RawQuery: targetURL.RawQuery,
@@ -426,46 +422,6 @@ func solveCaptchaViaHTTP(ctx context.Context, captchaImg string) (string, error)
 	manualCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	profile := getRandomProfile()
-	client := newCaptchaClient()
-
-	req, err := http.NewRequestWithContext(manualCtx, http.MethodGet, captchaImg, nil)
-	if err != nil {
-		return "", fmt.Errorf("build captcha image request: %w", err)
-	}
-	applyBrowserProfile(req, profile)
-	req.Header.Set("Accept", "image/png,image/jpeg,image/apng,image/*,*/*;q=0.8")
-	req.Header.Set("Referer", captchaImg)
-	req.Header.Del("Origin")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch captcha image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	imageBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read captcha image: %w", err)
-	}
-	if len(imageBytes) == 0 {
-		return "", fmt.Errorf("captcha image response is empty")
-	}
-
-	decodedImage, _, err := image.Decode(bytes.NewReader(imageBytes))
-	if err != nil {
-		return "", fmt.Errorf("decode captcha image: %w (content-type=%s)", err, resp.Header.Get("Content-Type"))
-	}
-
-	var normalized bytes.Buffer
-	if err := png.Encode(&normalized, decodedImage); err != nil {
-		return "", fmt.Errorf("encode captcha image as png: %w", err)
-	}
-
-	imageDataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(normalized.Bytes())
-	log.Printf("[Captcha] Image fallback loaded: original-content-type=%s bytes=%d normalized=png bytes=%d",
-		resp.Header.Get("Content-Type"), len(imageBytes), normalized.Len())
-
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
@@ -484,7 +440,7 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 <form onsubmit="fetch('/solve?key='+encodeURIComponent(document.getElementById('k').value)).then(()=>{document.body.innerHTML='<h2>Done!</h2>';setTimeout(function(){window.close();}, 300);});return false;">
 <br><input id="k" type="text" autofocus placeholder="Text from image"/>
 <br><button type="submit">Submit</button>
-</form></body></html>`, imageDataURI)
+</form></body></html>`, captchaImg)
 	})
 
 	mux.HandleFunc("/solve", func(w http.ResponseWriter, r *http.Request) {
