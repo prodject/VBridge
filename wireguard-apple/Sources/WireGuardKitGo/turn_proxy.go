@@ -171,11 +171,12 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 	}
 
 	var resp map[string]interface{}
-    defer func() {
-        if r := recover(); r != nil {
-            log.Printf("get TURN creds error (bad JSON?): %v\n\n", resp)
-            resErr = fmt.Errorf("panic in getCreds: %v", r)
-        }
+	var err error
+	    defer func() {
+	        if r := recover(); r != nil {
+	            log.Printf("get TURN creds error (bad JSON?): %v\n\n", resp)
+	            resErr = fmt.Errorf("panic in getCreds: %v", r)
+	        }
     }()
 
 	data := "client_id=6287487&token_type=messages&client_secret=QbYic1K3lEV5kTGiqlq2&version=1&app_id=6287487"
