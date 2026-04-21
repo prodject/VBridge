@@ -30,6 +30,8 @@ struct CaptchaSolverView: View {
 
                 if let captchaURL {
                     CaptchaWebView(url: captchaURL)
+                        .frame(maxWidth: .infinity, minHeight: 480, maxHeight: 640)
+                        .layoutPriority(1)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
