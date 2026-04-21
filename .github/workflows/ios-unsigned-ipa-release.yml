@@ -27,17 +27,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Link local WireGuard package
-        run: |
-          set -euo pipefail
-
-          # Xcode resolves the local Swift package reference relative to the
-          # .xcodeproj location, which ends up one level above the checkout in CI.
-          # Use a real directory copy instead of a symlink so SwiftPM/Xcode
-          # can build the package modules reliably on GitHub-hosted runners.
-          rm -rf "$GITHUB_WORKSPACE/../wireguard-apple"
-          ditto "$GITHUB_WORKSPACE/wireguard-apple" "$GITHUB_WORKSPACE/../wireguard-apple"
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -60,38 +49,12 @@ jobs:
       - name: Prebuild WireGuard Go bridge
         run: |
           set -euo pipefail
-          bridge_log="wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a.log"
-          set +e
-          make -C wireguard-apple/Sources/WireGuardKitGo \
-            build version-header \
-            PLATFORM_NAME=iphoneos \
-            ARCHS=arm64 \
-            IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET"
-          make_status=$?
-          set -e
-          if [ "$make_status" -ne 0 ]; then
-            echo "=== Make failed. Listing .tmp directory ===" >&2
-            find wireguard-apple/Sources/WireGuardKitGo/.tmp -type f 2>/dev/null || true
-            echo "=== WireGuard Go bridge out directory ===" >&2
-            find wireguard-apple/Sources/WireGuardKitGo/out -maxdepth 2 -type f 2>/dev/null || true
-            if [ -f "$bridge_log" ]; then
-              echo "=== WireGuard Go bridge log ===" >&2
-              ls -l "$bridge_log" >&2 || true
-              tail -n 200 "$bridge_log" >&2 || true
-            fi
-            echo "=== Go environment ===" >&2
-            go env GOROOT GOPATH GOOS GOARCH CGO_ENABLED GOPROXY GOMOD GOMODCACHE 2>/dev/null || true
-            echo "=== Go build cache ===" >&2
-            ls -la "$HOME/Library/Caches/go-build" 2>/dev/null || true
-            echo "=== Bridge cache artifacts ===" >&2
-            ls -la wireguard-apple/Sources/WireGuardKitGo/out 2>/dev/null || true
-            exit "$make_status"
-          fi
-          echo "=== WireGuard Go bridge outputs ==="
-          ls -la wireguard-apple/Sources/WireGuardKitGo/out || true
+          PLATFORM_NAME=iphoneos \
+          ARCHS=arm64 \
+          IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" \
+          ./script/build_wireguard_go_bridge.sh
           test -f wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a
           test -f wireguard-apple/Sources/WireGuardKitGo/out/wireguard-go-version.h
-          touch "wireguard-apple/Sources/WireGuardKitGo/out/.wireguard-go-bridge-iphoneos-arm64-${IPHONEOS_DEPLOYMENT_TARGET}"
 
       - name: Build app
         run: |
