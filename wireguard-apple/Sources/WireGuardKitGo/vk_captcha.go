@@ -148,6 +148,26 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
 
     successToken, err := callCaptchaNotRobot(ctx, client, profile, sessionToken, hash, initialSettings)
     if err != nil {
+        log.Printf("[Captcha] Automatic solver failed: %v", err)
+
+        if captchaErr.RedirectUri != "" {
+            log.Printf("[Captcha] Falling back to manual proxy solver...")
+            if token, manualErr := solveCaptchaViaProxy(ctx, captchaErr.RedirectUri); manualErr == nil && token != "" {
+                return token, nil
+            } else if manualErr != nil {
+                log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
+            }
+        }
+
+        if captchaErr.CaptchaImg != "" {
+            log.Printf("[Captcha] Falling back to manual image solver...")
+            if token, manualErr := solveCaptchaViaHTTP(ctx, captchaErr.CaptchaImg); manualErr == nil && token != "" {
+                return token, nil
+            } else if manualErr != nil {
+                log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
+            }
+        }
+
         return "", fmt.Errorf("captchaNotRobot API failed: %w", err)
     }
 
@@ -309,7 +329,12 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
     // Step 3: checkbox check
     log.Printf("[Captcha] Step 3/4: check (checkbox)")
 
+    cursorJSON := generateFakeCursor()
     answer := base64.StdEncoding.EncodeToString([]byte("{}"))
+    debugInfoBytes := md5.Sum([]byte(profile.UserAgent + strconv.FormatInt(time.Now().UnixNano(), 10)))
+    debugInfo := hex.EncodeToString(debugInfoBytes[:])
+    connectionRtt := "[50,50,50,50,50,50,50,50,50,50]"
+    connectionDownlink := "[9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5]"
 
     checkData := baseParams + fmt.Sprintf(
         "&accelerometer=%s&gyroscope=%s&motion=%s&cursor=%s&taps=%s&connectionRtt=%s&connectionDownlink=%s"+
@@ -317,14 +342,14 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
         url.QueryEscape("[]"),
         url.QueryEscape("[]"),
         url.QueryEscape("[]"),
-        url.QueryEscape(generateSliderCursor(0, 1)),
+        url.QueryEscape(cursorJSON),
         url.QueryEscape("[]"),
-        url.QueryEscape("[]"),
-        url.QueryEscape("[]"),
+        url.QueryEscape(connectionRtt),
+        url.QueryEscape(connectionDownlink),
         browserFp,
         hash,
         answer,
-        captchaDebugInfo,
+        debugInfo,
     )
 
     checkResp, err := vkReq("captchaNotRobot.check", checkData)
@@ -381,6 +406,20 @@ func generateBrowserFp(profile Profile) string {
     data := profile.UserAgent + profile.SecChUa + "1920x1080x24" + strconv.FormatInt(time.Now().UnixNano(), 10)
     sum := md5.Sum([]byte(data))
     return hex.EncodeToString(sum[:])
+}
+
+func generateFakeCursor() string {
+    startX := 600 + mathrand.Intn(400)
+    startY := 300 + mathrand.Intn(200)
+    startTime := time.Now().UnixMilli() - int64(mathrand.Intn(2000)+1000)
+    points := make([]string, 0, 15+mathrand.Intn(10))
+    for i := 0; i < 15+mathrand.Intn(10); i++ {
+        startX += mathrand.Intn(15) - 5
+        startY += mathrand.Intn(15) + 2
+        startTime += int64(mathrand.Intn(40) + 10)
+        points = append(points, fmt.Sprintf(`{"x":%d,"y":%d,"t":%d}`, startX, startY, startTime))
+    }
+    return "[" + strings.Join(points, ",") + "]"
 }
 
 func parseCaptchaSettingsResponse(resp map[string]interface{}) (*captchaSettingsResponse, error) {

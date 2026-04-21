@@ -150,8 +150,14 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 
 	token1 := resp["data"].(map[string]interface{})["access_token"].(string)
 
-	data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", link, escapedName, token1)
-    reqURL := "https://api.vk.ru/method/calls.getAnonymousToken?v=5.274&client_id=6287487"
+    previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
+    _, err = doRequest(previewData, "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id=6287487")
+    if err != nil {
+        log.Printf("[VK Auth] Warning: getCallPreview failed: %v", err)
+    }
+
+    data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", link, escapedName, token1)
+    reqURL := "https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=6287487"
 
     var token2 string
     const maxCaptchaAttempts = 3
