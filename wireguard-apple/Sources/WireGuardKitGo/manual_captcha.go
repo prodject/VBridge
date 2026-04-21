@@ -371,7 +371,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 	return fmt.Errorf("captcha listeners failed: %s", strings.Join(listenErrs, "; "))
 }
 
-func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
+func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string, mode string) (string, error) {
 	srv := &http.Server{Handler: handler}
 
 	if err := startCaptchaServer(srv, logPrefix); err != nil {
@@ -380,11 +380,14 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 
 	fmt.Println("\n==============================================")
 	fmt.Println("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
-	fmt.Println("Open this URL in your browser: " + localCaptchaOrigin())
+	fmt.Println("Open this URL in the app or browser: " + localCaptchaOrigin())
 	fmt.Println("==============================================")
 	fmt.Println()
 
-	openBrowser(captchaURL)
+	notifyCaptchaRequired(mode, captchaURL, "Open the captcha page in the app or browser to continue")
+	if runtime.GOOS != "ios" {
+		openBrowser(captchaURL)
+	}
 
 	select {
 	case key := <-keyCh:
@@ -443,7 +446,7 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Done!</h2></body></html>`)
 	})
 
-	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error")
+	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error", "image")
 }
 
 func solveCaptchaViaProxy(ctx context.Context, redirectURI string) (string, error) {
@@ -581,7 +584,7 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string) (string, erro
 		proxy.ServeHTTP(w, r)
 	})
 
-	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error")
+	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error", "proxy")
 }
 
 func openBrowser(url string) {
@@ -618,4 +621,3 @@ func browserOpenCommands(goos string, url string) []browserCommand {
 	}
 	return nil
 }
-

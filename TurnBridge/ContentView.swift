@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var settingsSheet: SettingsSheet?
+    @StateObject private var captchaBridge = CaptchaBridge()
 
     var body: some View {
         NavigationStack {
@@ -116,6 +117,13 @@ struct ContentView: View {
             .sheet(item: $settingsSheet) { sheet in
                 NavigationStack {
                     SettingsView(store: store, profileID: sheet.profileID, isNewProfile: sheet.isNew)
+                }
+            }
+            .sheet(item: $captchaBridge.activeRequest, onDismiss: {
+                captchaBridge.clear()
+            }) { request in
+                CaptchaSolverView(request: request) {
+                    captchaBridge.clear()
                 }
             }
             .onAppear(perform: checkInitialStatus)

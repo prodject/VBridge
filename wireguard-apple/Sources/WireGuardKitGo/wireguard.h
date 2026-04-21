@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 typedef void(*logger_fn_t)(void *context, int level, const char *msg);
+typedef void(*captcha_fn_t)(void *context, const char *msg);
 extern void wgSetLogger(void *context, logger_fn_t logger_fn);
 extern int wgTurnOn(const char *settings, int32_t tun_fd);
 extern void wgTurnOff(int handle);
@@ -35,6 +36,7 @@ extern char* LibXraySetSockCallback(libxray_sockcallback cb, void* ctx);
 extern void StartProxy(const char *link, const char *peerAddrStr, const char *localAddrStr, int n);
 extern void StopProxy(void);
 extern void ProxySetLogger(void *context, logger_fn_t logger_fn);
+extern void ProxySetCaptchaCallback(void *context, captcha_fn_t captcha_fn);
 extern int ProxyWaitReady(int timeoutMs);
 
 #endif

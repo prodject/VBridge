@@ -2,12 +2,39 @@
 //  Created by nullcstring.
 //
 
+import Foundation
 import NetworkExtension
 import WireGuardKit
 import WireGuardKitGo
 import os
 
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
+private let captchaRequestStorageKey = "captcha.pending.request"
+
+private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
+    guard let messageCStr else { return }
+    let payload = String(cString: messageCStr)
+    guard let payloadData = payload.data(using: .utf8) else { return }
+    guard let groupID = SharedLogger.appGroupID,
+          let defaults = UserDefaults(suiteName: groupID) else {
+        sharedLogger.error("[TP]: unable to access shared defaults for captcha payload")
+        return
+    }
+
+    defaults.set(payloadData, forKey: captchaRequestStorageKey)
+    defaults.synchronize()
+    sharedLogger.log("[TP]: captcha payload published for app UI")
+}
+
+private func clearCaptchaRequest() {
+    guard let groupID = SharedLogger.appGroupID,
+          let defaults = UserDefaults(suiteName: groupID) else {
+        return
+    }
+
+    defaults.removeObject(forKey: captchaRequestStorageKey)
+    defaults.synchronize()
+}
 
 enum PacketTunnelProviderError: String, Error {
     case invalidProtocolConfiguration
@@ -81,6 +108,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         SharedLogger.info("Starting TURN proxy...", source: .tunnel)
 
         ProxySetLogger(nil, goProxyCLoggerCallback)
+        ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
 
         DispatchQueue.global(qos: .userInteractive).async {
             StartProxy(vkLink, peerAddr, listenAddr, nValue)
@@ -119,6 +147,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         StopProxy()
         SharedLogger.info("TURN proxy stopped", source: .tunnel)
+        clearCaptchaRequest()
 
         adapter.stop { [weak self] error in
             guard self != nil else { return }

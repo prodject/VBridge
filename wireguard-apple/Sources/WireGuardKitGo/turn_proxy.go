@@ -4,10 +4,17 @@ package main
 #include <stdlib.h>
 
 typedef void(*proxy_logger_fn_t)(void *context, int level, const char *msg);
+typedef void(*proxy_captcha_fn_t)(void *context, const char *msg);
 
 static inline void call_proxy_logger(proxy_logger_fn_t fn, void *ctx, int level, const char *msg) {
     if (fn != NULL) {
         fn(ctx, level, msg);
+    }
+}
+
+static inline void call_proxy_captcha(proxy_captcha_fn_t fn, void *ctx, const char *msg) {
+    if (fn != NULL) {
+        fn(ctx, msg);
     }
 }
 */
@@ -41,12 +48,20 @@ import (
 
 var proxyLoggerFunc C.proxy_logger_fn_t
 var proxyLoggerCtx unsafe.Pointer
+var proxyCaptchaFunc C.proxy_captcha_fn_t
+var proxyCaptchaCtx unsafe.Pointer
 var proxyCancel context.CancelFunc
 
 //export ProxySetLogger
 func ProxySetLogger(context unsafe.Pointer, loggerFn C.proxy_logger_fn_t) {
     proxyLoggerCtx = context
     proxyLoggerFunc = loggerFn
+}
+
+//export ProxySetCaptchaCallback
+func ProxySetCaptchaCallback(context unsafe.Pointer, captchaFn C.proxy_captcha_fn_t) {
+    proxyCaptchaCtx = context
+    proxyCaptchaFunc = captchaFn
 }
 
 var proxyReady = make(chan struct{}, 1)
@@ -75,6 +90,28 @@ func (l ProxyLogger) Write(p []byte) (n int, err error) {
     C.call_proxy_logger(proxyLoggerFunc, proxyLoggerCtx, C.int(l), cMsg)
 
     return len(p), nil
+}
+
+func notifyCaptchaRequired(mode string, captchaURL string, message string) {
+    if proxyCaptchaFunc == nil {
+        return
+    }
+
+    payload, err := json.Marshal(map[string]string{
+        "id":      uuid.NewString(),
+        "mode":    mode,
+        "url":     captchaURL,
+        "message": message,
+    })
+    if err != nil {
+        log.Printf("[Captcha] Failed to encode manual fallback payload: %v", err)
+        return
+    }
+
+    cMsg := C.CString(string(payload))
+    defer C.free(unsafe.Pointer(cMsg))
+
+    C.call_proxy_captcha(proxyCaptchaFunc, proxyCaptchaCtx, cMsg)
 }
 
 func init() {
