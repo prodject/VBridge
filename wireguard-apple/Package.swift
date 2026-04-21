@@ -1,7 +1,11 @@
 // swift-tools-version:5.5
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
+import Foundation
 import PackageDescription
+
+let packageDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let wireguardGoOutDirectory = "\(packageDirectory)/Sources/WireGuardKitGo/out"
 
 let package = Package(
     name: "WireGuardKit",
@@ -37,7 +41,7 @@ let package = Package(
             ],
             publicHeadersPath: ".",
             linkerSettings: [
-                .unsafeFlags(["-L", "Sources/WireGuardKitGo/out"]),
+                .unsafeFlags(["-L", wireguardGoOutDirectory]),
                 .linkedLibrary("wg-go"),
                 .linkedLibrary("resolv")
             ]
