@@ -1,0 +1,169 @@
+name: Build Unsigned IPA and Publish Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    env:
+      XCODE_PROJECT: TurnBridge.xcodeproj
+      XCODE_TARGET: VBridge
+      XCODE_CONFIGURATION: Release
+      XCODE_SDK: iphoneos
+      # GitHub-hosted Xcode 16.4 supports iOS deployment targets only up to 18.5.99.
+      # Keep the repo's local project settings as-is, but build the CI artifact with
+      # the highest target supported by the runner toolchain.
+      IPHONEOS_DEPLOYMENT_TARGET: "18.5"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Link local WireGuard package
+        run: |
+          set -euo pipefail
+
+          # Xcode resolves the local Swift package reference relative to the
+          # .xcodeproj location, which ends up one level above the checkout in CI.
+          # Use a real directory copy instead of a symlink so SwiftPM/Xcode
+          # can build the package modules reliably on GitHub-hosted runners.
+          rm -rf "$GITHUB_WORKSPACE/../wireguard-apple"
+          ditto "$GITHUB_WORKSPACE/wireguard-apple" "$GITHUB_WORKSPACE/../wireguard-apple"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: wireguard-apple/Sources/WireGuardKitGo/go.sum
+
+      - name: Cache WireGuard Go bridge
+        uses: actions/cache@v4
+        with:
+          path: |
+            wireguard-apple/Sources/WireGuardKitGo/out
+            wireguard-apple/Sources/WireGuardKitGo/.tmp
+          key: wireguard-go-bridge-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/*.go', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          go version
+
+      - name: Prebuild WireGuard Go bridge
+        run: |
+          set -euo pipefail
+          bridge_log="wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a.log"
+          set +e
+          make -C wireguard-apple/Sources/WireGuardKitGo \
+            PLATFORM_NAME=iphoneos \
+            ARCHS=arm64 \
+            IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET"
+          make_status=$?
+          set -e
+          if [ "$make_status" -ne 0 ]; then
+            echo "=== Make failed. Listing .tmp directory ===" >&2
+            find wireguard-apple/Sources/WireGuardKitGo/.tmp -type f 2>/dev/null || true
+            echo "=== WireGuard Go bridge out directory ===" >&2
+            find wireguard-apple/Sources/WireGuardKitGo/out -maxdepth 2 -type f 2>/dev/null || true
+            if [ -f "$bridge_log" ]; then
+              echo "=== WireGuard Go bridge log ===" >&2
+              ls -l "$bridge_log" >&2 || true
+              tail -n 200 "$bridge_log" >&2 || true
+            fi
+            echo "=== Go environment ===" >&2
+            go env GOROOT GOPATH GOOS GOARCH CGO_ENABLED GOPROXY GOMOD GOMODCACHE 2>/dev/null || true
+            echo "=== Go build cache ===" >&2
+            ls -la "$HOME/Library/Caches/go-build" 2>/dev/null || true
+            echo "=== Bridge cache artifacts ===" >&2
+            ls -la wireguard-apple/Sources/WireGuardKitGo/out 2>/dev/null || true
+            exit "$make_status"
+          fi
+          echo "=== WireGuard Go bridge outputs ==="
+          ls -la wireguard-apple/Sources/WireGuardKitGo/out || true
+          test -f wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a
+          test -f wireguard-apple/Sources/WireGuardKitGo/out/wireguard-go-version.h
+          touch "wireguard-apple/Sources/WireGuardKitGo/out/.wireguard-go-bridge-iphoneos-arm64-${IPHONEOS_DEPLOYMENT_TARGET}"
+
+      - name: Build app
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -target "$XCODE_TARGET" \
+            -configuration "$XCODE_CONFIGURATION" \
+            -sdk "$XCODE_SDK" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" \
+            build
+
+      - name: Package unsigned IPA
+        id: package
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$GITHUB_WORKSPACE/build/${XCODE_CONFIGURATION}-iphoneos/VBridge.app"
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH=""
+          fi
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH="$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/Build/Products/${XCODE_CONFIGURATION}-iphoneos/VBridge.app" -print -quit)"
+          fi
+
+          test -n "$APP_PATH"
+          test -d "$APP_PATH"
+
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_PATH/Info.plist")"
+          APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP_PATH/Info.plist")"
+          IPA_FILENAME="vbridge-${GITHUB_SHA}-${APP_VERSION}.ipa"
+          IPA_PATH="${GITHUB_WORKSPACE}/${IPA_FILENAME}"
+
+          PACKAGE_ROOT="$(mktemp -d)"
+          mkdir -p "$PACKAGE_ROOT/Payload"
+          ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/VBridge.app"
+          (cd "$PACKAGE_ROOT" && ditto -c -k --sequesterRsrc --keepParent Payload "$IPA_PATH")
+
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_build=$APP_BUILD" >> "$GITHUB_OUTPUT"
+          echo "ipa_filename=$IPA_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_path=$IPA_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.ipa_filename }}
+          path: ${{ steps.package.outputs.ipa_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: vbridge-${{ steps.package.outputs.app_version }}-${{ github.sha }}
+          name: VBridge ${{ steps.package.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Automated unsigned IPA build for commit `${{ github.sha }}`.
+
+            App version: `${{ steps.package.outputs.app_version }}`
+            Build number: `${{ steps.package.outputs.app_build }}`
+            Build target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+            Artifact: `${{ steps.package.outputs.ipa_filename }}`
+          files: ${{ steps.package.outputs.ipa_path }}
