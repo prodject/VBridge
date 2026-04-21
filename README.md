@@ -1,6 +1,6 @@
-# TurnBridge
+# VBridge
 
-**TurnBridge** is annetwork utility. It allows you to securely route your iOS network traffic through TURN servers and WireGuard / Amnezia WG endpoints.
+**VBridge** is annetwork utility. It allows you to securely route your iOS network traffic through TURN servers and WireGuard / Amnezia WG endpoints.
 
 To run the application, you must use a [server](https://github.com/cacggghp/vk-turn-proxy/releases/tag/v1.0.0) running on a VPS.
 
@@ -12,7 +12,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **WireGuard & Amnezia WG Integration:**
   - Complete WireGuard protocol support with key management, routing, and DNS configuration
   - Full Amnezia WireGuard obfuscation support including jitter parameters (Jc, Jmin, Jmax), packet size obfuscation (S1-S4), and magic headers (H1-H4)
-* **1-Click Import:** Quickly import complex configurations via base64-encoded clipboard links (`turnbridge://`).
+* **1-Click Import:** Quickly import complex configurations via base64-encoded clipboard links (`vbridge://`).
 * **Multi-Profile Management:** Create, edit, and seamlessly switch between multiple VPN configurations using a convenient dropdown picker.
 
 ## 📸 Screenshot
@@ -20,14 +20,14 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 
 ## 🚀 Installation & Build
 
-To build and run TurnBridge locally, you need a macOS environment with Xcode installed, as well as Go (for compiling the WireGuard/TURN bridge).
+To build and run VBridge locally, you need a macOS environment with Xcode installed, as well as Go (for compiling the WireGuard/TURN bridge).
 
-> ⚠️ **Important:** TurnBridge uses a Network Extension (VPN). Signing with a **free Apple ID** (via standard AltStore or Sideloadly) **will not work** because free accounts lack the required VPN entitlements. You must use a paid Apple Developer account ($99/year) or a third-party paid signing service.
+> ⚠️ **Important:** VBridge uses a Network Extension (VPN). Signing with a **free Apple ID** (via standard AltStore or Sideloadly) **will not work** because free accounts lack the required VPN entitlements. You must use a paid Apple Developer account ($99/year) or a third-party paid signing service.
 
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/nullcstring/turnbridge.git
-   cd TurnBridge
+   cd VBridge
    ```
 
 2. **Build the Go Bridge:**
@@ -36,9 +36,9 @@ Ensure you have Go installed (`brew install go`).
 Modify the Go path in the script at script/build_wireguard_go_bridge.sh, according to your setup. Refer to [this Stack Overflow answer](https://stackoverflow.com/a/64212121) for guidance.
 
 3. **Open the project in Xcode:**
-Open `TurnBridge.xcodeproj` (or `.xcworkspace` if applicable) in Xcode.
+Open the Xcode project (or `.xcworkspace` if applicable) in Xcode.
 4. **Configure Code Signing:**
-* Select the `TurnBridge` project in the Project Navigator.
+* Select the `VBridge` project in the Project Navigator.
 * Go to the **Signing & Capabilities** tab.
 * Select your personal Apple Developer Team.
 * Ensure you update the Bundle Identifier (for both the main app and the `network-extension` target) to match your team provisioning profile.
@@ -64,7 +64,7 @@ If you already possess a paid Apple Developer certificate (or bought one from th
 
 ## 🛠 Usage (Configuration Import)
 
-TurnBridge uses a specific JSON structure encoded in Base64 for fast configuration imports for WireGuard / Amnezia WG.
+VBridge uses a specific JSON structure encoded in Base64 for fast configuration imports for WireGuard / Amnezia WG.
 
 ### Configuration JSON Structure
 
@@ -80,7 +80,7 @@ TurnBridge uses a specific JSON structure encoded in Base64 for fast configurati
 
 ### Generate a Quick Import Link
 
-You can use the included `quick_link.py` script to easily generate valid `turnbridge://` clipboard links.
+You can use the included `quick_link.py` script to easily generate valid `vbridge://` clipboard links.
 
 1. Open `quick_link.py` in your text editor and replace the placeholder values in the `config` dictionary with your actual server parameters and WireGuard keys.
 2. Run the script from your terminal:
@@ -88,12 +88,12 @@ You can use the included `quick_link.py` script to easily generate valid `turnbr
    python3 quick_link.py
    ```
 
-3. Copy the generated `turnbridge://...` link from the terminal output to your iOS clipboard.
-4. Open TurnBridge, tap the `+` icon, select **Paste from Clipboard**, and tap **Connect**.
+3. Copy the generated `vbridge://...` link from the terminal output to your iOS clipboard.
+4. Open VBridge, tap the `+` icon, select **Paste from Clipboard**, and tap **Connect**.
 
 ## ☕ Support My Work
 
-If TurnBridge saved you some time, consider supporting its development! As an independent open-source project, any contribution is greatly appreciated.
+If VBridge saved you some time, consider supporting its development! As an independent open-source project, any contribution is greatly appreciated.
 
 **Crypto:**
 * **TON:** `UQBisIcwzfQz5Rj0TofZhN2CSZXvUhQrwMmTGEiSSa9ErW5b`
@@ -102,7 +102,7 @@ Thank you for keeping the open-source spirit alive! 🚀
 
 ## License
 
-TurnBridge is released under the [GNU General Public License v3.0](LICENSE).
+VBridge is released under the [GNU General Public License v3.0](LICENSE).
 
 Copyright (C) 2026 nullcstring
 
@@ -125,4 +125,3 @@ This project was made possible thanks to the work of the open-source community. 
 * [Wireguardkit](https://github.com/Shahzainali/Wireguardkit) — Licensed under MIT / GPL.
 * [vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy) — Licensed under the GNU GPL.
 * [Amneziawg-Apple](https://github.com/amnezia-vpn/amneziawg-apple.git) — Licensed under MIT.
-

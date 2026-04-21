@@ -6,7 +6,7 @@ import SwiftUI
 import NetworkExtension
 
 @main
-struct TurnBridge: App {
+struct VBridge: App {
     var body: some Scene {
         WindowGroup {
             ContentView(app: self)
@@ -29,7 +29,7 @@ struct TurnBridge: App {
             SharedLogger.debug("Using \(preExistingTunnelManager != nil ? "existing" : "new") tunnel manager")
 
             let protocolConfiguration = NETunnelProviderProtocol()
-            let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.netlab.TurnBridge"
+            let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
             protocolConfiguration.providerBundleIdentifier = "\(currentAppBundleId).network-extension"
 
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr

@@ -44,13 +44,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A7EBA62C2F606924003CA7F3 /* TurnBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TurnBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A7EBA62C2F606924003CA7F3 /* VBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7EBA6442F606A38003CA7F3 /* network-extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "network-extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7EBA6462F606A38003CA7F3 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A706130E2F7F259C0090BDC7 /* Exceptions for "TurnBridge" folder in "network-extension" target */ = {
+		A706130E2F7F259C0090BDC7 /* Exceptions for "VBridge" folder in "network-extension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				SharedLogger.swift,
@@ -67,10 +67,10 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A7EBA62E2F606924003CA7F3 /* TurnBridge */ = {
+		A7EBA62E2F606924003CA7F3 /* VBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				A706130E2F7F259C0090BDC7 /* Exceptions for "TurnBridge" folder in "network-extension" target */,
+				A706130E2F7F259C0090BDC7 /* Exceptions for "VBridge" folder in "network-extension" target */,
 			);
 			path = TurnBridge;
 			sourceTree = "<group>";
@@ -108,7 +108,7 @@
 		A7EBA6232F606924003CA7F3 = {
 			isa = PBXGroup;
 			children = (
-				A7EBA62E2F606924003CA7F3 /* TurnBridge */,
+				A7EBA62E2F606924003CA7F3 /* VBridge */,
 				A7EBA6482F606A38003CA7F3 /* network-extension */,
 				A7EBA6452F606A38003CA7F3 /* Frameworks */,
 				A7EBA62D2F606924003CA7F3 /* Products */,
@@ -118,7 +118,7 @@
 		A7EBA62D2F606924003CA7F3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A7EBA62C2F606924003CA7F3 /* TurnBridge.app */,
+				A7EBA62C2F606924003CA7F3 /* VBridge.app */,
 				A7EBA6442F606A38003CA7F3 /* network-extension.appex */,
 			);
 			name = Products;
@@ -153,9 +153,9 @@
 /* End PBXLegacyTarget section */
 
 /* Begin PBXNativeTarget section */
-		A7EBA62B2F606924003CA7F3 /* TurnBridge */ = {
+		A7EBA62B2F606924003CA7F3 /* VBridge */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A7EBA6372F606925003CA7F3 /* Build configuration list for PBXNativeTarget "TurnBridge" */;
+			buildConfigurationList = A7EBA6372F606925003CA7F3 /* Build configuration list for PBXNativeTarget "VBridge" */;
 			buildPhases = (
 				A7EBA6282F606924003CA7F3 /* Sources */,
 				A7EBA6292F606924003CA7F3 /* Frameworks */,
@@ -168,13 +168,13 @@
 				A7EBA64E2F606A38003CA7F3 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				A7EBA62E2F606924003CA7F3 /* TurnBridge */,
+				A7EBA62E2F606924003CA7F3 /* VBridge */,
 			);
-			name = TurnBridge;
+			name = VBridge;
 			packageProductDependencies = (
 			);
-			productName = TurnBridge;
-			productReference = A7EBA62C2F606924003CA7F3 /* TurnBridge.app */;
+			productName = VBridge;
+			productReference = A7EBA62C2F606924003CA7F3 /* VBridge.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A7EBA6432F606A38003CA7F3 /* network-extension */ = {
@@ -222,7 +222,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A7EBA6272F606924003CA7F3 /* Build configuration list for PBXProject "TurnBridge" */;
+			buildConfigurationList = A7EBA6272F606924003CA7F3 /* Build configuration list for PBXProject "VBridge" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -239,7 +239,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A7EBA62B2F606924003CA7F3 /* TurnBridge */,
+				A7EBA62B2F606924003CA7F3 /* VBridge */,
 				A7EBA6432F606A38003CA7F3 /* network-extension */,
 				A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */,
 			);
@@ -424,6 +424,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = VBridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -435,8 +436,8 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
-				PRODUCT_BUNDLE_IDENTIFIER = com.netlab.TurnBridge;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge;
+				PRODUCT_NAME = VBridge;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -458,6 +459,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = VBridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -469,8 +471,8 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
-				PRODUCT_BUNDLE_IDENTIFIER = com.netlab.TurnBridge;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge;
+				PRODUCT_NAME = VBridge;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -490,7 +492,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "network-extension/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "network-extension";
+				INFOPLIST_KEY_CFBundleDisplayName = "VBridge Extension";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -499,7 +501,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.netlab.TurnBridge.network-extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.prodject.vbridge.network-extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -520,7 +522,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "network-extension/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "network-extension";
+				INFOPLIST_KEY_CFBundleDisplayName = "VBridge Extension";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -529,7 +531,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.6;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.netlab.TurnBridge.network-extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.prodject.vbridge.network-extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -569,7 +571,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A7EBA6272F606924003CA7F3 /* Build configuration list for PBXProject "TurnBridge" */ = {
+		A7EBA6272F606924003CA7F3 /* Build configuration list for PBXProject "VBridge" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A7EBA6352F606925003CA7F3 /* Debug */,
@@ -578,7 +580,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A7EBA6372F606925003CA7F3 /* Build configuration list for PBXNativeTarget "TurnBridge" */ = {
+		A7EBA6372F606925003CA7F3 /* Build configuration list for PBXNativeTarget "VBridge" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A7EBA6382F606925003CA7F3 /* Debug */,

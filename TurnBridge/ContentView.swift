@@ -8,7 +8,7 @@ struct SettingsSheet: Identifiable {
 }
 
 struct ContentView: View {
-    var app: TurnBridge
+    var app: VBridge
 
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
@@ -23,7 +23,7 @@ struct ContentView: View {
         NavigationStack {
             VStack {
                 VStack(spacing: 4) {
-                    Text("TurnBridge")
+                    Text("VBridge")
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(
                             LinearGradient(

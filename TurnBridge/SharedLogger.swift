@@ -112,7 +112,7 @@ public struct SharedLogger {
             return first
         }
         // Fallback: derive from bundle ID (works for Xcode-signed builds)
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.netlab.TurnBridge"
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
         let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
         return "group.\(baseBundleID)"
     }()

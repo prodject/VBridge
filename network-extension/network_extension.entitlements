@@ -8,7 +8,7 @@
 	</array>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.netlab.TurnBridge</string>
+		<string>group.com.prodject.vbridge</string>
 	</array>
 </dict>
 </plist>

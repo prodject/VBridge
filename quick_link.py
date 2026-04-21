@@ -24,9 +24,8 @@ json_string = json.dumps(config, separators=(',', ':'))
 base64_bytes = base64.b64encode(json_string.encode('utf-8'))
 base64_string = base64_bytes.decode('utf-8')
 
-final_link = f"turnbridge://{base64_string}"
+final_link = f"vbridge://{base64_string}"
 
 print("\n=== ===")
 print(final_link)
 print("========================================\n")
-

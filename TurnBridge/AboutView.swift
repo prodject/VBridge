@@ -12,7 +12,7 @@ struct AboutView: View {
                 .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
                 .padding(.top, 40)
             
-            Text("TurnBridge")
+            Text("VBridge")
                 .font(.largeTitle)
                 .fontWeight(.bold)
             

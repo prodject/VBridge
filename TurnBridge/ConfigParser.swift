@@ -24,7 +24,7 @@ enum ConfigParseError: LocalizedError {
         case .emptyString:
             return "The string is empty."
         case .invalidScheme:
-            return "Invalid configuration format. Must start with 'turnbridge://'"
+            return "Invalid configuration format. Must start with 'vbridge://'"
         case .invalidBase64:
             return "Invalid Base64 encoding."
         case .invalidJSON(let details):
@@ -34,7 +34,8 @@ enum ConfigParseError: LocalizedError {
 }
 
 struct ConfigParser {
-    static let scheme = "turnbridge://"
+    static let scheme = "vbridge://"
+    static let legacySchemes = ["turnbridge://"]
     
     static func parse(from string: String) throws -> TurnConfigImport {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,11 +44,12 @@ struct ConfigParser {
             throw ConfigParseError.emptyString
         }
         
-        guard trimmed.hasPrefix(scheme) else {
+        let matchedScheme = [scheme] + legacySchemes
+        guard let prefix = matchedScheme.first(where: { trimmed.hasPrefix($0) }) else {
             throw ConfigParseError.invalidScheme
         }
-        
-        let base64String = String(trimmed.dropFirst(scheme.count))
+
+        let base64String = String(trimmed.dropFirst(prefix.count))
         
         guard let jsonData = Data(base64Encoded: base64String) else {
             throw ConfigParseError.invalidBase64
