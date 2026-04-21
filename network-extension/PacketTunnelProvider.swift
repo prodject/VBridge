@@ -87,12 +87,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let ready = ProxyWaitReady(12000)
+            let ready = ProxyWaitReady(120000)
             guard let self = self else { return }
 
             if ready == 0 {
                 sharedLogger.error("DTLS connection timeout!")
-                SharedLogger.error("DTLS connection timeout (12s)", source: .tunnel)
+                SharedLogger.error("DTLS connection timeout (120s)", source: .tunnel)
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                 return
             }
