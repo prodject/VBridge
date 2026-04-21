@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "crypto/md5"
     "crypto/rand"
     "crypto/sha256"
     "crypto/tls"
@@ -325,31 +326,10 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
     // Step 3: checkbox check
     log.Printf("[Captcha] Step 3/4: check (checkbox)")
 
-    type Point struct {
-        X int   `json:"x"`
-        Y int   `json:"y"`
-        T int64 `json:"t"`
-    }
-    var cursor []Point
-    startX, startY := screenW/2+mathrand.Intn(200)-100, screenH/2+mathrand.Intn(200)-100
-    startTime := time.Now().Add(-300 * time.Millisecond).UnixMilli()
-
-    pointsCount := 4 + mathrand.Intn(5)
-    for i := 0; i < pointsCount; i++ {
-        cursor = append(cursor, Point{
-            X: startX,
-            Y: startY,
-            T: startTime + int64(i*20+mathrand.Intn(10)),
-        })
-        startX += mathrand.Intn(30) - 15
-        startY += mathrand.Intn(30) - 15
-    }
-    cursorBytes, _ := json.Marshal(cursor)
-
     connectionDownlink := "[" + downlinkStr + "," + downlinkStr + "," + downlinkStr + "," + downlinkStr + "," + downlinkStr + "," + downlinkStr + "," + downlinkStr + "]"
 
     answer := base64.StdEncoding.EncodeToString([]byte("{}"))
-    debugInfo := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    debugInfo := captchaDebugInfo(profile)
 
     checkData := baseParams + fmt.Sprintf(
         "&accelerometer=%s&gyroscope=%s&motion=%s&cursor=%s&taps=%s&connectionRtt=%s&connectionDownlink=%s"+
@@ -357,7 +337,7 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
         url.QueryEscape("[]"),
         url.QueryEscape("[]"),
         url.QueryEscape("[]"),
-        url.QueryEscape(string(cursorBytes)),
+        url.QueryEscape(generateSliderCursor(0, 1)),
         url.QueryEscape("[]"),
         url.QueryEscape("[]"),
         url.QueryEscape(connectionDownlink),
@@ -413,4 +393,9 @@ func buildCaptchaDeviceJSON(profile Profile) string {
         `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1040,"innerWidth":1920,"innerHeight":969,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":8,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"default","userAgent":"%s","platform":"Win32"}`,
         profile.UserAgent,
     )
+}
+
+func captchaDebugInfo(profile Profile) string {
+    sum := md5.Sum([]byte(profile.UserAgent + strconv.FormatInt(time.Now().UnixNano(), 10)))
+    return hex.EncodeToString(sum[:])
 }
