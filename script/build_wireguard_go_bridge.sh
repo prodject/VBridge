@@ -94,7 +94,7 @@ log "🔨 Building WireGuardGoBridge in $wireguard_go_dir"
 log "   Go: $GO_VERSION"
 log "   Jobs: $jobs"
 
-if ! "$make_cmd" -j"$jobs" >"$log_file" 2>&1; then
+if ! "$make_cmd" -j"$jobs" build version-header >"$log_file" 2>&1; then
     printf '%s\n' "=== WireGuardGoBridge build failed ===" >&2
     ls -la "$out_dir" >&2 || true
     tail -n 200 "$log_file" >&2 || true
