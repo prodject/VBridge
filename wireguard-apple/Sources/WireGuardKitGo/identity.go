@@ -1,8 +1,9 @@
 package main
 
 import (
-    "fmt"
-    mathrand "math/rand"
+	"fmt"
+	mathrand "math/rand"
+	"strings"
 )
 
 type Profile struct {
@@ -26,6 +27,13 @@ var lastNames = []string{
     "Новиков", "Федоров", "Морозов", "Волков", "Алексеев", "Лебедев", "Семенов", "Егоров",
     "Павлов", "Козлов", "Степанов", "Николаев", "Орлов", "Андреев", "Макаров", "Никитин",
     "Захаров", "Зайцев", "Соловьев", "Борисов", "Яковлев", "Григорьев", "Романов", "Воробьев",
+}
+
+var femaleFirstNames = []string{
+	"Алина", "Алёна", "Анастасия", "Ангелина", "Анна", "Вера", "Вероника", "Виктория",
+	"Дарья", "Ева", "Екатерина", "Елена", "Елизавета", "Ирина", "Кира", "Кристина",
+	"Ксения", "Любовь", "Маргарита", "Марина", "Мария", "Милана", "Надежда", "Наталья",
+	"Ольга", "Полина", "Светлана", "София", "Татьяна", "Юлия", "Яна",
 }
 
 var profiles = []Profile{
@@ -93,18 +101,41 @@ var profiles = []Profile{
 }
 
 func getRandomProfile() Profile {
-    return profiles[mathrand.Intn(len(profiles))]
+	return profiles[mathrand.Intn(len(profiles))]
 }
 
 func generateName() string {
-    if mathrand.Float32() < 0.3 {
-        return firstNames[mathrand.Intn(len(firstNames))]
-    }
-    fn := firstNames[mathrand.Intn(len(firstNames))]
-    ln := lastNames[mathrand.Intn(len(lastNames))]
-    lastChar := fn[len(fn)-2:]
-    if lastChar == "а" || lastChar == "я" {
-        return fmt.Sprintf("%s %sа", fn, ln)
-    }
-    return fmt.Sprintf("%s %s", fn, ln)
+	isFemale := mathrand.Intn(2) == 0
+
+	var fn string
+	if isFemale {
+		fn = femaleFirstNames[mathrand.Intn(len(femaleFirstNames))]
+	} else {
+		fn = firstNames[mathrand.Intn(len(firstNames))]
+	}
+
+	if mathrand.Float32() < 0.3 {
+		return fn
+	}
+
+	ln := lastNames[mathrand.Intn(len(lastNames))]
+	if isFemale {
+		ln = convertToFemaleSurname(ln)
+	}
+
+	return fmt.Sprintf("%s %s", fn, ln)
+}
+
+func convertToFemaleSurname(surname string) string {
+	if strings.HasSuffix(surname, "ий") || strings.HasSuffix(surname, "ый") || strings.HasSuffix(surname, "ой") {
+		return surname[:len(surname)-4] + "ая"
+	}
+
+	if strings.HasSuffix(surname, "ов") || strings.HasSuffix(surname, "ев") ||
+		strings.HasSuffix(surname, "ин") || strings.HasSuffix(surname, "ын") ||
+		strings.HasSuffix(surname, "ёв") {
+		return surname + "а"
+	}
+
+	return surname
 }

@@ -24,6 +24,7 @@ import (
     "net"
     "net/http"
 	neturl "net/url"
+    mathrand "math/rand"
     "sync"
     "sync/atomic"
     "time"
@@ -83,6 +84,36 @@ func init() {
 
 type getCredsFunc func(string) (string, string, string, error)
 
+type VKCredentials struct {
+	ClientID     string
+	ClientSecret string
+}
+
+var vkCredentialsList = []VKCredentials{
+	{ClientID: "6287487", ClientSecret: "QbYic1K3lEV5kTGiqlq2"},
+	{ClientID: "7879029", ClientSecret: "aR5NKGmm03GYrCiNKsaw"},
+	{ClientID: "52461373", ClientSecret: "o557NLIkAErNhakXrQ7A"},
+	{ClientID: "52649896", ClientSecret: "WStp4ihWG4l3nmXZgIbC"},
+	{ClientID: "51781872", ClientSecret: "IjjCNl4L4Tf5QZEXIHKK"},
+}
+
+func applyBrowserProfile(req *http.Request, profile Profile) {
+	req.Header.Set("User-Agent", profile.UserAgent)
+	req.Header.Set("sec-ch-ua", profile.SecChUa)
+	req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
+	req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("DNT", "1")
+}
+
+func vkDelayRandom(minMs, maxMs int) {
+	ms := minMs
+	if maxMs > minMs {
+		ms = minMs + mathrand.Intn(maxMs-minMs+1)
+	}
+	time.Sleep(time.Duration(ms) * time.Millisecond)
+}
+
 func getCreds(link string) (resUser string, resPass string, resTurn string, resErr error) {
     profile := getRandomProfile()
     name := generateName()
@@ -106,8 +137,15 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 			return nil, err
 		}
 
-		req.Header.Add("User-Agent", profile.UserAgent)
+		applyBrowserProfile(req, profile)
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Add("Accept", "*/*")
+		req.Header.Add("Origin", "https://vk.ru")
+		req.Header.Add("Referer", "https://vk.ru/")
+		req.Header.Add("Sec-Fetch-Site", "same-site")
+		req.Header.Add("Sec-Fetch-Mode", "cors")
+		req.Header.Add("Sec-Fetch-Dest", "empty")
+		req.Header.Add("Priority", "u=1, i")
 
 		httpResp, err := client.Do(req)
 		if err != nil {
@@ -143,63 +181,105 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 	data := "client_id=6287487&token_type=messages&client_secret=QbYic1K3lEV5kTGiqlq2&version=1&app_id=6287487"
 	url := "https://login.vk.ru/?act=get_anonym_token"
 
-	resp, err := doRequest(data, url)
-	if err != nil {
-		return "", "", "", fmt.Errorf("request error:%s", err)
-	}
-
-	token1 := resp["data"].(map[string]interface{})["access_token"].(string)
-
-    previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
-    _, err = doRequest(previewData, "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id=6287487")
-    if err != nil {
-        log.Printf("[VK Auth] Warning: getCallPreview failed: %v", err)
-    }
-
-    data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", link, escapedName, token1)
-    reqURL := "https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=6287487"
-
+    var token1 string
     var token2 string
     const maxCaptchaAttempts = 3
-    for attempt := 0; attempt <= maxCaptchaAttempts; attempt++ {
-        resp, err = doRequest(data, reqURL)
+    const previewURL = "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id=%s"
+    const anonymousURL = "https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=%s"
+
+    for _, creds := range vkCredentialsList {
+        data = fmt.Sprintf("client_id=%s&token_type=messages&client_secret=%s&version=1&app_id=%s", creds.ClientID, creds.ClientSecret, creds.ClientID)
+        url = "https://login.vk.ru/?act=get_anonym_token"
+
+        resp, err = doRequest(data, url)
         if err != nil {
-            return "", "", "", fmt.Errorf("request error:%s", err)
+            log.Printf("[VK Auth] client_id=%s token1 failed: %v", creds.ClientID, err)
+            continue
         }
 
-        if errObj, hasErr := resp["error"].(map[string]interface{}); hasErr {
-            errCode, _ := errObj["error_code"].(float64)
-            if errCode == 14 {
-                if attempt == maxCaptchaAttempts {
-                    return "", "", "", fmt.Errorf("captcha failed after %d attempts", maxCaptchaAttempts)
-                }
+        tokenData, ok := resp["data"].(map[string]interface{})
+        if !ok {
+            log.Printf("[VK Auth] client_id=%s invalid token1 response: %v", creds.ClientID, resp)
+            continue
+        }
 
-                captchaErr := ParseVkCaptchaError(errObj)
-                if captchaErr.IsCaptchaError() {
-                    log.Printf("[Captcha] Attempt %d/%d: solving...", attempt+1, maxCaptchaAttempts)
+        token1, ok = tokenData["access_token"].(string)
+        if !ok || token1 == "" {
+            log.Printf("[VK Auth] client_id=%s missing access_token", creds.ClientID)
+            continue
+        }
 
-                    successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
-                    if solveErr != nil {
-                        return "", "", "", fmt.Errorf("captcha solve error: %v", solveErr)
-                    }
+        vkDelayRandom(100, 150)
 
-                    if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
-                        captchaErr.CaptchaAttempt = "1"
-                    }
+        previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
+        _, err = doRequest(previewData, fmt.Sprintf(previewURL, creds.ClientID))
+        if err != nil {
+            log.Printf("[VK Auth] Warning: getCallPreview failed for client_id=%s: %v", creds.ClientID, err)
+        }
 
-                    data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
-                        "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
-                        "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
-                        link, escapedName, captchaErr.CaptchaSid, successToken,
-                        captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
-                    continue
-                }
+        vkDelayRandom(200, 400)
+
+        data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", link, escapedName, token1)
+        reqURL := fmt.Sprintf(anonymousURL, creds.ClientID)
+
+        token2 = ""
+        for attempt := 0; attempt <= maxCaptchaAttempts; attempt++ {
+            resp, err = doRequest(data, reqURL)
+            if err != nil {
+                log.Printf("[VK Auth] client_id=%s request failed: %v", creds.ClientID, err)
+                break
             }
-            return "", "", "", fmt.Errorf("VK API error: %v", errObj)
+
+            if errObj, hasErr := resp["error"].(map[string]interface{}); hasErr {
+                errCode, _ := errObj["error_code"].(float64)
+                if errCode == 14 {
+                    if attempt == maxCaptchaAttempts {
+                        err = fmt.Errorf("captcha failed after %d attempts", maxCaptchaAttempts)
+                        break
+                    }
+
+                    captchaErr := ParseVkCaptchaError(errObj)
+                    if captchaErr.IsCaptchaError() {
+                        log.Printf("[Captcha] Attempt %d/%d: solving...", attempt+1, maxCaptchaAttempts)
+
+                        successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
+                        if solveErr != nil {
+                            err = fmt.Errorf("captcha solve error: %v", solveErr)
+                            break
+                        }
+
+                        if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
+                            captchaErr.CaptchaAttempt = "1"
+                        }
+
+                        data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
+                            "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
+                            "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
+                            link, escapedName, captchaErr.CaptchaSid, successToken,
+                            captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+                        continue
+                    }
+                }
+                err = fmt.Errorf("VK API error: %v", errObj)
+                break
+            }
+
+            token2, _ = resp["response"].(map[string]interface{})["token"].(string)
+            if token2 != "" {
+                err = nil
+                break
+            }
+            err = fmt.Errorf("missing token in response: %v", resp)
+            break
         }
 
-        token2 = resp["response"].(map[string]interface{})["token"].(string)
-        break
+        if err == nil && token2 != "" {
+            break
+        }
+    }
+
+    if token2 == "" {
+        return "", "", "", fmt.Errorf("all VK credentials failed: %w", err)
     }
 
 	data = fmt.Sprintf("%s%s%s", "session_data=%7B%22version%22%3A2%2C%22device_id%22%3A%22", uuid.New(), "%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA")
