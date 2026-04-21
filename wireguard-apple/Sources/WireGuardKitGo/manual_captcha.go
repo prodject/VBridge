@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"log"
 	"net"
@@ -18,6 +20,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "golang.org/x/image/webp"
 )
 
 const captchaListenPort = "8765"
@@ -428,7 +434,7 @@ func solveCaptchaViaHTTP(ctx context.Context, captchaImg string) (string, error)
 		return "", fmt.Errorf("build captcha image request: %w", err)
 	}
 	applyBrowserProfile(req, profile)
-	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	req.Header.Set("Accept", "image/png,image/jpeg,image/apng,image/*,*/*;q=0.8")
 	req.Header.Set("Referer", captchaImg)
 	req.Header.Del("Origin")
 
@@ -446,12 +452,19 @@ func solveCaptchaViaHTTP(ctx context.Context, captchaImg string) (string, error)
 		return "", fmt.Errorf("captcha image response is empty")
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "image/png"
+	decodedImage, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return "", fmt.Errorf("decode captcha image: %w (content-type=%s)", err, resp.Header.Get("Content-Type"))
 	}
-	imageDataURI := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(imageBytes)
-	log.Printf("[Captcha] Image fallback loaded: content-type=%s bytes=%d", contentType, len(imageBytes))
+
+	var normalized bytes.Buffer
+	if err := png.Encode(&normalized, decodedImage); err != nil {
+		return "", fmt.Errorf("encode captcha image as png: %w", err)
+	}
+
+	imageDataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(normalized.Bytes())
+	log.Printf("[Captcha] Image fallback loaded: original-content-type=%s bytes=%d normalized=png bytes=%d",
+		resp.Header.Get("Content-Type"), len(imageBytes), normalized.Len())
 
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
