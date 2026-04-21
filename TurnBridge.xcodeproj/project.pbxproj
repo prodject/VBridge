@@ -10,6 +10,7 @@
 		A7EBA6472F606A38003CA7F3 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A7EBA6462F606A38003CA7F3 /* NetworkExtension.framework */; };
 		A7EBA64F2F606A38003CA7F3 /* network-extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A7EBA6442F606A38003CA7F3 /* network-extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
+		A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -98,6 +99,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */,
+				A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */,
 				A7EBA6472F606A38003CA7F3 /* NetworkExtension.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -196,6 +198,7 @@
 			name = "network-extension";
 			packageProductDependencies = (
 				A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */,
+				A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */,
 			);
 			productName = "network-extension";
 			productReference = A7EBA6442F606A38003CA7F3 /* network-extension.appex */;
@@ -619,9 +622,15 @@
 /* Begin XCSwiftPackageProductDependency section */
 		A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */;
 			productName = WireGuardKit;
+		};
+		A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */;
+			productName = WireGuardKitGo;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = A7EBA6242F606924003CA7F3 /* Project object */;
+rootObject = A7EBA6242F606924003CA7F3 /* Project object */;
 }
