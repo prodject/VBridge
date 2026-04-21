@@ -27,7 +27,7 @@ type browserCommand struct {
 }
 
 func localCaptchaOrigin() string {
-	return "http://localhost:" + captchaListenPort
+	return "http://127.0.0.1:" + captchaListenPort
 }
 
 func localCaptchaListenAddrs() []string {
@@ -57,7 +57,7 @@ func isLocalCaptchaHost(host string) bool {
 func localCaptchaURLForTarget(targetURL *neturl.URL) string {
 	localURL := &neturl.URL{
 		Scheme:   "http",
-		Host:     "localhost:" + captchaListenPort,
+		Host:     "127.0.0.1:" + captchaListenPort,
 		Path:     targetURL.Path,
 		RawPath:  targetURL.RawPath,
 		RawQuery: targetURL.RawQuery,
