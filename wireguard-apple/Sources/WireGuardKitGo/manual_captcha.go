@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -420,6 +421,38 @@ func solveCaptchaViaHTTP(ctx context.Context, captchaImg string) (string, error)
 	defer cancel()
 
 	profile := getRandomProfile()
+	client := newCaptchaClient()
+
+	req, err := http.NewRequestWithContext(manualCtx, http.MethodGet, captchaImg, nil)
+	if err != nil {
+		return "", fmt.Errorf("build captcha image request: %w", err)
+	}
+	applyBrowserProfile(req, profile)
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	req.Header.Set("Referer", captchaImg)
+	req.Header.Del("Origin")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch captcha image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	imageBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read captcha image: %w", err)
+	}
+	if len(imageBytes) == 0 {
+		return "", fmt.Errorf("captcha image response is empty")
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/png"
+	}
+	imageDataURI := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(imageBytes)
+	log.Printf("[Captcha] Image fallback loaded: content-type=%s bytes=%d", contentType, len(imageBytes))
+
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
@@ -434,39 +467,11 @@ input{font-size:24px;padding:12px;width:80%%;box-sizing:border-box}
 button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 </head><body>
 <h2>Solve the Captcha</h2>
-<img src="/captcha-image" alt="captcha"/>
+<img src="%s" alt="captcha"/>
 <form onsubmit="fetch('/solve?key='+encodeURIComponent(document.getElementById('k').value)).then(()=>{document.body.innerHTML='<h2>Done!</h2>';setTimeout(function(){window.close();}, 300);});return false;">
 <br><input id="k" type="text" autofocus placeholder="Text from image"/>
 <br><button type="submit">Submit</button>
-</form></body></html>`)
-	})
-
-	mux.HandleFunc("/captcha-image", func(w http.ResponseWriter, r *http.Request) {
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, captchaImg, nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		applyBrowserProfile(req, profile)
-		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-		req.Header.Set("Referer", captchaImg)
-		req.Header.Del("Origin")
-
-		resp, err := newCaptchaClient().Do(req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-
-		for _, h := range []string{"Content-Type", "Cache-Control", "Expires", "Last-Modified"} {
-			if v := resp.Header.Get(h); v != "" {
-				w.Header().Set(h, v)
-			}
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
+</form></body></html>`, imageDataURI)
 	})
 
 	mux.HandleFunc("/solve", func(w http.ResponseWriter, r *http.Request) {

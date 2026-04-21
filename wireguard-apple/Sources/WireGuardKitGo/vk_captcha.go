@@ -146,30 +146,30 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
     hash := solvePoW(powInput, difficulty)
     log.Printf("[Captcha] PoW solved: hash=%s", hash)
 
-    successToken, err := callCaptchaNotRobot(ctx, client, profile, sessionToken, hash, initialSettings)
-    if err != nil {
-        log.Printf("[Captcha] Automatic solver failed: %v", err)
+	successToken, err := callCaptchaNotRobot(ctx, client, profile, sessionToken, hash, initialSettings)
+	if err != nil {
+		log.Printf("[Captcha] Automatic solver failed: %v", err)
 
-        if captchaErr.RedirectUri != "" {
-            log.Printf("[Captcha] Falling back to manual proxy solver...")
-            if token, manualErr := solveCaptchaViaProxy(ctx, captchaErr.RedirectUri); manualErr == nil && token != "" {
-                return token, nil
-            } else if manualErr != nil {
-                log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
-            }
-        }
+		if captchaErr.CaptchaImg != "" {
+			log.Printf("[Captcha] Falling back to manual image solver...")
+			if token, manualErr := solveCaptchaViaHTTP(ctx, captchaErr.CaptchaImg); manualErr == nil && token != "" {
+				return token, nil
+			} else if manualErr != nil {
+				log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
+			}
+		}
 
-        if captchaErr.CaptchaImg != "" {
-            log.Printf("[Captcha] Falling back to manual image solver...")
-            if token, manualErr := solveCaptchaViaHTTP(ctx, captchaErr.CaptchaImg); manualErr == nil && token != "" {
-                return token, nil
-            } else if manualErr != nil {
-                log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
-            }
-        }
+		if captchaErr.RedirectUri != "" {
+			log.Printf("[Captcha] Falling back to manual proxy solver...")
+			if token, manualErr := solveCaptchaViaProxy(ctx, captchaErr.RedirectUri); manualErr == nil && token != "" {
+				return token, nil
+			} else if manualErr != nil {
+				log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
+			}
+		}
 
-        return "", fmt.Errorf("captchaNotRobot API failed: %w", err)
-    }
+		return "", fmt.Errorf("captchaNotRobot API failed: %w", err)
+	}
 
     log.Printf("[Captcha] Success! Got success_token")
     return successToken, nil
