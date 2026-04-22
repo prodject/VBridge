@@ -67,6 +67,51 @@ struct AboutView: View {
                 }
             }
             .padding(.horizontal, 40)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Thanks & Credits")
+                    .font(.headline)
+                    .padding(.horizontal, 40)
+
+                VStack(spacing: 12) {
+                    Link(destination: URL(string: "https://github.com/nullcstring/turnbridge")!) {
+                        HStack {
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 30)
+                            Text("nullcstring / turnbridge")
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+
+                    Link(destination: URL(string: "https://github.com/samosvalishe/turn-proxy-android")!) {
+                        HStack {
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 30)
+                            Text("samosvalishe / turn-proxy-android")
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal, 40)
+            }
             
             Spacer()
         }
