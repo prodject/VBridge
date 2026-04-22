@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var showExporter = false
     @State private var showExportError = false
     @State private var exportErrorMessage = ""
+    @State private var showQRScanner = false
+    @State private var showScannerError = false
+    @State private var scannerErrorMessage = ""
 
     private var profile: VPNProfile {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
@@ -76,7 +79,13 @@ struct SettingsView: View {
         .navigationTitle(isNewProfile ? "New Profile" : "Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button(action: { showQRScanner = true }) {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.title3)
+                        .foregroundColor(.primary)
+                }
+
                 Button(action: { dismiss() }) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title2)
@@ -103,6 +112,11 @@ struct SettingsView: View {
         } message: {
             Text(exportErrorMessage)
         }
+        .alert("Scanner Error", isPresented: $showScannerError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(scannerErrorMessage)
+        }
         .fileExporter(
             isPresented: $showExporter,
             document: exportDocument,
@@ -113,6 +127,20 @@ struct SettingsView: View {
                 exportErrorMessage = error.localizedDescription
                 showExportError = true
             }
+        }
+        .sheet(isPresented: $showQRScanner) {
+            WireGuardQRScannerView(
+                onCode: { code in
+                    showQRScanner = false
+                    applyScannedWireGuardConfig(code)
+                },
+                onError: { message in
+                    showQRScanner = false
+                    scannerErrorMessage = message
+                    showScannerError = true
+                }
+            )
+            .ignoresSafeArea()
         }
         .onDisappear {
             guard let draft else { return }
@@ -126,6 +154,19 @@ struct SettingsView: View {
         let package = VBridgeProfilePackage.fromCurrent(profile: profile)
         exportDocument = VBridgeProfileDocument(package: package)
         showExporter = true
+    }
+
+    private func applyScannedWireGuardConfig(_ raw: String) {
+        let normalized = normalizeScannedText(raw)
+        binding(\.wgQuickConfig).wrappedValue = normalized
+    }
+
+    private func normalizeScannedText(_ input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("\\n") && !trimmed.contains("\n") {
+            return trimmed.replacingOccurrences(of: "\\n", with: "\n")
+        }
+        return trimmed
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {
