@@ -150,21 +150,21 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
 	if err != nil {
 		log.Printf("[Captcha] Automatic solver failed: %v", err)
 
-		if captchaErr.CaptchaImg != "" {
-			log.Printf("[Captcha] Falling back to manual image solver...")
-			if token, manualErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg); manualErr == nil && token != "" {
-				return token, nil
-			} else if manualErr != nil {
-				log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
-			}
-		}
-
 		if captchaErr.RedirectUri != "" {
 			log.Printf("[Captcha] Falling back to manual proxy solver...")
 			if token, manualErr := solveCaptchaViaProxy(captchaErr.RedirectUri); manualErr == nil && token != "" {
 				return token, nil
 			} else if manualErr != nil {
 				log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
+			}
+		}
+
+		if captchaErr.CaptchaImg != "" {
+			log.Printf("[Captcha] Falling back to manual image solver...")
+			if token, manualErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg); manualErr == nil && token != "" {
+				return token, nil
+			} else if manualErr != nil {
+				log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
 			}
 		}
 

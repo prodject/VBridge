@@ -301,8 +301,17 @@ func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 		}
 		defer resp.Body.Close()
 
+		finalURL := ""
+		if resp.Request != nil && resp.Request.URL != nil {
+			finalURL = resp.Request.URL.String()
+		}
+
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			cachedImageErr = fmt.Errorf("captcha image bad status: %d", resp.StatusCode)
+			return
+		}
+		if strings.Contains(finalURL, "image_not_supported") {
+			cachedImageErr = fmt.Errorf("captcha image redirected to image_not_supported: %s", finalURL)
 			return
 		}
 
@@ -325,7 +334,7 @@ func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 			cachedImageErr = fmt.Errorf("unexpected captcha content-type: %s", cachedImageType)
 			return
 		}
-		log.Printf("[Captcha Image] fetched captcha image (%d bytes, %s)", len(cachedImageBytes), cachedImageType)
+		log.Printf("[Captcha Image] fetched captcha image (%d bytes, %s, final=%s)", len(cachedImageBytes), cachedImageType, finalURL)
 	}
 
 	mux.HandleFunc("/captcha-image", func(w http.ResponseWriter, r *http.Request) {

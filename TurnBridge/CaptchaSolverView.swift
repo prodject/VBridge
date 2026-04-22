@@ -1,15 +1,18 @@
 import SwiftUI
+import SafariServices
+import UIKit
 
 struct CaptchaSolverView: View {
     let request: CaptchaRequest
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var didOpenBrowser = false
     @State private var tokenInput = ""
     @State private var tokenStatus: String?
     @State private var isSubmittingToken = false
+    @State private var safariTarget: SafariTarget?
+    @State private var linkStatus: String?
 
     private var captchaURL: URL? { URL(string: request.url) }
     private var directURL: URL? {
@@ -56,7 +59,7 @@ struct CaptchaSolverView: View {
 
                 if let captchaURL {
                     Button("Open in Browser") {
-                        openBrowser(captchaURL)
+                        openInAppSafari(captchaURL)
                     }
                     .font(.footnote.weight(.semibold))
                 }
@@ -68,9 +71,14 @@ struct CaptchaSolverView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
                     Button("Open Direct Link") {
-                        openBrowser(directURL)
+                        openInAppSafari(directURL)
                     }
                     .font(.footnote.weight(.semibold))
+                    Button("Copy Direct Link") {
+                        UIPasteboard.general.string = directURL.absoluteString
+                        linkStatus = "Direct link copied to clipboard."
+                    }
+                    .font(.footnote)
                 }
 
                 if request.mode == .proxy {
@@ -94,6 +102,13 @@ struct CaptchaSolverView: View {
                         }
                     }
                 }
+
+                if let linkStatus {
+                    Text(linkStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding()
             .navigationTitle("Captcha")
@@ -109,13 +124,17 @@ struct CaptchaSolverView: View {
             .task {
                 guard !didOpenBrowser, let captchaURL else { return }
                 didOpenBrowser = true
-                openBrowser(captchaURL)
+                openInAppSafari(captchaURL)
+            }
+            .sheet(item: $safariTarget) { target in
+                SafariView(url: target.url)
+                    .ignoresSafeArea()
             }
         }
     }
 
-    private func openBrowser(_ url: URL) {
-        _ = openURL(url)
+    private func openInAppSafari(_ url: URL) {
+        safariTarget = SafariTarget(url: url)
     }
 
     private func submitToken() {
@@ -149,4 +168,21 @@ struct CaptchaSolverView: View {
             }
         }.resume()
     }
+}
+
+private struct SafariTarget: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let vc = SFSafariViewController(url: url)
+        vc.dismissButtonStyle = .close
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
