@@ -48,7 +48,10 @@ struct VBridge: App {
             let excludeCellular = defaults.object(forKey: "excludeCellularServices") as? Bool ?? false
             let excludeLAN = defaults.object(forKey: "excludeLocalNetworks") as? Bool ?? true
 
-            protocolConfiguration.includeAllNetworks = true
+            // Keep Internet available while manual captcha is being solved.
+            // With includeAllNetworks=true iOS can route browser traffic into a
+            // not-yet-ready tunnel during Connecting, causing blank captcha pages.
+            protocolConfiguration.includeAllNetworks = false
             protocolConfiguration.excludeAPNs = excludeAPNs
             protocolConfiguration.excludeCellularServices = excludeCellular
             protocolConfiguration.excludeLocalNetworks = excludeLAN
