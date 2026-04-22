@@ -24,7 +24,7 @@ struct AboutView: View {
                 .padding(.top, 10)
             
             VStack(spacing: 16) {
-                Link(destination: URL(string: "https://github.com/nullcstring/turnbridge")!) {
+                Link(destination: URL(string: "https://github.com/prodject/VBridge")!) {
                     HStack {
                         Image(systemName: "chevron.left.forwardslash.chevron.right")
                             .font(.system(size: 18, weight: .medium))
