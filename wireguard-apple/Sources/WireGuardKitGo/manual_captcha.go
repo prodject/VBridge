@@ -169,9 +169,172 @@ func rewriteProxyCookies(header http.Header) {
 func rewriteCaptchaHTML(html string, targetURL *neturl.URL) string {
 	localOrigin := localCaptchaOrigin()
 	upstreamOrigin := targetOrigin(targetURL)
-	// Keep rewrite mode conservative: only rewrite same-origin absolute links.
-	// Aggressive JS hooks were causing blank captcha pages in mobile Safari.
-	return strings.ReplaceAll(html, upstreamOrigin, localOrigin)
+	html = strings.ReplaceAll(html, upstreamOrigin, localOrigin)
+
+	script := fmt.Sprintf(`
+<script>
+(function() {
+    var localOrigin = %q;
+    var upstreamOrigin = %q;
+
+    function rewriteUrl(urlStr) {
+        if (!urlStr || typeof urlStr !== 'string') return urlStr;
+        if (urlStr.indexOf(localOrigin) === 0) return urlStr;
+        if (urlStr.indexOf(upstreamOrigin) === 0) return localOrigin + urlStr.slice(upstreamOrigin.length);
+        if (urlStr.indexOf('//') === 0) {
+            return '/generic_proxy?proxy_url=' + encodeURIComponent(window.location.protocol + urlStr);
+        }
+        if (urlStr.indexOf('http://') === 0 || urlStr.indexOf('https://') === 0) {
+            return '/generic_proxy?proxy_url=' + encodeURIComponent(urlStr);
+        }
+        return urlStr;
+    }
+
+    function rewriteElementAttr(el, attr) {
+        if (!el || !el.getAttribute) return;
+        var value = el.getAttribute(attr);
+        if (!value) return;
+        var rewritten = rewriteUrl(value);
+        if (rewritten !== value) {
+            el.setAttribute(attr, rewritten);
+        }
+    }
+
+    function rewriteDocument(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll('[href]').forEach(function(el) { rewriteElementAttr(el, 'href'); });
+        root.querySelectorAll('[src]').forEach(function(el) { rewriteElementAttr(el, 'src'); });
+        root.querySelectorAll('form[action]').forEach(function(el) { rewriteElementAttr(el, 'action'); });
+    }
+
+    function handleSuccessToken(token) {
+        if (!token) return;
+        fetch('/local-captcha-result', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'token=' + encodeURIComponent(token)
+        }).then(function() {
+            document.body.innerHTML = '<h2 style="text-align:center;margin-top:20vh">Done! You can close the page.</h2>';
+            setTimeout(function() { window.close(); }, 300);
+        }).catch(function() {});
+    }
+
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        if (arguments[1] && typeof arguments[1] === 'string') {
+            this._origUrl = arguments[1];
+            arguments[1] = rewriteUrl(arguments[1]);
+        }
+        return origOpen.apply(this, arguments);
+    };
+
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function() {
+        var xhr = this;
+        if (this._origUrl && this._origUrl.indexOf('captchaNotRobot.check') !== -1) {
+            xhr.addEventListener('load', function() {
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    if (data.response && data.response.success_token) {
+                        handleSuccessToken(data.response.success_token);
+                    }
+                } catch (e) {}
+            });
+        }
+        return origSend.apply(this, arguments);
+    };
+
+    var origFetch = window.fetch;
+    if (origFetch) {
+        window.fetch = function() {
+            var url = arguments[0];
+            var isObj = (typeof url === 'object' && url && url.url);
+            var urlStr = isObj ? url.url : url;
+            var origUrlStr = urlStr;
+
+            if (typeof urlStr === 'string') {
+                urlStr = rewriteUrl(urlStr);
+                arguments[0] = urlStr;
+            }
+
+            var p = origFetch.apply(this, arguments);
+            if (typeof origUrlStr === 'string' && origUrlStr.indexOf('captchaNotRobot.check') !== -1) {
+                p.then(function(response) {
+                    return response.clone().json();
+                }).then(function(data) {
+                    if (data.response && data.response.success_token) {
+                        handleSuccessToken(data.response.success_token);
+                    }
+                }).catch(function() {});
+            }
+            return p;
+        };
+    }
+
+    document.addEventListener('submit', function(event) {
+        if (event.target && event.target.action) {
+            event.target.action = rewriteUrl(event.target.action);
+        }
+    }, true);
+
+    document.addEventListener('click', function(event) {
+        var target = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (target && target.href) {
+            target.href = rewriteUrl(target.href);
+        }
+    }, true);
+
+    var origFormSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+        if (this.action) {
+            this.action = rewriteUrl(this.action);
+        }
+        return origFormSubmit.apply(this, arguments);
+    };
+
+    var origWindowOpen = window.open;
+    if (origWindowOpen) {
+        window.open = function(url) {
+            if (typeof url === 'string') {
+                arguments[0] = rewriteUrl(url);
+            }
+            return origWindowOpen.apply(this, arguments);
+        };
+    }
+
+    rewriteDocument(document);
+    if (document.documentElement && window.MutationObserver) {
+        new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && mutation.target) {
+                    rewriteElementAttr(mutation.target, mutation.attributeName);
+                    return;
+                }
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) {
+                        rewriteDocument(node);
+                    }
+                });
+            });
+        }).observe(document.documentElement, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['href', 'src', 'action']
+        });
+    }
+})();
+</script>
+`, localOrigin, upstreamOrigin)
+
+	switch {
+	case strings.Contains(html, "</head>"):
+		return strings.Replace(html, "</head>", script+"</head>", 1)
+	case strings.Contains(html, "</body>"):
+		return strings.Replace(html, "</body>", script+"</body>", 1)
+	default:
+		return html + script
+	}
 }
 
 func newCaptchaProxyTransport() *http.Transport {
@@ -180,10 +343,8 @@ func newCaptchaProxyTransport() *http.Transport {
 		MaxIdleConnsPerHost:   100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout:  1 * time.Second,
-		ForceAttemptHTTP2:      false,
-		ResponseHeaderTimeout:  30 * time.Second,
-		DisableCompression:     true,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     false,
 	}
 }
 
@@ -378,34 +539,6 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 }
 
 func solveCaptchaViaProxy(redirectURI string) (string, error) {
-	token, err := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRaw)
-	if err == nil && token != "" {
-		return token, nil
-	}
-	log.Printf("[Captcha Proxy] raw mode failed, retrying rewrite mode: %v", err)
-
-	rewriteToken, rewriteErr := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRewrite)
-	if rewriteErr == nil && rewriteToken != "" {
-		return rewriteToken, nil
-	}
-
-	if err == nil {
-		err = fmt.Errorf("raw mode returned empty token")
-	}
-	if rewriteErr == nil {
-		rewriteErr = fmt.Errorf("rewrite mode returned empty token")
-	}
-	return "", fmt.Errorf("all proxy modes failed: raw=%v; rewrite=%v", err, rewriteErr)
-}
-
-type captchaProxyMode string
-
-const (
-	captchaProxyModeRewrite captchaProxyMode = "rewrite"
-	captchaProxyModeRaw     captchaProxyMode = "raw"
-)
-
-func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (string, error) {
 	keyCh := make(chan string, 1)
 
 	targetURL, err := neturl.Parse(redirectURI)
@@ -413,8 +546,6 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 		return "", fmt.Errorf("invalid redirect URI: %v", err)
 	}
 
-	rewriteHTML := mode == captchaProxyModeRewrite
-	log.Printf("[Captcha Proxy][%s] starting proxy captcha flow for %s", mode, targetURL.String())
 	transport := newCaptchaProxyTransport()
 
 	proxy := &httputil.ReverseProxy{
@@ -433,6 +564,7 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 
 			if res.StatusCode >= 300 && res.StatusCode < 400 {
 				if loc := res.Header.Get("Location"); loc != "" {
+					log.Printf("[Captcha Proxy] Redirecting to: %s", loc)
 					if rewritten, ok := rewriteProxyRedirectLocation(loc, targetURL); ok {
 						res.Header.Set("Location", rewritten)
 					} else {
@@ -443,23 +575,13 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 
 			contentType := res.Header.Get("Content-Type")
 			contentEncoding := res.Header.Get("Content-Encoding")
-			location := res.Header.Get("Location")
-			log.Printf(
-				"[Captcha Proxy][%s] upstream response %s %s -> status=%d content-type=%q encoding=%q location=%q",
-				mode,
-				res.Request.Method,
-				res.Request.URL.String(),
-				res.StatusCode,
-				contentType,
-				contentEncoding,
-				location,
-			)
+			log.Printf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
+
 			shouldInspectBody := strings.Contains(contentType, "text/html") ||
 				strings.Contains(contentType, "application/xhtml+xml") ||
 				strings.Contains(res.Request.URL.Path, "captchaNotRobot.check")
 
 			if !shouldInspectBody {
-				log.Printf("[Captcha Proxy][%s] skip body inspect for %s", mode, res.Request.URL.Path)
 				return nil
 			}
 
@@ -483,18 +605,12 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 			if err := res.Body.Close(); err != nil {
 				return err
 			}
-			log.Printf(
-				"[Captcha Proxy][%s] body read for %s: %d bytes",
-				mode,
-				res.Request.URL.Path,
-				len(bodyBytes),
-			)
 
 			if strings.Contains(res.Request.URL.Path, "captchaNotRobot.check") {
 				notifyKey(keyCh, extractSuccessToken(bodyBytes))
 			}
 
-			if rewriteHTML && strings.Contains(contentType, "text/html") {
+			if strings.Contains(contentType, "text/html") {
 				for _, headerName := range []string{
 					"Content-Security-Policy",
 					"Content-Security-Policy-Report-Only",
@@ -512,12 +628,6 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 
 				bodyBytes = []byte(rewriteCaptchaHTML(string(bodyBytes), targetURL))
 				res.Header.Del("Content-Encoding")
-				log.Printf(
-					"[Captcha Proxy][%s] html rewritten for %s, new len=%d",
-					mode,
-					res.Request.URL.Path,
-					len(bodyBytes),
-				)
 			} else if contentEncoding == "gzip" {
 				res.Header.Del("Content-Encoding")
 			}
@@ -556,14 +666,16 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.String())
 		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
+			log.Printf("[Captcha Proxy] Redirecting ROOT to: %s", localCaptchaURLForTarget(targetURL))
 			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)
 			return
 		}
 		proxy.ServeHTTP(w, r)
 	})
 
-	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), redirectURI, keyCh, "proxy HTTP server error", "proxy")
+	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), "", keyCh, "proxy HTTP server error", "proxy")
 }
 
 func openBrowser(url string) {
