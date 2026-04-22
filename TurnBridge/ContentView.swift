@@ -288,7 +288,9 @@ struct ContentView: View {
 
                 Button(action: {
                     withAnimation { showImportModal = false }
-                    showProfileImporter = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        showProfileImporter = true
+                    }
                 }) {
                     HStack {
                         Image(systemName: "tray.and.arrow.down")
@@ -482,7 +484,7 @@ struct ContentView: View {
 
         do {
             let data = try Data(contentsOf: url)
-            let package = try JSONDecoder().decode(VBridgeProfilePackage.self, from: data)
+            let package = try VBridgeProfilePackage.decode(from: data)
             let imported = package.profile
             let profile = VPNProfile(
                 id: UUID(),

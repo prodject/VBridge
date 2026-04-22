@@ -37,7 +37,7 @@ struct VBridgeProfilePackage: Codable, Equatable {
     var format: String
     var profile: VPNProfile
     var appSettings: VBridgeAppSettingsSnapshot
-    var exportedAt: Date
+    var exportedAt: Date?
 
     static func fromCurrent(profile: VPNProfile) -> VBridgeProfilePackage {
         VBridgeProfilePackage(
@@ -46,6 +46,17 @@ struct VBridgeProfilePackage: Codable, Equatable {
             appSettings: .current(),
             exportedAt: Date()
         )
+    }
+
+    static func decode(from data: Data) throws -> VBridgeProfilePackage {
+        let isoDecoder = JSONDecoder()
+        isoDecoder.dateDecodingStrategy = .iso8601
+        if let decoded = try? isoDecoder.decode(VBridgeProfilePackage.self, from: data) {
+            return decoded
+        }
+
+        let plainDecoder = JSONDecoder()
+        return try plainDecoder.decode(VBridgeProfilePackage.self, from: data)
     }
 }
 
@@ -68,7 +79,7 @@ struct VBridgeProfileDocument: FileDocument {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        self.package = try JSONDecoder().decode(VBridgeProfilePackage.self, from: data)
+        self.package = try VBridgeProfilePackage.decode(from: data)
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
