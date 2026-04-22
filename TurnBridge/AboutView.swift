@@ -45,13 +45,13 @@ struct AboutView: View {
                     .cornerRadius(12)
                 }
                 
-                Link(destination: URL(string: "https://t.me/nullcstring")!) {
+                Link(destination: URL(string: "https://t.me/prodject")!) {
                     HStack {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 18))
                             .frame(width: 30)
                         
-                        Text("@nullcstring")
+                        Text("@prodject")
                             .font(.system(size: 16, weight: .medium))
                         
                         Spacer()
