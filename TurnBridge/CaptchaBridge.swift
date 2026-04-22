@@ -10,7 +10,16 @@ struct CaptchaRequest: Codable, Identifiable, Equatable {
     let id: String
     let mode: CaptchaRequestMode
     let url: String
+    let directURL: String?
     let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mode
+        case url
+        case directURL = "direct_url"
+        case message
+    }
 }
 
 @MainActor
@@ -52,7 +61,11 @@ final class CaptchaBridge: ObservableObject {
             let request = try JSONDecoder().decode(CaptchaRequest.self, from: data)
             if activeRequest != request {
                 activeRequest = request
-                SharedLogger.info("Captcha request received: \(request.mode.rawValue) -> \(request.url)")
+                if let direct = request.directURL, !direct.isEmpty {
+                    SharedLogger.info("Captcha request received: \(request.mode.rawValue) -> \(request.url) (direct: \(direct))")
+                } else {
+                    SharedLogger.info("Captcha request received: \(request.mode.rawValue) -> \(request.url)")
+                }
             }
         } catch {
             SharedLogger.error("Failed to decode captcha request: \(error.localizedDescription)")

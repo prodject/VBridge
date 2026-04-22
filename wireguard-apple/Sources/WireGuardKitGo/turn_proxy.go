@@ -92,16 +92,17 @@ func (l ProxyLogger) Write(p []byte) (n int, err error) {
     return len(p), nil
 }
 
-func notifyCaptchaRequired(mode string, captchaURL string, message string) {
+func notifyCaptchaRequired(mode string, captchaURL string, directURL string, message string) {
     if proxyCaptchaFunc == nil {
         return
     }
 
     payload, err := json.Marshal(map[string]string{
-        "id":      uuid.NewString(),
-        "mode":    mode,
-        "url":     captchaURL,
-        "message": message,
+        "id":         uuid.NewString(),
+        "mode":       mode,
+        "url":        captchaURL,
+        "direct_url": directURL,
+        "message":    message,
     })
     if err != nil {
         log.Printf("[Captcha] Failed to encode manual fallback payload: %v", err)

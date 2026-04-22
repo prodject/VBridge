@@ -212,7 +212,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 	return fmt.Errorf("captcha listeners failed: %s", strings.Join(listenErrs, "; "))
 }
 
-func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string, mode string) (string, error) {
+func runCaptchaServerAndWait(handler http.Handler, captchaURL string, directURL string, keyCh <-chan string, logPrefix string, mode string) (string, error) {
 	srv := &http.Server{Handler: handler}
 
 	if err := startCaptchaServer(srv, logPrefix); err != nil {
@@ -222,10 +222,13 @@ func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-ch
 	fmt.Println("\n==============================================")
 	fmt.Println("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
 	fmt.Println("Open this URL in the app or browser: " + localCaptchaOrigin())
+	if directURL != "" {
+		fmt.Println("Direct captcha URL: " + directURL)
+	}
 	fmt.Println("==============================================")
 	fmt.Println()
 
-	notifyCaptchaRequired(mode, captchaURL, "Open the captcha page in the app or browser to continue")
+	notifyCaptchaRequired(mode, captchaURL, directURL, "Open the captcha page in the app or browser to continue")
 	if runtime.GOOS != "ios" {
 		openBrowser(captchaURL)
 	}
@@ -285,9 +288,9 @@ func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 			return
 		}
 		applyBrowserProfile(req, profile)
-		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+		req.Header.Set("Accept", "image/jpeg,image/png,image/gif,image/*;q=0.9,*/*;q=0.5")
 		req.Header.Set("Referer", "https://id.vk.ru/")
-		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
 		req.Header.Set("Sec-Fetch-Mode", "no-cors")
 		req.Header.Set("Sec-Fetch-Dest", "image")
 
@@ -317,6 +320,10 @@ func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 		cachedImageType = resp.Header.Get("Content-Type")
 		if cachedImageType == "" {
 			cachedImageType = "image/jpeg"
+		}
+		if !strings.HasPrefix(strings.ToLower(cachedImageType), "image/") {
+			cachedImageErr = fmt.Errorf("unexpected captcha content-type: %s", cachedImageType)
+			return
 		}
 		log.Printf("[Captcha Image] fetched captcha image (%d bytes, %s)", len(cachedImageBytes), cachedImageType)
 	}
@@ -358,7 +365,7 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Done!</h2></body></html>`)
 	})
 
-	return runCaptchaServerAndWait(mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error", "image")
+	return runCaptchaServerAndWait(mux, localCaptchaOrigin(), captchaImg, keyCh, "captcha HTTP server error", "image")
 }
 
 func solveCaptchaViaProxy(redirectURI string) (string, error) {
@@ -547,7 +554,7 @@ func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (st
 		proxy.ServeHTTP(w, r)
 	})
 
-	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error", "proxy")
+	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), redirectURI, keyCh, "proxy HTTP server error", "proxy")
 }
 
 func openBrowser(url string) {
