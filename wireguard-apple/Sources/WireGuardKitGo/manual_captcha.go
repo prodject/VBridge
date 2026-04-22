@@ -168,172 +168,9 @@ func rewriteProxyCookies(header http.Header) {
 func rewriteCaptchaHTML(html string, targetURL *neturl.URL) string {
 	localOrigin := localCaptchaOrigin()
 	upstreamOrigin := targetOrigin(targetURL)
-	html = strings.ReplaceAll(html, upstreamOrigin, localOrigin)
-
-	script := fmt.Sprintf(`
-<script>
-(function() {
-    var localOrigin = %q;
-    var upstreamOrigin = %q;
-
-    function rewriteUrl(urlStr) {
-        if (!urlStr || typeof urlStr !== 'string') return urlStr;
-        if (urlStr.indexOf(localOrigin) === 0) return urlStr;
-        if (urlStr.indexOf(upstreamOrigin) === 0) return localOrigin + urlStr.slice(upstreamOrigin.length);
-        if (urlStr.indexOf('//') === 0) {
-            return '/generic_proxy?proxy_url=' + encodeURIComponent(window.location.protocol + urlStr);
-        }
-        if (urlStr.indexOf('http://') === 0 || urlStr.indexOf('https://') === 0) {
-            return '/generic_proxy?proxy_url=' + encodeURIComponent(urlStr);
-        }
-        return urlStr;
-    }
-
-    function rewriteElementAttr(el, attr) {
-        if (!el || !el.getAttribute) return;
-        var value = el.getAttribute(attr);
-        if (!value) return;
-        var rewritten = rewriteUrl(value);
-        if (rewritten !== value) {
-            el.setAttribute(attr, rewritten);
-        }
-    }
-
-    function rewriteDocument(root) {
-        if (!root || !root.querySelectorAll) return;
-        root.querySelectorAll('[href]').forEach(function(el) { rewriteElementAttr(el, 'href'); });
-        root.querySelectorAll('[src]').forEach(function(el) { rewriteElementAttr(el, 'src'); });
-        root.querySelectorAll('form[action]').forEach(function(el) { rewriteElementAttr(el, 'action'); });
-    }
-
-    function handleSuccessToken(token) {
-        if (!token) return;
-        fetch('/local-captcha-result', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: 'token=' + encodeURIComponent(token)
-        }).then(function() {
-            document.body.innerHTML = '<h2 style="text-align:center;margin-top:20vh">Done! You can close the page.</h2>';
-            setTimeout(function() { window.close(); }, 300);
-        }).catch(function() {});
-    }
-
-    var origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function() {
-        if (arguments[1] && typeof arguments[1] === 'string') {
-            this._origUrl = arguments[1];
-            arguments[1] = rewriteUrl(arguments[1]);
-        }
-        return origOpen.apply(this, arguments);
-    };
-
-    var origSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function() {
-        var xhr = this;
-        if (this._origUrl && this._origUrl.indexOf('captchaNotRobot.check') !== -1) {
-            xhr.addEventListener('load', function() {
-                try {
-                    var data = JSON.parse(xhr.responseText);
-                    if (data.response && data.response.success_token) {
-                        handleSuccessToken(data.response.success_token);
-                    }
-                } catch (e) {}
-            });
-        }
-        return origSend.apply(this, arguments);
-    };
-
-    var origFetch = window.fetch;
-    if (origFetch) {
-        window.fetch = function() {
-            var url = arguments[0];
-            var isObj = (typeof url === 'object' && url && url.url);
-            var urlStr = isObj ? url.url : url;
-            var origUrlStr = urlStr;
-
-            if (typeof urlStr === 'string') {
-                urlStr = rewriteUrl(urlStr);
-                arguments[0] = urlStr;
-            }
-
-            var p = origFetch.apply(this, arguments);
-            if (typeof origUrlStr === 'string' && origUrlStr.indexOf('captchaNotRobot.check') !== -1) {
-                p.then(function(response) {
-                    return response.clone().json();
-                }).then(function(data) {
-                    if (data.response && data.response.success_token) {
-                        handleSuccessToken(data.response.success_token);
-                    }
-                }).catch(function() {});
-            }
-            return p;
-        };
-    }
-
-    document.addEventListener('submit', function(event) {
-        if (event.target && event.target.action) {
-            event.target.action = rewriteUrl(event.target.action);
-        }
-    }, true);
-
-    document.addEventListener('click', function(event) {
-        var target = event.target && event.target.closest ? event.target.closest('a[href]') : null;
-        if (target && target.href) {
-            target.href = rewriteUrl(target.href);
-        }
-    }, true);
-
-    var origFormSubmit = HTMLFormElement.prototype.submit;
-    HTMLFormElement.prototype.submit = function() {
-        if (this.action) {
-            this.action = rewriteUrl(this.action);
-        }
-        return origFormSubmit.apply(this, arguments);
-    };
-
-    var origWindowOpen = window.open;
-    if (origWindowOpen) {
-        window.open = function(url) {
-            if (typeof url === 'string') {
-                arguments[0] = rewriteUrl(url);
-            }
-            return origWindowOpen.apply(this, arguments);
-        };
-    }
-
-    rewriteDocument(document);
-    if (document.documentElement && window.MutationObserver) {
-        new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                if (mutation.type === 'attributes' && mutation.target) {
-                    rewriteElementAttr(mutation.target, mutation.attributeName);
-                    return;
-                }
-                mutation.addedNodes.forEach(function(node) {
-                    if (node.nodeType === 1) {
-                        rewriteDocument(node);
-                    }
-                });
-            });
-        }).observe(document.documentElement, {
-            subtree: true,
-            childList: true,
-            attributes: true,
-            attributeFilter: ['href', 'src', 'action']
-        });
-    }
-})();
-</script>
-`, localOrigin, upstreamOrigin)
-
-	switch {
-	case strings.Contains(html, "</head>"):
-		return strings.Replace(html, "</head>", script+"</head>", 1)
-	case strings.Contains(html, "</body>"):
-		return strings.Replace(html, "</body>", script+"</body>", 1)
-	default:
-		return html + script
-	}
+	// Keep rewrite mode conservative: only rewrite same-origin absolute links.
+	// Aggressive JS hooks were causing blank captcha pages in mobile Safari.
+	return strings.ReplaceAll(html, upstreamOrigin, localOrigin)
 }
 
 func newCaptchaProxyTransport() *http.Transport {
@@ -450,24 +287,24 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 }
 
 func solveCaptchaViaProxy(redirectURI string) (string, error) {
-	token, err := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRewrite)
+	token, err := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRaw)
 	if err == nil && token != "" {
 		return token, nil
 	}
-	log.Printf("[Captcha Proxy] rewrite mode failed, retrying raw mode: %v", err)
+	log.Printf("[Captcha Proxy] raw mode failed, retrying rewrite mode: %v", err)
 
-	rawToken, rawErr := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRaw)
-	if rawErr == nil && rawToken != "" {
-		return rawToken, nil
+	rewriteToken, rewriteErr := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRewrite)
+	if rewriteErr == nil && rewriteToken != "" {
+		return rewriteToken, nil
 	}
 
 	if err == nil {
-		err = fmt.Errorf("rewrite mode returned empty token")
+		err = fmt.Errorf("raw mode returned empty token")
 	}
-	if rawErr == nil {
-		rawErr = fmt.Errorf("raw mode returned empty token")
+	if rewriteErr == nil {
+		rewriteErr = fmt.Errorf("rewrite mode returned empty token")
 	}
-	return "", fmt.Errorf("all proxy modes failed: rewrite=%v; raw=%v", err, rawErr)
+	return "", fmt.Errorf("all proxy modes failed: raw=%v; rewrite=%v", err, rewriteErr)
 }
 
 type captchaProxyMode string
