@@ -8,6 +8,10 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: VPNProfile?
     @State private var showDeleteConfirmation = false
+    @State private var exportDocument = VBridgeProfileDocument(package: VBridgeProfilePackage.fromCurrent(profile: VPNProfile(name: "Profile")))
+    @State private var showExporter = false
+    @State private var showExportError = false
+    @State private var exportErrorMessage = ""
 
     private var profile: VPNProfile {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
@@ -46,6 +50,14 @@ struct SettingsView: View {
             }
 
             Section {
+                Button(action: exportProfile) {
+                    HStack {
+                        Spacer()
+                        Label("Export Profile", systemImage: "square.and.arrow.up")
+                        Spacer()
+                    }
+                }
+
                 Button(role: .destructive, action: {
                     showDeleteConfirmation = true
                 }) {
@@ -82,12 +94,34 @@ struct SettingsView: View {
         } message: {
             Text("Profile \"\(profile.name)\" will be permanently deleted.")
         }
+        .alert("Export Error", isPresented: $showExportError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportErrorMessage)
+        }
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: .vbridgeProfile,
+            defaultFilename: "\(profile.name.replacingOccurrences(of: " ", with: "_")).vbridge"
+        ) { result in
+            if case .failure(let error) = result {
+                exportErrorMessage = error.localizedDescription
+                showExportError = true
+            }
+        }
         .onDisappear {
             guard let draft else { return }
             if store.profiles.contains(where: { $0.id == profileID }) {
                 store.selectedProfile = draft
             }
         }
+    }
+
+    private func exportProfile() {
+        let package = VBridgeProfilePackage.fromCurrent(profile: profile)
+        exportDocument = VBridgeProfileDocument(package: package)
+        showExporter = true
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {
