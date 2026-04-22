@@ -63,6 +63,7 @@ struct SettingsView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .padding(.bottom, 8)
 
                 Button(action: exportProfile) {
                     HStack {
