@@ -6,6 +6,16 @@ To run the application, you must use a [server](https://github.com/cacggghp/vk-t
 
 The project is based on the repositories listed in the **Acknowledgments** section.
 
+## Extended features:
+
+* **Auto-Update Pipeline:** The app can check GitHub Releases and download the latest IPA directly.
+* **Manual Update Trigger:** Dedicated **Check update** action on the main screen.
+* **Manual Captcha Mode:** Optional mode to disable automatic captcha solving and force manual flow.
+* **Profile Export/Import (.vbridge):** Full profile transfer including proxy fields, WireGuard config, and app-level routing/theme settings.
+* **Theme Control:** User-selectable app theme (System / Light / Dark).
+* **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.
+* **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`1.X`) and release artifact publishing.
+
 ## ✨ Features
 
 * **Custom Routing:** Route your traffic through specific TURN protocols and WG endpoints.
@@ -121,7 +131,9 @@ GNU General Public License for more details.
 
 This project was made possible thanks to the work of the open-source community. It includes code and concepts from the following excellent repositories:
 
+* [turnbridge](https://github.com/nullcstring/turnbridge) — Original iOS client base and design direction.
 * [WireGuard-Apple](https://github.com/ut360e/wireguard-apple) — Licensed under MIT / GPL.
 * [Wireguardkit](https://github.com/Shahzainali/Wireguardkit) — Licensed under MIT / GPL.
 * [vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy) — Licensed under the GNU GPL.
 * [Amneziawg-Apple](https://github.com/amnezia-vpn/amneziawg-apple.git) — Licensed under MIT.
+* [proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android) — Android implementation references.
