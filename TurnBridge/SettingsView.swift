@@ -49,7 +49,7 @@ struct SettingsView: View {
                     .disableAutocorrection(true)
             }
 
-            Section {
+            Section(header: Text("Transfer")) {
                 Button(action: exportProfile) {
                     HStack {
                         Spacer()
@@ -57,7 +57,10 @@ struct SettingsView: View {
                         Spacer()
                     }
                 }
+                .buttonStyle(.plain)
+            }
 
+            Section {
                 Button(role: .destructive, action: {
                     showDeleteConfirmation = true
                 }) {
@@ -67,6 +70,7 @@ struct SettingsView: View {
                         Spacer()
                     }
                 }
+                .buttonStyle(.plain)
             }
         }
         .navigationTitle(isNewProfile ? "New Profile" : "Settings")
