@@ -9,8 +9,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: VPNProfile?
     @State private var showDeleteConfirmation = false
-    @State private var exportDocument = VBridgeProfileDocument(package: VBridgeProfilePackage.fromCurrent(profile: VPNProfile(name: "Profile")))
-    @State private var showExporter = false
     @State private var showExportError = false
     @State private var exportErrorMessage = ""
     @State private var showQRScanner = false
@@ -59,16 +57,6 @@ struct SettingsView: View {
                     HStack {
                         Spacer()
                         Label("Generate Link", systemImage: "link.badge.plus")
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 8)
-
-                Button(action: exportProfile) {
-                    HStack {
-                        Spacer()
-                        Label("Export Profile", systemImage: "square.and.arrow.up")
                         Spacer()
                     }
                 }
@@ -134,17 +122,6 @@ struct SettingsView: View {
         } message: {
             Text("vbridge link copied to clipboard.")
         }
-        .fileExporter(
-            isPresented: $showExporter,
-            document: exportDocument,
-            contentType: .vbridgeProfile,
-            defaultFilename: "\(profile.name.replacingOccurrences(of: " ", with: "_")).vbridge"
-        ) { result in
-            if case .failure(let error) = result {
-                exportErrorMessage = error.localizedDescription
-                showExportError = true
-            }
-        }
         .sheet(isPresented: $showQRScanner) {
             WireGuardQRScannerView(
                 onCode: { code in
@@ -165,12 +142,6 @@ struct SettingsView: View {
                 store.selectedProfile = draft
             }
         }
-    }
-
-    private func exportProfile() {
-        let package = VBridgeProfilePackage.fromCurrent(profile: profile)
-        exportDocument = VBridgeProfileDocument(package: package)
-        showExporter = true
     }
 
     private func applyScannedWireGuardConfig(_ raw: String) {

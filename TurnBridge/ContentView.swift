@@ -1,6 +1,5 @@
 import SwiftUI
 import NetworkExtension
-import UniformTypeIdentifiers
 
 struct SettingsSheet: Identifiable {
     let id = UUID()
@@ -28,7 +27,6 @@ struct ContentView: View {
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
     @State private var isCheckingUpdate = false
-    @State private var showProfileImporter = false
 
     var body: some View {
         NavigationStack {
@@ -214,19 +212,6 @@ struct ContentView: View {
             } message: {
                 Text(alertMessage)
             }
-            .fileImporter(
-                isPresented: $showProfileImporter,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    importProfile(from: url)
-                case .failure(let error):
-                    showAlert(title: "Import Error", message: error.localizedDescription)
-                }
-            }
         }
     }
     
@@ -284,24 +269,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-
-                Button(action: {
-                    withAnimation { showImportModal = false }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        showProfileImporter = true
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: "tray.and.arrow.down")
-                        Text("Import Profile")
-                    }
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.indigo)
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
@@ -478,39 +445,6 @@ struct ContentView: View {
         SharedLogger.info("New manual profile created: \"\(store.selectedProfile?.name ?? "")\"")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             settingsSheet = SettingsSheet(profileID: profile.id, isNew: true)
-        }
-    }
-
-    private func importProfile(from url: URL) {
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if hasAccess { url.stopAccessingSecurityScopedResource() }
-        }
-
-        do {
-            let ext = url.pathExtension.lowercased()
-            guard ext.isEmpty || ext == "vbridge" || ext == "json" else {
-                showAlert(title: "Import Error", message: "Unsupported file type: .\(ext)")
-                return
-            }
-
-            let data = try Data(contentsOf: url)
-            let package = try VBridgeProfilePackage.decode(from: data)
-            let imported = package.profile
-            let profile = VPNProfile(
-                id: UUID(),
-                name: imported.name,
-                vkLink: imported.vkLink,
-                peerAddr: imported.peerAddr,
-                listenAddr: imported.listenAddr,
-                nValue: imported.nValue,
-                wgQuickConfig: imported.wgQuickConfig
-            )
-            store.addProfile(profile)
-            package.appSettings.apply()
-            showAlert(title: "Imported", message: "Profile \"\(profile.name)\" imported from .vbridge")
-        } catch {
-            showAlert(title: "Import Error", message: error.localizedDescription)
         }
     }
 
