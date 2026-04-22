@@ -450,12 +450,43 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 }
 
 func solveCaptchaViaProxy(redirectURI string) (string, error) {
+	token, err := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRewrite)
+	if err == nil && token != "" {
+		return token, nil
+	}
+	log.Printf("[Captcha Proxy] rewrite mode failed, retrying raw mode: %v", err)
+
+	rawToken, rawErr := solveCaptchaViaProxyWithMode(redirectURI, captchaProxyModeRaw)
+	if rawErr == nil && rawToken != "" {
+		return rawToken, nil
+	}
+
+	if err == nil {
+		err = fmt.Errorf("rewrite mode returned empty token")
+	}
+	if rawErr == nil {
+		rawErr = fmt.Errorf("raw mode returned empty token")
+	}
+	return "", fmt.Errorf("all proxy modes failed: rewrite=%v; raw=%v", err, rawErr)
+}
+
+type captchaProxyMode string
+
+const (
+	captchaProxyModeRewrite captchaProxyMode = "rewrite"
+	captchaProxyModeRaw     captchaProxyMode = "raw"
+)
+
+func solveCaptchaViaProxyWithMode(redirectURI string, mode captchaProxyMode) (string, error) {
 	keyCh := make(chan string, 1)
 
 	targetURL, err := neturl.Parse(redirectURI)
 	if err != nil {
 		return "", fmt.Errorf("invalid redirect URI: %v", err)
 	}
+
+	rewriteHTML := mode == captchaProxyModeRewrite
+	log.Printf("[Captcha Proxy][%s] starting proxy captcha flow for %s", mode, targetURL.String())
 	transport := newCaptchaProxyTransport()
 
 	proxy := &httputil.ReverseProxy{
@@ -484,11 +515,23 @@ func solveCaptchaViaProxy(redirectURI string) (string, error) {
 
 			contentType := res.Header.Get("Content-Type")
 			contentEncoding := res.Header.Get("Content-Encoding")
+			location := res.Header.Get("Location")
+			log.Printf(
+				"[Captcha Proxy][%s] upstream response %s %s -> status=%d content-type=%q encoding=%q location=%q",
+				mode,
+				res.Request.Method,
+				res.Request.URL.String(),
+				res.StatusCode,
+				contentType,
+				contentEncoding,
+				location,
+			)
 			shouldInspectBody := strings.Contains(contentType, "text/html") ||
 				strings.Contains(contentType, "application/xhtml+xml") ||
 				strings.Contains(res.Request.URL.Path, "captchaNotRobot.check")
 
 			if !shouldInspectBody {
+				log.Printf("[Captcha Proxy][%s] skip body inspect for %s", mode, res.Request.URL.Path)
 				return nil
 			}
 
@@ -512,12 +555,18 @@ func solveCaptchaViaProxy(redirectURI string) (string, error) {
 			if err := res.Body.Close(); err != nil {
 				return err
 			}
+			log.Printf(
+				"[Captcha Proxy][%s] body read for %s: %d bytes",
+				mode,
+				res.Request.URL.Path,
+				len(bodyBytes),
+			)
 
 			if strings.Contains(res.Request.URL.Path, "captchaNotRobot.check") {
 				notifyKey(keyCh, extractSuccessToken(bodyBytes))
 			}
 
-			if strings.Contains(contentType, "text/html") {
+			if rewriteHTML && strings.Contains(contentType, "text/html") {
 				for _, headerName := range []string{
 					"Content-Security-Policy",
 					"Content-Security-Policy-Report-Only",
@@ -535,6 +584,12 @@ func solveCaptchaViaProxy(redirectURI string) (string, error) {
 
 				bodyBytes = []byte(rewriteCaptchaHTML(string(bodyBytes), targetURL))
 				res.Header.Del("Content-Encoding")
+				log.Printf(
+					"[Captcha Proxy][%s] html rewritten for %s, new len=%d",
+					mode,
+					res.Request.URL.Path,
+					len(bodyBytes),
+				)
 			} else if contentEncoding == "gzip" {
 				res.Header.Del("Content-Encoding")
 			}
