@@ -12,6 +12,8 @@ struct ContentView: View {
     var app: VBridge
 
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
+    @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
+    @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
 
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
@@ -402,10 +404,13 @@ struct ContentView: View {
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
             vpnStatus = .connecting
+            let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
+            tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
+            SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
             app.turnOnTunnel(
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
-                listenAddr: profile.listenAddr,
+                listenAddr: effectiveListenAddr,
                 nValue: profile.nValue,
                 wgQuickConfig: profile.wgQuickConfig
             ) { isSuccess in
@@ -537,6 +542,19 @@ struct ContentView: View {
     private func cancelConnectWatchdog() {
         connectWatchdogTask?.cancel()
         connectWatchdogTask = nil
+    }
+
+    private func resolvedListenAddress(from original: String) -> String {
+        guard tetherProxyEnabled else { return original }
+        let port = extractPort(from: original) ?? 9000
+        return "0.0.0.0:\(port)"
+    }
+
+    private func extractPort(from listenAddress: String) -> Int? {
+        let trimmed = listenAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = trimmed.lastIndex(of: ":") else { return nil }
+        let portPart = trimmed[trimmed.index(after: index)...]
+        return Int(portPart)
     }
 
     private func checkForUpdates(manual: Bool) async {

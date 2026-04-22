@@ -8,6 +8,7 @@ struct VBridgeAppSettingsSnapshot: Codable, Equatable {
     var excludeLocalNetworks: Bool
     var manualCaptcha: Bool
     var autoUpdateEnabled: Bool
+    var tetherProxyEnabled: Bool
     var appTheme: String
 
     static func current() -> VBridgeAppSettingsSnapshot {
@@ -18,6 +19,7 @@ struct VBridgeAppSettingsSnapshot: Codable, Equatable {
             excludeLocalNetworks: defaults.object(forKey: "excludeLocalNetworks") as? Bool ?? true,
             manualCaptcha: defaults.object(forKey: "manualCaptcha") as? Bool ?? false,
             autoUpdateEnabled: defaults.object(forKey: "autoUpdateEnabled") as? Bool ?? true,
+            tetherProxyEnabled: defaults.object(forKey: "tetherProxyEnabled") as? Bool ?? false,
             appTheme: defaults.string(forKey: "appTheme") ?? "system"
         )
     }
@@ -29,6 +31,7 @@ struct VBridgeAppSettingsSnapshot: Codable, Equatable {
         defaults.set(excludeLocalNetworks, forKey: "excludeLocalNetworks")
         defaults.set(manualCaptcha, forKey: "manualCaptcha")
         defaults.set(autoUpdateEnabled, forKey: "autoUpdateEnabled")
+        defaults.set(tetherProxyEnabled, forKey: "tetherProxyEnabled")
         defaults.set(appTheme, forKey: "appTheme")
     }
 }
