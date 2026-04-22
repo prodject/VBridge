@@ -5,6 +5,7 @@ struct GlobalSettingsView: View {
     @AppStorage("excludeCellularServices") private var excludeCellularServices = false
     @AppStorage("excludeLocalNetworks") private var excludeLocalNetworks = true
     @AppStorage("manualCaptcha") private var manualCaptcha = false
+    @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
 
     var body: some View {
         Form {
@@ -58,6 +59,17 @@ struct GlobalSettingsView: View {
                     VStack(alignment: .leading) {
                         Text("Manual Captcha")
                         Text("Disable automatic captcha solving and require manual solving flow")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section(header: Text("Updates")) {
+                Toggle(isOn: $autoUpdateEnabled) {
+                    VStack(alignment: .leading) {
+                        Text("Autoupdate")
+                        Text("Check GitHub Releases and offer download when a newer version is available")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

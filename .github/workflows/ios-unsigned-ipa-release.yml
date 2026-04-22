@@ -46,6 +46,16 @@ jobs:
           xcodebuild -version
           go version
 
+      - name: Compute CI app version
+        run: |
+          set -euo pipefail
+          APP_MINOR=$((GITHUB_RUN_NUMBER + GITHUB_RUN_ATTEMPT - 1))
+          APP_VERSION="1.${APP_MINOR}"
+          APP_BUILD="${APP_MINOR}"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
+          echo "CI app version: $APP_VERSION ($APP_BUILD)"
+
       - name: Prebuild WireGuard Go bridge
         run: |
           set -euo pipefail
@@ -72,6 +82,8 @@ jobs:
             DEVELOPMENT_TEAM="" \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET="$IPHONEOS_DEPLOYMENT_TARGET" \
+            MARKETING_VERSION="$APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$APP_BUILD" \
             build
 
       - name: Package unsigned IPA

@@ -10,6 +10,9 @@ struct SettingsSheet: Identifiable {
 struct ContentView: View {
     var app: VBridge
 
+    @Environment(\.openURL) private var openURL
+    @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
+
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
 
@@ -20,6 +23,9 @@ struct ContentView: View {
     @State private var connectWatchdogTask: Task<Void, Never>?
     @State private var settingsSheet: SettingsSheet?
     @StateObject private var captchaBridge = CaptchaBridge()
+    @State private var updateInfo: UpdateInfo?
+    @State private var showUpdateDialog = false
+    @State private var didCheckForUpdates = false
 
     var body: some View {
         NavigationStack {
@@ -72,7 +78,7 @@ struct ContentView: View {
                             .cornerRadius(16)
                             .shadow(color: buttonColor.opacity(0.4), radius: 8, x: 0, y: 4)
                     }
-                    .disabled(vpnStatus == .connecting || vpnStatus == .disconnecting || store.selectedProfile == nil)
+                    .disabled(isConnectButtonDisabled)
                     .padding(.horizontal, 40)
                 }
 
@@ -128,6 +134,12 @@ struct ContentView: View {
                 }
             }
             .onAppear(perform: checkInitialStatus)
+            .onAppear {
+                if !didCheckForUpdates {
+                    didCheckForUpdates = true
+                    checkForUpdatesIfNeeded()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { notification in
                 if let connection = notification.object as? NEVPNConnection {
                     let newStatus = connection.status
@@ -153,6 +165,19 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(alertMessage)
+            }
+            .confirmationDialog(
+                "Update Available",
+                isPresented: $showUpdateDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Download") {
+                    guard let url = updateInfo?.releaseURL else { return }
+                    openURL(url)
+                }
+                Button("Later", role: .cancel) { }
+            } message: {
+                Text("A newer version (\(updateInfo?.latestVersion ?? "?")) is available on GitHub Releases.")
             }
         }
     }
@@ -248,7 +273,7 @@ struct ContentView: View {
     private var buttonText: String {
         switch vpnStatus {
         case .connected: return "Disconnect"
-        case .connecting: return "Please wait..."
+        case .connecting, .reasserting: return "Stop"
         case .disconnecting: return "Stopping..."
         default: return "Connect"
         }
@@ -259,6 +284,17 @@ struct ContentView: View {
         case .connected: return .red
         case .connecting, .disconnecting: return .orange
         default: return .blue
+        }
+    }
+
+    private var isConnectButtonDisabled: Bool {
+        switch vpnStatus {
+        case .disconnecting:
+            return true
+        case .disconnected, .invalid:
+            return store.selectedProfile == nil
+        default:
+            return false
         }
     }
 
@@ -287,10 +323,11 @@ struct ContentView: View {
     }
 
     private func toggleTunnel() {
-        if vpnStatus == .connected {
-            SharedLogger.info("User requested disconnect")
+        if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
+            SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
             cancelConnectWatchdog()
             app.turnOffTunnel()
+            vpnStatus = .disconnecting
         } else {
             guard let profile = store.selectedProfile else { return }
             if let errorMessage = validateConfig(profile) {
@@ -403,5 +440,22 @@ struct ContentView: View {
     private func cancelConnectWatchdog() {
         connectWatchdogTask?.cancel()
         connectWatchdogTask = nil
+    }
+
+    private func checkForUpdatesIfNeeded() {
+        guard autoUpdateEnabled else { return }
+
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
+        Task {
+            if let info = await UpdateChecker.checkForUpdate(currentVersion: currentVersion) {
+                await MainActor.run {
+                    updateInfo = info
+                    showUpdateDialog = true
+                }
+                SharedLogger.info("[Update] New version available: \(info.latestVersion)")
+            } else {
+                SharedLogger.debug("[Update] No update available")
+            }
+        }
     }
 }
