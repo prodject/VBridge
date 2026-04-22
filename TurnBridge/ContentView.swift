@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showingAlert = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
+    @State private var connectWatchdogTask: Task<Void, Never>?
     @State private var settingsSheet: SettingsSheet?
     @StateObject private var captchaBridge = CaptchaBridge()
 
@@ -143,6 +144,9 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
+                    if newStatus != .connecting {
+                        cancelConnectWatchdog()
+                    }
                 }
             }
             .alert(alertTitle, isPresented: $showingAlert) {
@@ -285,6 +289,7 @@ struct ContentView: View {
     private func toggleTunnel() {
         if vpnStatus == .connected {
             SharedLogger.info("User requested disconnect")
+            cancelConnectWatchdog()
             app.turnOffTunnel()
         } else {
             guard let profile = store.selectedProfile else { return }
@@ -304,10 +309,12 @@ struct ContentView: View {
                 wgQuickConfig: profile.wgQuickConfig
             ) { isSuccess in
                 if !isSuccess {
+                    cancelConnectWatchdog()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
                 }
             }
+            startConnectWatchdog()
         }
     }
 
@@ -372,5 +379,29 @@ struct ContentView: View {
         alertTitle = title
         alertMessage = message
         showingAlert = true
+    }
+
+    private func startConnectWatchdog() {
+        cancelConnectWatchdog()
+        connectWatchdogTask = Task {
+            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard vpnStatus == .connecting else { return }
+
+                SharedLogger.error("Connection timeout while waiting for tunnel readiness")
+                app.turnOffTunnel()
+                vpnStatus = .disconnected
+                showAlert(
+                    title: "Connection Timeout",
+                    message: "Tunnel startup timed out (45s). Check Logs and Captcha flow, then try again."
+                )
+            }
+        }
+    }
+
+    private func cancelConnectWatchdog() {
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = nil
     }
 }

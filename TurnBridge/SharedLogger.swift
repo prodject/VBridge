@@ -105,16 +105,33 @@ public struct LogEntry: Identifiable, Equatable {
 public struct SharedLogger {
 
     // MARK: - App Group detection from binary entitlements
+    private static let defaultAppGroupID = "group.com.prodject.vbridge"
 
     private static let _appGroupID: String? = {
-        // Try reading App Group from code signature entitlements in the Mach-O binary
-        if let groups = appGroupsFromBinary(), let first = groups.first {
-            return first
+        var candidates: [String] = []
+
+        // 1) Try reading App Group from code signature entitlements in the Mach-O binary.
+        if let groups = appGroupsFromBinary() {
+            candidates.append(contentsOf: groups)
         }
-        // Fallback: derive from bundle ID (works for Xcode-signed builds)
+
+        // 2) Fallback: derive from bundle ID (works for Xcode-signed builds).
         let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
         let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
-        return "group.\(baseBundleID)"
+        candidates.append("group.\(baseBundleID)")
+
+        // 3) Stable project default fallback.
+        candidates.append(defaultAppGroupID)
+
+        for candidate in candidates {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: candidate) != nil {
+                return candidate
+            }
+        }
+
+        // Last resort: keep deterministic fallback instead of nil, so
+        // UserDefaults(suiteName:) path remains consistent for debug builds.
+        return candidates.first
     }()
 
     static var appGroupID: String? { _appGroupID }
