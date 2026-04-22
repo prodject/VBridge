@@ -1,5 +1,6 @@
 import SwiftUI
 import NetworkExtension
+import UniformTypeIdentifiers
 
 struct SettingsSheet: Identifiable {
     let id = UUID()
