@@ -33,7 +33,7 @@ extern char *LibXrayStopXray();
 extern char *LibXrayXrayVersion();
 extern char* LibXraySetSockCallback(libxray_sockcallback cb, void* ctx);
 
-extern void StartProxy(const char *link, const char *peerAddrStr, const char *localAddrStr, int n);
+extern void StartProxy(const char *link, const char *peerAddrStr, const char *localAddrStr, int n, int manualCaptcha);
 extern void StopProxy(void);
 extern void ProxySetLogger(void *context, logger_fn_t logger_fn);
 extern void ProxySetCaptchaCallback(void *context, captcha_fn_t captcha_fn);

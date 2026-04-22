@@ -51,6 +51,7 @@ var proxyLoggerCtx unsafe.Pointer
 var proxyCaptchaFunc C.proxy_captcha_fn_t
 var proxyCaptchaCtx unsafe.Pointer
 var proxyCancel context.CancelFunc
+var manualCaptchaOnly atomic.Bool
 
 //export ProxySetLogger
 func ProxySetLogger(context unsafe.Pointer, loggerFn C.proxy_logger_fn_t) {
@@ -281,22 +282,60 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                     if captchaErr.IsCaptchaError() {
                         log.Printf("[Captcha] Attempt %d/%d: solving...", attempt+1, maxCaptchaAttempts)
 
-                        successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
-                        if solveErr != nil {
-                            err = fmt.Errorf("captcha solve error: %v", solveErr)
+                        if manualCaptchaOnly.Load() {
+                            if captchaErr.RedirectUri != "" {
+                                log.Printf("[Captcha] Manual captcha mode enabled; using proxy flow...")
+                                successToken, solveErr := solveCaptchaViaProxy(captchaErr.RedirectUri)
+                                if solveErr != nil {
+                                    err = fmt.Errorf("manual captcha proxy solve error: %v", solveErr)
+                                    break
+                                }
+
+                                if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
+                                    captchaErr.CaptchaAttempt = "1"
+                                }
+
+                                data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
+                                    "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
+                                    "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
+                                    link, escapedName, captchaErr.CaptchaSid, successToken,
+                                    captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+                                continue
+                            }
+
+                            if captchaErr.CaptchaImg != "" {
+                                log.Printf("[Captcha] Manual captcha mode enabled; using image flow...")
+                                captchaKey, solveErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg)
+                                if solveErr != nil {
+                                    err = fmt.Errorf("manual captcha image solve error: %v", solveErr)
+                                    break
+                                }
+
+                                data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&captcha_key=%s&captcha_sid=%s&access_token=%s",
+                                    link, escapedName, neturl.QueryEscape(captchaKey), captchaErr.CaptchaSid, token1)
+                                continue
+                            }
+
+                            err = fmt.Errorf("manual captcha mode: no redirect_uri or captcha_img")
                             break
-                        }
+                        } else {
+                            successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
+                            if solveErr != nil {
+                                err = fmt.Errorf("captcha solve error: %v", solveErr)
+                                break
+                            }
 
-                        if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
-                            captchaErr.CaptchaAttempt = "1"
-                        }
+                            if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
+                                captchaErr.CaptchaAttempt = "1"
+                            }
 
-                        data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
-                            "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
-                            "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
-                            link, escapedName, captchaErr.CaptchaSid, successToken,
-                            captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
-                        continue
+                            data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
+                                "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
+                                "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
+                                link, escapedName, captchaErr.CaptchaSid, successToken,
+                                captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+                            continue
+                        }
                     }
                 }
                 err = fmt.Errorf("VK API error: %v", errObj)
@@ -773,7 +812,7 @@ func poolCreds(f getCredsFunc, poolSize int) getCredsFunc {
 }
 
 //export StartProxy
-func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int) {
+func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, cManualCaptcha C.int) {
     select { case <-proxyReady: default: }
 
     link := C.GoString(cLink)
@@ -784,6 +823,10 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int) 
     port := "19302"
     n := int(cN)
     udp := true
+    manualCaptchaOnly.Store(cManualCaptcha != 0)
+    if manualCaptchaOnly.Load() {
+        log.Printf("Manual captcha mode is enabled (auto-solver disabled)")
+    }
 
     ctx, cancel := context.WithCancel(context.Background())
     proxyCancel = cancel

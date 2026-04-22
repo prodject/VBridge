@@ -40,7 +40,8 @@ struct VBridge: App {
                 "vkLink": vkLink,
                 "peerAddr": peerAddr,
                 "listenAddr": listenAddr,
-                "nValue": nValue
+                "nValue": nValue,
+                "manualCaptcha": UserDefaults.standard.bool(forKey: "manualCaptcha")
             ]
 
             let defaults = UserDefaults.standard
@@ -56,7 +57,8 @@ struct VBridge: App {
             protocolConfiguration.excludeCellularServices = excludeCellular
             protocolConfiguration.excludeLocalNetworks = excludeLAN
 
-            SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular)")
+            let manualCaptcha = UserDefaults.standard.bool(forKey: "manualCaptcha")
+            SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular), ManualCaptcha=\(manualCaptcha)")
 
             tunnelManager.protocolConfiguration = protocolConfiguration
             tunnelManager.isEnabled = true

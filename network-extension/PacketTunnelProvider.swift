@@ -103,15 +103,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         let nValue = Int32(nValueInt)
+        let manualCaptcha = (providerConfiguration["manualCaptcha"] as? Bool) ?? false
 
-        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue)", source: .tunnel)
+        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), ManualCaptcha: \(manualCaptcha)", source: .tunnel)
         SharedLogger.info("Starting TURN proxy...", source: .tunnel)
 
         ProxySetLogger(nil, goProxyCLoggerCallback)
         ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
 
         DispatchQueue.global(qos: .userInteractive).async {
-            StartProxy(vkLink, peerAddr, listenAddr, nValue)
+            StartProxy(vkLink, peerAddr, listenAddr, nValue, manualCaptcha ? 1 : 0)
         }
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in

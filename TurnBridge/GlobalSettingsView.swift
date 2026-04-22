@@ -4,6 +4,7 @@ struct GlobalSettingsView: View {
     @AppStorage("excludeAPNs") private var excludeAPNs = false
     @AppStorage("excludeCellularServices") private var excludeCellularServices = false
     @AppStorage("excludeLocalNetworks") private var excludeLocalNetworks = true
+    @AppStorage("manualCaptcha") private var manualCaptcha = false
 
     var body: some View {
         Form {
@@ -46,6 +47,17 @@ struct GlobalSettingsView: View {
                     VStack(alignment: .leading) {
                         Text("Bypass Cellular")
                         Text("Exclude calls, SMS, and voicemail from the tunnel")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section(header: Text("Captcha")) {
+                Toggle(isOn: $manualCaptcha) {
+                    VStack(alignment: .leading) {
+                        Text("Manual Captcha")
+                        Text("Disable automatic captcha solving and require manual solving flow")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
