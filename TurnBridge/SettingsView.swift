@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @ObservedObject var store: ProfileStore
@@ -15,6 +16,7 @@ struct SettingsView: View {
     @State private var showQRScanner = false
     @State private var showScannerError = false
     @State private var scannerErrorMessage = ""
+    @State private var showLinkGeneratedAlert = false
 
     private var profile: VPNProfile {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
@@ -53,6 +55,15 @@ struct SettingsView: View {
             }
 
             Section(header: Text("Transfer")) {
+                Button(action: generateQuickImportLink) {
+                    HStack {
+                        Spacer()
+                        Label("Generate Link", systemImage: "link.badge.plus")
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
                 Button(action: exportProfile) {
                     HStack {
                         Spacer()
@@ -117,6 +128,11 @@ struct SettingsView: View {
         } message: {
             Text(scannerErrorMessage)
         }
+        .alert("Link Copied", isPresented: $showLinkGeneratedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("vbridge link copied to clipboard.")
+        }
         .fileExporter(
             isPresented: $showExporter,
             document: exportDocument,
@@ -167,6 +183,30 @@ struct SettingsView: View {
             return trimmed.replacingOccurrences(of: "\\n", with: "\n")
         }
         return trimmed
+    }
+
+    private func generateQuickImportLink() {
+        let payload: [String: Any] = [
+            "name": profile.name,
+            "turn": profile.vkLink,
+            "peer": profile.peerAddr,
+            "listen": profile.listenAddr,
+            "n": profile.nValue,
+            "wg": profile.wgQuickConfig
+        ]
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let json = String(data: jsonData, encoding: .utf8) else {
+            exportErrorMessage = "Failed to generate quick link."
+            showExportError = true
+            return
+        }
+
+        let base64 = Data(json.utf8).base64EncodedString()
+        let link = "vbridge://\(base64)"
+        UIPasteboard.general.string = link
+        showLinkGeneratedAlert = true
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {
