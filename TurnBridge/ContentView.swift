@@ -214,7 +214,7 @@ struct ContentView: View {
             }
             .fileImporter(
                 isPresented: $showProfileImporter,
-                allowedContentTypes: [.vbridgeProfile, .json, .data],
+                allowedContentTypes: [.item],
                 allowsMultipleSelection: false
             ) { result in
                 switch result {
@@ -483,6 +483,12 @@ struct ContentView: View {
         }
 
         do {
+            let ext = url.pathExtension.lowercased()
+            guard ext.isEmpty || ext == "vbridge" || ext == "json" else {
+                showAlert(title: "Import Error", message: "Unsupported file type: .\(ext)")
+                return
+            }
+
             let data = try Data(contentsOf: url)
             let package = try VBridgeProfilePackage.decode(from: data)
             let imported = package.profile
