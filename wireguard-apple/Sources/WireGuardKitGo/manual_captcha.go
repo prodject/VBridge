@@ -15,6 +15,7 @@ import (
 	neturl "net/url"
 	"os/exec"
 	"runtime"
+	"sync"
 	"strings"
 	"time"
 
@@ -259,6 +260,80 @@ func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
+	var (
+		imageOnce        sync.Once
+		cachedImageBytes []byte
+		cachedImageType  string
+		cachedImageErr   error
+	)
+
+	fetchImage := func() {
+		profile := getRandomProfile()
+		client := &http.Client{
+			Timeout: 20 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     30 * time.Second,
+			},
+		}
+		defer client.CloseIdleConnections()
+
+		req, err := http.NewRequest("GET", captchaImg, nil)
+		if err != nil {
+			cachedImageErr = fmt.Errorf("build captcha image request: %w", err)
+			return
+		}
+		applyBrowserProfile(req, profile)
+		req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+		req.Header.Set("Referer", "https://id.vk.ru/")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Sec-Fetch-Mode", "no-cors")
+		req.Header.Set("Sec-Fetch-Dest", "image")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			cachedImageErr = fmt.Errorf("download captcha image: %w", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			cachedImageErr = fmt.Errorf("captcha image bad status: %d", resp.StatusCode)
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			cachedImageErr = fmt.Errorf("read captcha image: %w", err)
+			return
+		}
+		if len(body) == 0 {
+			cachedImageErr = fmt.Errorf("captcha image is empty")
+			return
+		}
+
+		cachedImageBytes = body
+		cachedImageType = resp.Header.Get("Content-Type")
+		if cachedImageType == "" {
+			cachedImageType = "image/jpeg"
+		}
+		log.Printf("[Captcha Image] fetched captcha image (%d bytes, %s)", len(cachedImageBytes), cachedImageType)
+	}
+
+	mux.HandleFunc("/captcha-image", func(w http.ResponseWriter, r *http.Request) {
+		imageOnce.Do(fetchImage)
+		if cachedImageErr != nil {
+			log.Printf("[Captcha Image] failed: %v", cachedImageErr)
+			http.Error(w, "Failed to load captcha image", http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", cachedImageType)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(cachedImageBytes)
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
@@ -270,11 +345,11 @@ input{font-size:24px;padding:12px;width:80%%;box-sizing:border-box}
 button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 </head><body>
 <h2>Solve the Captcha</h2>
-<img src="%s" alt="captcha"/>
+<img src="/captcha-image" alt="captcha"/>
 <form onsubmit="fetch('/solve?key='+encodeURIComponent(document.getElementById('k').value)).then(()=>{document.body.innerHTML='<h2>Done!</h2>';setTimeout(function(){window.close();}, 300);});return false;">
 <br><input id="k" type="text" autofocus placeholder="Text from image"/>
 <br><button type="submit">Submit</button>
-</form></body></html>`, captchaImg)
+</form></body></html>`)
 	})
 
 	mux.HandleFunc("/solve", func(w http.ResponseWriter, r *http.Request) {
