@@ -3,6 +3,8 @@ import Foundation
 struct UpdateInfo: Equatable {
     let latestVersion: String
     let releaseURL: URL
+    let ipaURL: URL
+    let ipaFileName: String
 }
 
 enum UpdateChecker {
@@ -34,27 +36,36 @@ enum UpdateChecker {
             guard let latest = latestRelease(from: releases) else { return nil }
             guard latest.version > current else { return nil }
 
-            return UpdateInfo(latestVersion: latest.version.display, releaseURL: latest.url)
+            return UpdateInfo(
+                latestVersion: latest.version.display,
+                releaseURL: latest.url,
+                ipaURL: latest.ipa.url,
+                ipaFileName: latest.ipa.name
+            )
         } catch {
             SharedLogger.warning("[Update] Check failed: \(error.localizedDescription)")
             return nil
         }
     }
 
-    private static func latestRelease(from releases: [GitHubRelease]) -> (version: Version, url: URL)? {
-        var best: (version: Version, url: URL)?
+    private static func latestRelease(from releases: [GitHubRelease]) -> (version: Version, url: URL, ipa: GitHubAsset)? {
+        var best: (version: Version, url: URL, ipa: GitHubAsset)?
 
         for release in releases where !release.draft {
             guard let url = URL(string: release.htmlURL) else { continue }
             let candidates = [release.tagName, release.name ?? ""]
             guard let version = candidates.compactMap(parseVersion).max() else { continue }
+            guard let ipa = release.assets.first(where: { $0.name.lowercased().hasSuffix(".ipa") }),
+                  URL(string: ipa.browserDownloadURL) != nil else {
+                continue
+            }
 
             if let existing = best {
                 if version > existing.version {
-                    best = (version, url)
+                    best = (version, url, ipa)
                 }
             } else {
-                best = (version, url)
+                best = (version, url, ipa)
             }
         }
 
@@ -81,12 +92,25 @@ private struct GitHubRelease: Decodable {
     let name: String?
     let draft: Bool
     let htmlURL: String
+    let assets: [GitHubAsset]
 
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case name
         case draft
         case htmlURL = "html_url"
+        case assets
+    }
+}
+
+private struct GitHubAsset: Decodable, Equatable {
+    let name: String
+    let browserDownloadURL: String
+    var url: URL { URL(string: browserDownloadURL)! }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadURL = "browser_download_url"
     }
 }
 

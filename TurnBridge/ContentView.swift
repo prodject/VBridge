@@ -10,7 +10,6 @@ struct SettingsSheet: Identifiable {
 struct ContentView: View {
     var app: VBridge
 
-    @Environment(\.openURL) private var openURL
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
 
     @State private var vpnStatus: NEVPNStatus = .disconnected
@@ -23,9 +22,8 @@ struct ContentView: View {
     @State private var connectWatchdogTask: Task<Void, Never>?
     @State private var settingsSheet: SettingsSheet?
     @StateObject private var captchaBridge = CaptchaBridge()
-    @State private var updateInfo: UpdateInfo?
-    @State private var showUpdateDialog = false
     @State private var didCheckForUpdates = false
+    @State private var isDownloadingUpdate = false
 
     var body: some View {
         NavigationStack {
@@ -165,19 +163,6 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(alertMessage)
-            }
-            .confirmationDialog(
-                "Update Available",
-                isPresented: $showUpdateDialog,
-                titleVisibility: .visible
-            ) {
-                Button("Download") {
-                    guard let url = updateInfo?.releaseURL else { return }
-                    openURL(url)
-                }
-                Button("Later", role: .cancel) { }
-            } message: {
-                Text("A newer version (\(updateInfo?.latestVersion ?? "?")) is available on GitHub Releases.")
             }
         }
     }
@@ -444,18 +429,50 @@ struct ContentView: View {
 
     private func checkForUpdatesIfNeeded() {
         guard autoUpdateEnabled else { return }
+        guard !isDownloadingUpdate else { return }
 
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
         Task {
             if let info = await UpdateChecker.checkForUpdate(currentVersion: currentVersion) {
-                await MainActor.run {
-                    updateInfo = info
-                    showUpdateDialog = true
-                }
                 SharedLogger.info("[Update] New version available: \(info.latestVersion)")
+                await downloadUpdate(info)
             } else {
                 SharedLogger.debug("[Update] No update available")
             }
+        }
+    }
+
+    @MainActor
+    private func downloadUpdate(_ info: UpdateInfo) async {
+        guard !isDownloadingUpdate else { return }
+        isDownloadingUpdate = true
+        defer { isDownloadingUpdate = false }
+
+        SharedLogger.info("[Update] Downloading IPA: \(info.ipaURL.absoluteString)")
+        do {
+            let (temporaryURL, response) = try await URLSession.shared.download(from: info.ipaURL)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                showAlert(title: "Update Error", message: "Failed to download update IPA.")
+                return
+            }
+
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let fileName = info.ipaFileName.isEmpty ? "VBridge-\(info.latestVersion).ipa" : info.ipaFileName
+            let destination = docs.appendingPathComponent(fileName)
+
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.moveItem(at: temporaryURL, to: destination)
+
+            SharedLogger.info("[Update] IPA saved to: \(destination.path)")
+            showAlert(
+                title: "Update Downloaded",
+                message: "IPA downloaded to Files: \(fileName)"
+            )
+        } catch {
+            SharedLogger.error("[Update] IPA download failed: \(error.localizedDescription)")
+            showAlert(title: "Update Error", message: "Download failed: \(error.localizedDescription)")
         }
     }
 }
