@@ -24,6 +24,7 @@ struct ContentView: View {
     @StateObject private var captchaBridge = CaptchaBridge()
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
+    @State private var isCheckingUpdate = false
 
     var body: some View {
         NavigationStack {
@@ -82,6 +83,27 @@ struct ContentView: View {
                             .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
                             .scaleEffect(vpnStatus == .connecting ? 1.08 : 1.0)
                             .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
+
+                        Button(action: {
+                            Task { await checkForUpdates(manual: true) }
+                        }) {
+                            HStack(spacing: 8) {
+                                if isCheckingUpdate || isDownloadingUpdate {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .tint(.blue)
+                                        .scaleEffect(0.8)
+                                }
+                                Text(isDownloadingUpdate ? "Downloading update..." : (isCheckingUpdate ? "Checking..." : "Check update"))
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.blue.opacity(0.12))
+                            .foregroundColor(.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .disabled(isCheckingUpdate || isDownloadingUpdate)
 
                         Button(action: toggleTunnel) {
                             Text(buttonText)
@@ -159,7 +181,7 @@ struct ContentView: View {
             .onAppear {
                 if !didCheckForUpdates {
                     didCheckForUpdates = true
-                    checkForUpdatesIfNeeded()
+                    Task { await checkForUpdates(manual: false) }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { notification in
@@ -451,17 +473,26 @@ struct ContentView: View {
         connectWatchdogTask = nil
     }
 
-    private func checkForUpdatesIfNeeded() {
-        guard autoUpdateEnabled else { return }
+    private func checkForUpdates(manual: Bool) async {
+        if !manual {
+            guard autoUpdateEnabled else { return }
+        }
         guard !isDownloadingUpdate else { return }
+        guard !isCheckingUpdate else { return }
+
+        await MainActor.run { isCheckingUpdate = true }
+        defer { Task { @MainActor in isCheckingUpdate = false } }
 
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
-        Task {
-            if let info = await UpdateChecker.checkForUpdate(currentVersion: currentVersion) {
-                SharedLogger.info("[Update] New version available: \(info.latestVersion)")
-                await downloadUpdate(info)
-            } else {
-                SharedLogger.debug("[Update] No update available")
+        if let info = await UpdateChecker.checkForUpdate(currentVersion: currentVersion) {
+            SharedLogger.info("[Update] New version available: \(info.latestVersion)")
+            await downloadUpdate(info)
+        } else {
+            SharedLogger.debug("[Update] No update available")
+            if manual {
+                await MainActor.run {
+                    showAlert(title: "No Updates", message: "You already have the latest version.")
+                }
             }
         }
     }
