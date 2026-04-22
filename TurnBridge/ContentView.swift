@@ -27,60 +27,84 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack {
-                VStack(spacing: 4) {
-                    Text("VBridge")
-                        .font(.system(size: 46, weight: .heavy, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.blue, .cyan],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.blue.opacity(0.18),
+                        Color.cyan.opacity(0.08),
+                        Color.mint.opacity(0.08)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 20) {
+                    VStack(spacing: 4) {
+                        Text("VBridge")
+                            .font(.system(size: 44, weight: .black, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.blue, .cyan, .mint],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .shadow(color: .blue.opacity(0.3), radius: 10, x: 0, y: 5)
+                            .shadow(color: .blue.opacity(0.25), radius: 10, x: 0, y: 5)
 
-                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 30)
-
-                if !store.profiles.isEmpty {
-                    profilePicker
-                        .padding(.top, 12)
-                        .padding(.horizontal, 40)
-                        .disabled(vpnStatus != .disconnected)
-                }
-
-                Spacer()
-
-                VStack(spacing: 50) {
-                    Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 120, height: 120)
-                        .foregroundColor(iconColor)
-                        .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
-                        .scaleEffect(vpnStatus == .connecting ? 1.1 : 1.0)
-                        .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
-
-                    Button(action: toggleTunnel) {
-                        Text(buttonText)
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                            .background(buttonColor)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
-                            .shadow(color: buttonColor.opacity(0.4), radius: 8, x: 0, y: 4)
+                        Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
                     }
-                    .disabled(isConnectButtonDisabled)
-                    .padding(.horizontal, 40)
-                }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 16)
 
-                Spacer()
+                    if !store.profiles.isEmpty {
+                        profilePicker
+                            .disabled(vpnStatus != .disconnected)
+                            .padding(16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                            .padding(.horizontal, 20)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    VStack(spacing: 22) {
+                        Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 112, height: 112)
+                            .foregroundColor(iconColor)
+                            .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
+                            .scaleEffect(vpnStatus == .connecting ? 1.08 : 1.0)
+                            .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
+
+                        Button(action: toggleTunnel) {
+                            Text(buttonText)
+                                .font(.title3.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(buttonColor)
+                                .foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .shadow(color: buttonColor.opacity(0.35), radius: 8, x: 0, y: 5)
+                        }
+                        .disabled(isConnectButtonDisabled)
+                    }
+                    .padding(24)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 20)
+
+                    Spacer()
+                }
             }
             .overlay {
                 if showImportModal {

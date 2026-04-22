@@ -6,6 +6,7 @@ struct GlobalSettingsView: View {
     @AppStorage("excludeLocalNetworks") private var excludeLocalNetworks = true
     @AppStorage("manualCaptcha") private var manualCaptcha = false
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
+    @AppStorage("appTheme") private var appTheme = "system"
 
     var body: some View {
         Form {
@@ -74,6 +75,15 @@ struct GlobalSettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+            }
+
+            Section(header: Text("Appearance")) {
+                Picker("Theme", selection: $appTheme) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
             }
         }
         .navigationTitle("Settings")
