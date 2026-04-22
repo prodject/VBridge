@@ -154,7 +154,7 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
 			// Keep parity with working vk-turn-proxy clients:
 			// prefer proxy-mode manual captcha when redirect_uri is available.
 			log.Printf("[Captcha] Falling back to manual proxy solver...")
-			if token, manualErr := solveCaptchaViaProxy(ctx, captchaErr.RedirectUri); manualErr == nil && token != "" {
+			if token, manualErr := solveCaptchaViaProxy(captchaErr.RedirectUri); manualErr == nil && token != "" {
 				return token, nil
 			} else if manualErr != nil {
 				log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
@@ -163,7 +163,7 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
 
 		if captchaErr.CaptchaImg != "" {
 			log.Printf("[Captcha] Falling back to manual image solver...")
-			if token, manualErr := solveCaptchaViaHTTP(ctx, captchaErr.CaptchaImg); manualErr == nil && token != "" {
+			if token, manualErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg); manualErr == nil && token != "" {
 				return token, nil
 			} else if manualErr != nil {
 				log.Printf("[Captcha] Manual image solver failed: %v", manualErr)

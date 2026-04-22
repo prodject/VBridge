@@ -374,7 +374,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 	return fmt.Errorf("captcha listeners failed: %s", strings.Join(listenErrs, "; "))
 }
 
-func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string, mode string) (string, error) {
+func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string, mode string) (string, error) {
 	srv := &http.Server{Handler: handler}
 
 	if err := startCaptchaServer(srv, logPrefix); err != nil {
@@ -400,11 +400,11 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 			return "", err
 		}
 		return key, nil
-	case <-ctx.Done():
+	case <-time.After(60 * time.Second):
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-		return "", ctx.Err()
+		return "", fmt.Errorf("manual captcha timed out after 60s")
 	}
 }
 
@@ -418,10 +418,7 @@ func notifyKey(keyCh chan<- string, key string) {
 	}
 }
 
-func solveCaptchaViaHTTP(ctx context.Context, captchaImg string) (string, error) {
-	manualCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
+func solveCaptchaViaHTTP(captchaImg string) (string, error) {
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
@@ -449,27 +446,21 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Done!</h2></body></html>`)
 	})
 
-	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error", "image")
+	return runCaptchaServerAndWait(mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error", "image")
 }
 
-func solveCaptchaViaProxy(ctx context.Context, redirectURI string) (string, error) {
-	manualCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
+func solveCaptchaViaProxy(redirectURI string) (string, error) {
 	keyCh := make(chan string, 1)
 
 	targetURL, err := neturl.Parse(redirectURI)
 	if err != nil {
 		return "", fmt.Errorf("invalid redirect URI: %v", err)
 	}
-	profile := getRandomProfile()
-
 	transport := newCaptchaProxyTransport()
 
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(req *httputil.ProxyRequest) {
-			applyBrowserProfile(req.Out, profile)
 			rewriteProxyRequest(req.Out, targetURL)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -573,7 +564,6 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string) (string, erro
 		genericReverse := &httputil.ReverseProxy{
 			Transport: transport,
 			Rewrite: func(req *httputil.ProxyRequest) {
-				applyBrowserProfile(req.Out, profile)
 				req.Out.URL.Path = targetParsed.Path
 				req.Out.URL.RawQuery = targetParsed.RawQuery
 				rewriteProxyRequest(req.Out, targetParsed)
@@ -590,7 +580,7 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string) (string, erro
 		proxy.ServeHTTP(w, r)
 	})
 
-	return runCaptchaServerAndWait(manualCtx, mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error", "proxy")
+	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error", "proxy")
 }
 
 func openBrowser(url string) {
