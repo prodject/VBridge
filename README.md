@@ -25,6 +25,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Multi-Profile Management:** Create, edit, and seamlessly switch between multiple VPN configurations using a convenient dropdown picker.
 
 ## 📸 Screenshot
+
 ![Main Screen](screen.png)
 
 ## 🚀 Installation & Build
@@ -34,28 +35,29 @@ To build and run VBridge locally, you need a macOS environment with Xcode instal
 > ⚠️ **Important:** VBridge uses a Network Extension (VPN). Signing with a **free Apple ID** (via standard AltStore or Sideloadly) **will not work** because free accounts lack the required VPN entitlements. You must use a paid Apple Developer account ($99/year) or a third-party paid signing service.
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/nullcstring/turnbridge.git
    cd VBridge
    ```
-
 2. **Build the Go Bridge:**
-Ensure you have Go installed (`brew install go`).
+   Ensure you have Go installed (`brew install go`).
 
 Modify the Go path in the script at script/build_wireguard_go_bridge.sh, according to your setup. Refer to [this Stack Overflow answer](https://stackoverflow.com/a/64212121) for guidance.
 
 3. **Open the project in Xcode:**
-Open the Xcode project (or `.xcworkspace` if applicable) in Xcode.
+   Open the Xcode project (or `.xcworkspace` if applicable) in Xcode.
 4. **Configure Code Signing:**
+
 * Select the `VBridge` project in the Project Navigator.
 * Go to the **Signing & Capabilities** tab.
 * Select your personal Apple Developer Team.
 * Ensure you update the Bundle Identifier (for both the main app and the `network-extension` target) to match your team provisioning profile.
 
 5. **Build and Run:**
-Select your target device (iPhone/iPad) and press `Cmd + R` to build and run the app.
+   Select your target device (iPhone/iPad) and press `Cmd + R` to build and run the app.
 
-## 📲 Install Pre-built IPA (No Xcode Required)
+## 📲 Install Pre-built IPA
 
 If you don't have a Mac or Xcode, you can download the pre-built unsigned IPA from the [Releases](https://github.com/nullcstring/turnbridge/releases) page and sign it yourself.
 
@@ -64,12 +66,11 @@ If you don't have a Mac or Xcode, you can download the pre-built unsigned IPA fr
 **Manual Installation Tools:**
 If you already possess a paid Apple Developer certificate (or bought one from the services above), you can sign and install the IPA yourself using:
 
-| Tool | Requirement |
-|------|-------------|
+| Tool                                 | Requirement                                                                                                                |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | [KravaSign](https://www.kravasign.com/) | ⚠️ Without a developer certificate, price $10 https://github.com/nullcstring/turnbridge/issues/2#issuecomment-4129716584 |
-| [GBox](https://gbox.run) | Paid Certificate Needed |
-| [ESign](https://esign.yyyue.xyz) | Paid Certificate Needed |
-
+| [GBox](https://gbox.run)                | Paid Certificate Needed                                                                                                    |
+| [ESign](https://esign.yyyue.xyz)        | Paid Certificate Needed                                                                                                    |
 
 ## 🛠 Usage (Configuration Import)
 
@@ -93,27 +94,24 @@ You can use the included `quick_link.py` script to easily generate valid `vbridg
 
 1. Open `quick_link.py` in your text editor and replace the placeholder values in the `config` dictionary with your actual server parameters and WireGuard keys.
 2. Run the script from your terminal:
+
    ```bash
    python3 quick_link.py
    ```
-
 3. Copy the generated `vbridge://...` link from the terminal output to your iOS clipboard.
 4. Open VBridge, tap the `+` icon, select **Paste from Clipboard**, and tap **Connect**.
 
-## ☕ Support My Work
-
-If VBridge saved you some time, consider supporting its development! As an independent open-source project, any contribution is greatly appreciated.
+## Support VBridge
 
 **Crypto:**
-* **TON:** `UQBisIcwzfQz5Rj0TofZhN2CSZXvUhQrwMmTGEiSSa9ErW5b`
 
-Thank you for keeping the open-source spirit alive! 🚀
+* **TON:** UQCwaqdfd_mAjc1GYvgYOI7CDDNXgOlTiZvRFI2SvjvfY8Tm
 
 ## License
 
 VBridge is released under the [GNU General Public License v3.0](LICENSE).
 
-Copyright (C) 2026 nullcstring
+Copyright (C) 2026 prodject
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -126,6 +124,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 
 ---
+
 ## Acknowledgements
 
 This project was made possible thanks to the work of the open-source community. It includes code and concepts from the following excellent repositories:
