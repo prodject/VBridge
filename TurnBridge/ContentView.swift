@@ -221,14 +221,6 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
-                    switch newStatus {
-                    case .connected:
-                        runtimeThreadCount = selectedProfileThreadCap
-                    case .disconnected:
-                        runtimeThreadCount = 1
-                    default:
-                        break
-                    }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
                     }
@@ -413,7 +405,8 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
-            runtimeThreadCount = selectedProfileThreadCap
+            let startingThreadCount = max(selectedProfileThreadCap, 4)
+            runtimeThreadCount = startingThreadCount
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -422,7 +415,7 @@ struct ContentView: View {
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
-                nValue: selectedProfileThreadCap,
+                nValue: startingThreadCount,
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
@@ -442,17 +435,8 @@ struct ContentView: View {
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
             if let manager = managers?.first {
                 self.vpnStatus = manager.connection.status
-                switch manager.connection.status {
-                case .connected:
-                    runtimeThreadCount = selectedProfileThreadCap
-                case .disconnected:
-                    runtimeThreadCount = 1
-                default:
-                    break
-                }
             } else {
                 self.vpnStatus = .disconnected
-                runtimeThreadCount = 1
             }
         }
     }
@@ -580,6 +564,11 @@ struct ContentView: View {
         let nextValue = min(runtimeThreadCountValue + 1, 32)
         guard nextValue > runtimeThreadCountValue else { return }
 
+        if var profile = store.selectedProfile {
+            profile.nValue = nextValue
+            store.selectedProfile = profile
+        }
+
         app.increaseTunnelThreads(by: 1) { isSuccess in
             DispatchQueue.main.async {
                 if isSuccess {
@@ -589,7 +578,7 @@ struct ContentView: View {
                     SharedLogger.error("Failed to increase runtime thread count")
                     showAlert(
                         title: "Speed Boost Failed",
-                        message: "The tunnel rejected the thread increase request."
+                        message: "The tunnel rejected the live increase request. Reconnect to apply \(nextValue) connections."
                     )
                 }
             }
