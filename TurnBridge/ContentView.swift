@@ -126,7 +126,7 @@ struct ContentView: View {
                         }
                         .disabled(isConnectButtonDisabled)
 
-                        if vpnStatus == .connected {
+                        if vpnStatus == .connected && runtimeThreadCountValue < selectedProfileThreadCap {
                             Button(action: improveSpeed) {
                                 Text("Improve speed")
                                     .font(.subheadline.weight(.semibold))
@@ -408,7 +408,7 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
-            runtimeThreadCount = 1
+            runtimeThreadCount = selectedProfileThreadCap
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -417,7 +417,7 @@ struct ContentView: View {
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
-                nValue: 1,
+                nValue: selectedProfileThreadCap,
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
