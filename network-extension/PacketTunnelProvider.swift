@@ -104,15 +104,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         let nValue = Int32(nValueInt)
         let manualCaptcha = (providerConfiguration["manualCaptcha"] as? Bool) ?? false
+        let turnHost = (providerConfiguration["turnHost"] as? String) ?? ""
+        let turnPort = (providerConfiguration["turnPort"] as? String) ?? ""
+        let useUdp = (providerConfiguration["useUdp"] as? Bool) ?? true
 
-        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), ManualCaptcha: \(manualCaptcha)", source: .tunnel)
+        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), ManualCaptcha: \(manualCaptcha), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
         SharedLogger.info("Starting TURN proxy...", source: .tunnel)
 
         ProxySetLogger(nil, goProxyCLoggerCallback)
         ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
 
         DispatchQueue.global(qos: .userInteractive).async {
-            StartProxy(vkLink, peerAddr, listenAddr, nValue, manualCaptcha ? 1 : 0)
+            StartProxy(vkLink, peerAddr, listenAddr, nValue, manualCaptcha ? 1 : 0, turnHost, turnPort, useUdp ? 1 : 0)
         }
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in

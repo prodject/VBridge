@@ -21,6 +21,8 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **WireGuard & Amnezia WG Integration:**
   - Complete WireGuard protocol support with key management, routing, and DNS configuration
   - Full Amnezia WireGuard obfuscation support including jitter parameters (Jc, Jmin, Jmax), packet size obfuscation (S1-S4), and magic headers (H1-H4)
+* **Advanced TURN Controls:** Optional UDP/TCP transport override and TURN host/port override for edge cases and alternate TURN endpoints.
+* **Multi-Threaded Proxy:** Default multi-connection mode is tuned for higher throughput, with per-profile control for stability.
 * **1-Click Import:** Quickly import complex configurations via base64-encoded clipboard links (`vbridge://`).
 * **Multi-Profile Management:** Create, edit, and seamlessly switch between multiple VPN configurations using a convenient dropdown picker.
 
@@ -83,7 +85,10 @@ VBridge uses a specific JSON structure encoded in Base64 for fast configuration 
   "turn": "https://vk.com/call/join/...",
   "peer": "SERVER_IP:PORT",
   "listen": "127.0.0.1:9000",
-  "n": 1,
+  "n": 16,
+  "turnHost": "",
+  "turnPort": "",
+  "udp": true,
   "wg": "[Interface]\nPrivateKey = ...\nAddress = 10.100.0.2/32\nDNS = 8.8.8.8\nMTU = 1280\n\n[Peer]\nPublicKey = ...\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9000\nPersistentKeepalive = 25"
 }
 ```

@@ -75,6 +75,10 @@ class ProfileStore: ObservableObject {
 
     private func migrateFromLegacy() {
         let defaults = UserDefaults.standard
+        let legacyNValue: Int = {
+            guard defaults.object(forKey: "nValue") != nil else { return 16 }
+            return max(defaults.integer(forKey: "nValue"), 1)
+        }()
         guard let vkLink = defaults.string(forKey: "vkLink"),
               !vkLink.contains("YOUR_INVITE_LINK") else { return }
 
@@ -83,14 +87,17 @@ class ProfileStore: ObservableObject {
             vkLink: vkLink,
             peerAddr: defaults.string(forKey: "peerAddr") ?? "",
             listenAddr: defaults.string(forKey: "listenAddr") ?? "127.0.0.1:9000",
-            nValue: max(defaults.integer(forKey: "nValue"), 1),
-            wgQuickConfig: defaults.string(forKey: "wgQuickConfig") ?? ""
+            nValue: legacyNValue,
+            wgQuickConfig: defaults.string(forKey: "wgQuickConfig") ?? "",
+            turnHost: defaults.string(forKey: "turnHost") ?? "",
+            turnPort: defaults.string(forKey: "turnPort") ?? "",
+            useUdp: defaults.object(forKey: "useUdp") as? Bool ?? true
         )
         profiles = [profile]
         selectedProfileID = profile.id
         save()
 
-        for key in ["vkLink", "peerAddr", "listenAddr", "nValue", "wgQuickConfig"] {
+        for key in ["vkLink", "peerAddr", "listenAddr", "nValue", "wgQuickConfig", "turnHost", "turnPort", "useUdp"] {
             defaults.removeObject(forKey: key)
         }
     }

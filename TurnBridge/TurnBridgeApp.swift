@@ -27,7 +27,17 @@ struct VBridge: App {
         }
     }
     
-    func turnOnTunnel(vkLink: String, peerAddr: String, listenAddr: String, nValue: Int, wgQuickConfig: String, completionHandler: @escaping (Bool) -> Void) {
+    func turnOnTunnel(
+        vkLink: String,
+        peerAddr: String,
+        listenAddr: String,
+        nValue: Int,
+        wgQuickConfig: String,
+        turnHost: String,
+        turnPort: String,
+        useUdp: Bool,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
         SharedLogger.info("Connecting... peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
 
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
@@ -55,7 +65,10 @@ struct VBridge: App {
                 "peerAddr": peerAddr,
                 "listenAddr": listenAddr,
                 "nValue": nValue,
-                "manualCaptcha": UserDefaults.standard.bool(forKey: "manualCaptcha")
+                "manualCaptcha": UserDefaults.standard.bool(forKey: "manualCaptcha"),
+                "turnHost": turnHost,
+                "turnPort": turnPort,
+                "useUdp": useUdp
             ]
 
             let defaults = UserDefaults.standard

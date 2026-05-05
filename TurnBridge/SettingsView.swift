@@ -41,7 +41,10 @@ struct SettingsView: View {
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
 
-                Stepper("Connections (n): \(profile.nValue)", value: binding(\.nValue), in: 1...16)
+                Stepper("Connections (n): \(profile.nValue)", value: binding(\.nValue), in: 1...32)
+                Text("Higher values increase parallel TURN sessions. 16 is a good default for VK; lower values are usually more stable.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section(header: Text("WireGuard Config")) {
@@ -50,6 +53,30 @@ struct SettingsView: View {
                     .frame(minHeight: 150)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
+            }
+
+            Section(header: Text("Advanced Proxy")) {
+                Toggle(isOn: binding(\.useUdp)) {
+                    VStack(alignment: .leading) {
+                        Text("Use UDP")
+                        Text("Prefer UDP for TURN transport. Disable this to force TCP.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                TextField("TURN Host Override", text: binding(\.turnHost))
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+
+                TextField("TURN Port Override", text: binding(\.turnPort))
+                    .keyboardType(.numberPad)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+
+                Text("Leave host and port empty to use the server suggested by the invite link.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section(header: Text("Transfer")) {
@@ -164,7 +191,10 @@ struct SettingsView: View {
             "peer": profile.peerAddr,
             "listen": profile.listenAddr,
             "n": profile.nValue,
-            "wg": profile.wgQuickConfig
+            "wg": profile.wgQuickConfig,
+            "turnHost": profile.turnHost,
+            "turnPort": profile.turnPort,
+            "udp": profile.useUdp
         ]
 
         guard JSONSerialization.isValidJSONObject(payload),

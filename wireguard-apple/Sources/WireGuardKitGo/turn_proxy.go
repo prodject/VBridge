@@ -52,6 +52,8 @@ var proxyCaptchaFunc C.proxy_captcha_fn_t
 var proxyCaptchaCtx unsafe.Pointer
 var proxyCancel context.CancelFunc
 var manualCaptchaOnly atomic.Bool
+var proxyStateMu sync.Mutex
+var proxyDone chan struct{}
 
 //export ProxySetLogger
 func ProxySetLogger(context unsafe.Pointer, loggerFn C.proxy_logger_fn_t) {
@@ -69,8 +71,29 @@ var proxyReady = make(chan struct{}, 1)
 
 //export ProxyWaitReady
 func ProxyWaitReady(timeoutMs C.int) C.int {
+    proxyStateMu.Lock()
+    done := proxyDone
+    proxyStateMu.Unlock()
+
+    if done != nil {
+        select {
+        case <-done:
+            return 0
+        default:
+        }
+    }
+
     select {
+    case <-done:
+        return 0
     case <-proxyReady:
+        if done != nil {
+            select {
+            case <-done:
+                return 0
+            default:
+            }
+        }
         return 1
     case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
         return 0
@@ -812,20 +835,34 @@ func poolCreds(f getCredsFunc, poolSize int) getCredsFunc {
 }
 
 //export StartProxy
-func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, cManualCaptcha C.int) {
+func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, cManualCaptcha C.int, cTurnHost *C.char, cTurnPort *C.char, cUseUdp C.int) {
     select { case <-proxyReady: default: }
+    proxyStateMu.Lock()
+    proxyDone = make(chan struct{})
+    proxyStateMu.Unlock()
 
     link := C.GoString(cLink)
     peerAddrStr := C.GoString(cPeerAddr)
     localAddrStr := C.GoString(cLocalAddr)
+    turnHost := C.GoString(cTurnHost)
+    turnPort := C.GoString(cTurnPort)
     
-    host := ""
-    port := "19302"
+    host := turnHost
+    port := turnPort
+    if port == "" {
+        port = "19302"
+    }
     n := int(cN)
-    udp := true
+    if n < 1 {
+        n = 16
+    }
+    udp := cUseUdp != 0
     manualCaptchaOnly.Store(cManualCaptcha != 0)
     if manualCaptchaOnly.Load() {
         log.Printf("Manual captcha mode is enabled (auto-solver disabled)")
+    }
+    if host != "" || turnPort != "" || !udp {
+        log.Printf("TURN override active: host=%q port=%q udp=%v", host, port, udp)
     }
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -910,6 +947,14 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
 
 //export StopProxy
 func StopProxy() {
+    proxyStateMu.Lock()
+    done := proxyDone
+    proxyDone = nil
+    proxyStateMu.Unlock()
+
+    if done != nil {
+        close(done)
+    }
     if proxyCancel != nil {
         proxyCancel()
         proxyCancel = nil

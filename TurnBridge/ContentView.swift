@@ -28,6 +28,8 @@ struct ContentView: View {
     @State private var isDownloadingUpdate = false
     @State private var isCheckingUpdate = false
 
+    private let connectWatchdogTimeout: UInt64 = 180
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -379,7 +381,10 @@ struct ContentView: View {
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
                 nValue: profile.nValue,
-                wgQuickConfig: profile.wgQuickConfig
+                wgQuickConfig: profile.wgQuickConfig,
+                turnHost: profile.turnHost,
+                turnPort: profile.turnPort,
+                useUdp: profile.useUdp
             ) { isSuccess in
                 if !isSuccess {
                     cancelConnectWatchdog()
@@ -419,8 +424,11 @@ struct ContentView: View {
                 vkLink: config.turn,
                 peerAddr: config.peer,
                 listenAddr: config.listen,
-                nValue: config.n,
-                wgQuickConfig: config.wg
+                nValue: config.n > 0 ? config.n : 16,
+                wgQuickConfig: config.wg,
+                turnHost: config.turnHost ?? "",
+                turnPort: config.turnPort ?? "",
+                useUdp: config.udp ?? true
             )
             store.addProfile(profile)
             SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from clipboard")
@@ -457,7 +465,7 @@ struct ContentView: View {
     private func startConnectWatchdog() {
         cancelConnectWatchdog()
         connectWatchdogTask = Task {
-            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            try? await Task.sleep(nanoseconds: connectWatchdogTimeout * 1_000_000_000)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard vpnStatus == .connecting else { return }
@@ -467,7 +475,7 @@ struct ContentView: View {
                 vpnStatus = .disconnected
                 showAlert(
                     title: "Connection Timeout",
-                    message: "Tunnel startup timed out (45s). Check Logs and Captcha flow, then try again."
+                    message: "Tunnel startup timed out (\(connectWatchdogTimeout)s). Check Logs and Captcha flow, then try again."
                 )
             }
         }

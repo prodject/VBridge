@@ -6,7 +6,10 @@ config = {
     "turn": "https://vk.com/call/join/YOUR_INVITE_LINK",
     "peer": "YOUR_SERVER_IP:PORT",
     "listen": "127.0.0.1:9000",
-    "n": 1,
+    "n": 16,
+    "turnHost": "",
+    "turnPort": "",
+    "udp": True,
     "wg": """[Interface]
 PrivateKey = YOUR_CLIENT_PRIVATE_KEY
 Address = 10.100.0.2/32
