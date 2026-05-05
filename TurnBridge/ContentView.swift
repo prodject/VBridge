@@ -13,6 +13,7 @@ struct ContentView: View {
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
+    @AppStorage("runtimeThreadCount") private var runtimeThreadCount = 1
 
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
@@ -59,6 +60,10 @@ struct ContentView: View {
 
                         Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
+
+                        Text(threadCountText)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -120,6 +125,16 @@ struct ContentView: View {
                                 .shadow(color: buttonColor.opacity(0.35), radius: 8, x: 0, y: 5)
                         }
                         .disabled(isConnectButtonDisabled)
+
+                        Button(action: improveSpeed) {
+                            Text("Improve speed")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.green.opacity(0.14))
+                                .foregroundColor(.green)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
                     }
                     .padding(24)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
@@ -341,6 +356,18 @@ struct ContentView: View {
         }
     }
 
+    private var runtimeThreadCountValue: Int {
+        max(runtimeThreadCount, 1)
+    }
+
+    private var selectedProfileThreadCap: Int {
+        max(store.selectedProfile?.nValue ?? runtimeThreadCountValue, 1)
+    }
+
+    private var threadCountText: String {
+        "\(runtimeThreadCountValue)/\(selectedProfileThreadCap)"
+    }
+
     private func validateConfig(_ profile: VPNProfile) -> String? {
         if profile.vkLink.isEmpty {
             return "Please provide a valid TURN Server URL."
@@ -380,7 +407,7 @@ struct ContentView: View {
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
-                nValue: profile.nValue,
+                nValue: runtimeThreadCountValue,
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
@@ -521,6 +548,12 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func improveSpeed() {
+        let nextValue = min(runtimeThreadCountValue + 1, 32)
+        runtimeThreadCount = nextValue
+        SharedLogger.info("Runtime thread count increased to \(nextValue)")
     }
 
     @MainActor

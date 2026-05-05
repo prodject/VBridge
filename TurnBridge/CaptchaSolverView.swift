@@ -13,6 +13,7 @@ struct CaptchaSolverView: View {
     @State private var isSubmittingToken = false
     @State private var safariTarget: SafariTarget?
     @State private var linkStatus: String?
+    @AppStorage("showCaptchaFallbackURL") private var showCaptchaFallbackURL = false
 
     private var captchaURL: URL? { URL(string: request.url) }
     private var directURL: URL? {
@@ -51,34 +52,41 @@ struct CaptchaSolverView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
 
-                Text(request.url)
-                    .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-
-                if let captchaURL {
-                    Button("Open in Browser") {
-                        openInAppSafari(captchaURL)
-                    }
-                    .font(.footnote.weight(.semibold))
-                }
-
-                if let directURL {
-                    Text(directURL.absoluteString)
+                if showCaptchaFallbackURL {
+                    Text(request.url)
                         .font(.footnote.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
-                    Button("Open Direct Link") {
-                        openInAppSafari(directURL)
+
+                    if let captchaURL {
+                        Button("Open in Browser") {
+                            openInAppSafari(captchaURL)
+                        }
+                        .font(.footnote.weight(.semibold))
+                    }
+
+                    if let directURL {
+                        Text(directURL.absoluteString)
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                        Button("Open Direct Link") {
+                            openInAppSafari(directURL)
+                        }
+                        .font(.footnote.weight(.semibold))
+                        Button("Copy Direct Link") {
+                            UIPasteboard.general.string = directURL.absoluteString
+                            linkStatus = "Direct link copied to clipboard."
+                        }
+                        .font(.footnote)
+                    }
+                } else if let captchaURL {
+                    Button("Open Captcha Page") {
+                        openInAppSafari(captchaURL)
                     }
                     .font(.footnote.weight(.semibold))
-                    Button("Copy Direct Link") {
-                        UIPasteboard.general.string = directURL.absoluteString
-                        linkStatus = "Direct link copied to clipboard."
-                    }
-                    .font(.footnote)
                 }
 
                 if request.mode == .proxy {

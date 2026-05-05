@@ -7,6 +7,7 @@ struct GlobalSettingsView: View {
     @AppStorage("excludeCellularServices") private var excludeCellularServices = false
     @AppStorage("excludeLocalNetworks") private var excludeLocalNetworks = true
     @AppStorage("manualCaptcha") private var manualCaptcha = false
+    @AppStorage("showCaptchaFallbackURL") private var showCaptchaFallbackURL = false
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("appTheme") private var appTheme = "system"
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
@@ -64,6 +65,15 @@ struct GlobalSettingsView: View {
                     VStack(alignment: .leading) {
                         Text("Manual Captcha")
                         Text("Disable automatic captcha solving and require manual solving flow")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle(isOn: $showCaptchaFallbackURL) {
+                    VStack(alignment: .leading) {
+                        Text("View Captcha fallback URL")
+                        Text("Show the raw fallback URL and direct link in the captcha screen.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
