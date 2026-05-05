@@ -67,6 +67,8 @@ type proxyRuntimeState struct {
     wg             *sync.WaitGroup
     readyChan      chan struct{}
     workerCount    atomic.Int32
+    increaseAckMu  sync.Mutex
+    increaseAck    chan error
 }
 
 //export ProxySetLogger
@@ -143,6 +145,36 @@ func getProxyRuntime() *proxyRuntimeState {
     proxyRuntimeMu.Lock()
     defer proxyRuntimeMu.Unlock()
     return proxyRuntime
+}
+
+func (rt *proxyRuntimeState) setIncreaseAck(ch chan error) {
+    rt.increaseAckMu.Lock()
+    rt.increaseAck = ch
+    rt.increaseAckMu.Unlock()
+}
+
+func (rt *proxyRuntimeState) deliverIncreaseAck(err error) {
+    rt.increaseAckMu.Lock()
+    ch := rt.increaseAck
+    rt.increaseAck = nil
+    rt.increaseAckMu.Unlock()
+
+    if ch == nil {
+        return
+    }
+
+    select {
+    case ch <- err:
+    default:
+    }
+}
+
+func isAllocationQuotaError(err error) bool {
+    if err == nil {
+        return false
+    }
+    msg := strings.ToLower(err.Error())
+    return strings.Contains(msg, "error 486") || strings.Contains(msg, "allocation quota reached")
 }
 
 type ProxyLogger int
@@ -702,8 +734,14 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	// socket.
 	relayConn, err1 := client.Allocate()
 	if err1 != nil {
+		if rt := getProxyRuntime(); rt != nil {
+			rt.deliverIncreaseAck(err1)
+		}
 		err = fmt.Errorf("failed to allocate: %s", err1)
 		return
+	}
+	if rt := getProxyRuntime(); rt != nil {
+		rt.deliverIncreaseAck(nil)
 	}
 	defer func() {
 		if err1 := relayConn.Close(); err1 != nil {
@@ -872,10 +910,31 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
         return 0
     }
 
+    successCount := 0
     for i := 0; i < delta; i++ {
+        ackCh := make(chan error, 1)
+        rt.setIncreaseAck(ackCh)
         spawnProxyWorkerPair(rt, false)
+
+        select {
+        case err := <-ackCh:
+            if err != nil {
+                if isAllocationQuotaError(err) {
+                    log.Printf("[Proxy] Increase rejected: TURN allocation quota reached")
+                } else {
+                    log.Printf("[Proxy] Increase rejected: %v", err)
+                }
+                return C.int(successCount)
+            }
+            successCount++
+        case <-time.After(10 * time.Second):
+            log.Printf("[Proxy] Increase timed out while waiting for TURN allocation confirmation")
+            return C.int(successCount)
+        case <-rt.ctx.Done():
+            return C.int(successCount)
+        }
     }
-    return C.int(delta)
+    return C.int(successCount)
 }
 
 //export StartProxy

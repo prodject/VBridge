@@ -126,14 +126,16 @@ struct ContentView: View {
                         }
                         .disabled(isConnectButtonDisabled)
 
-                        Button(action: improveSpeed) {
-                            Text("Improve speed")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(Color.green.opacity(0.14))
-                                .foregroundColor(.green)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        if vpnStatus == .connected {
+                            Button(action: improveSpeed) {
+                                Text("Improve speed")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(Color.green.opacity(0.14))
+                                    .foregroundColor(.green)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
                         }
                     }
                     .padding(24)
@@ -219,6 +221,9 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
+                    if newStatus == .disconnected {
+                        runtimeThreadCount = selectedProfileThreadCount
+                    }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
                     }
@@ -356,16 +361,21 @@ struct ContentView: View {
         }
     }
 
+    private var selectedProfileThreadCount: Int {
+        max(store.selectedProfile?.nValue ?? runtimeThreadCountValue, 1)
+    }
+
     private var runtimeThreadCountValue: Int {
         max(runtimeThreadCount, 1)
     }
 
     private var selectedProfileThreadCap: Int {
-        max(store.selectedProfile?.nValue ?? runtimeThreadCountValue, 1)
+        selectedProfileThreadCount
     }
 
     private var threadCountText: String {
-        "\(runtimeThreadCountValue)/\(selectedProfileThreadCap)"
+        let currentCount = vpnStatus == .connected ? runtimeThreadCountValue : selectedProfileThreadCap
+        return "\(currentCount)/\(selectedProfileThreadCap)"
     }
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
@@ -399,9 +409,7 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
-            if runtimeThreadCountValue < 4 {
-                runtimeThreadCount = 4
-            }
+            runtimeThreadCount = selectedProfileThreadCount
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -554,29 +562,25 @@ struct ContentView: View {
     }
 
     private func improveSpeed() {
+        guard vpnStatus == .connected else { return }
+
         let nextValue = min(runtimeThreadCountValue + 1, 32)
         guard nextValue > runtimeThreadCountValue else { return }
 
-        if vpnStatus == .connected {
-            app.increaseTunnelThreads(by: 1) { isSuccess in
-                DispatchQueue.main.async {
-                    if isSuccess {
-                        runtimeThreadCount = nextValue
-                        SharedLogger.info("Runtime thread count increased to \(nextValue)")
-                    } else {
-                        SharedLogger.error("Failed to increase runtime thread count")
-                        showAlert(
-                            title: "Speed Boost Failed",
-                            message: "The tunnel rejected the thread increase request."
-                        )
-                    }
+        app.increaseTunnelThreads(by: 1) { isSuccess in
+            DispatchQueue.main.async {
+                if isSuccess {
+                    runtimeThreadCount = nextValue
+                    SharedLogger.info("Runtime thread count increased to \(nextValue)")
+                } else {
+                    SharedLogger.error("Failed to increase runtime thread count")
+                    showAlert(
+                        title: "Speed Boost Failed",
+                        message: "The tunnel rejected the thread increase request."
+                    )
                 }
             }
-            return
         }
-
-        runtimeThreadCount = nextValue
-        SharedLogger.info("Runtime thread count staged to \(nextValue)")
     }
 
     @MainActor
