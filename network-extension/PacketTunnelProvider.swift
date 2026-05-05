@@ -134,6 +134,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             guard let self = self else { return }
 
             if ready == 0 {
+                StopProxy()
                 sharedLogger.error("DTLS connection timeout!")
                 SharedLogger.error("DTLS connection timeout (120s)", source: .tunnel)
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)

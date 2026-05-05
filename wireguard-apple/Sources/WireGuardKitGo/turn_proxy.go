@@ -25,6 +25,7 @@ import (
     "context"
     "crypto/tls"
     "encoding/json"
+    "errors"
     "fmt"
     "io"
     "log"
@@ -508,9 +509,47 @@ func dtlsFunc(ctx context.Context, conn net.PacketConn, peer *net.UDPAddr) (net.
     }
 
     if err := dtlsConn.HandshakeContext(ctx1); err != nil {
+        if closeErr := dtlsConn.Close(); closeErr != nil {
+            log.Printf("Failed to close DTLS connection after handshake error: %s", closeErr)
+        }
         return nil, err
     }
     return dtlsConn, nil
+}
+
+const (
+    dtlsHandshakeMaxAttempts = 3
+    dtlsHandshakeBaseDelay   = 250 * time.Millisecond
+    dtlsHandshakeMaxDelay    = 2 * time.Second
+)
+
+func dtlsRetryDelay(attempt int) time.Duration {
+    if attempt < 1 {
+        attempt = 1
+    }
+
+    delay := dtlsHandshakeBaseDelay << (attempt - 1)
+    if delay > dtlsHandshakeMaxDelay {
+        return dtlsHandshakeMaxDelay
+    }
+    return delay
+}
+
+func isTransientDTLSError(err error) bool {
+    if err == nil {
+        return false
+    }
+
+    if errors.Is(err, context.DeadlineExceeded) {
+        return true
+    }
+
+    var netErr net.Error
+    if errors.As(err, &netErr) && netErr.Timeout() {
+        return true
+    }
+
+    return strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded")
 }
 
 func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.PacketConn, connchan chan<- net.PacketConn, okchan chan<- struct{}, c1 chan<- error) {
@@ -519,7 +558,46 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
     dtlsctx, dtlscancel := context.WithCancel(ctx)
     defer dtlscancel()
     var conn1, conn2 net.PacketConn
-    conn1, conn2 = connutil.AsyncPacketPipe()
+    var dtlsConn net.Conn
+    var err1 error
+    for attempt := 1; attempt <= dtlsHandshakeMaxAttempts; attempt++ {
+        if dtlsctx.Err() != nil {
+            err = dtlsctx.Err()
+            return
+        }
+
+        conn1, conn2 = connutil.AsyncPacketPipe()
+        dtlsConn, err1 = dtlsFunc(dtlsctx, conn1, peer)
+        if err1 == nil {
+            break
+        }
+
+        if closeErr := conn1.Close(); closeErr != nil {
+            log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
+        }
+        if closeErr := conn2.Close(); closeErr != nil {
+            log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
+        }
+
+        if !isTransientDTLSError(err1) || attempt == dtlsHandshakeMaxAttempts || dtlsctx.Err() != nil {
+            err = fmt.Errorf("failed to connect DTLS after %d attempts: %w", attempt, err1)
+            return
+        }
+
+        delay := dtlsRetryDelay(attempt)
+        log.Printf("DTLS connect attempt %d/%d failed: %v; retrying in %s", attempt, dtlsHandshakeMaxAttempts, err1, delay)
+
+        timer := time.NewTimer(delay)
+        select {
+        case <-dtlsctx.Done():
+            if !timer.Stop() {
+                <-timer.C
+            }
+            err = dtlsctx.Err()
+            return
+        case <-timer.C:
+        }
+    }
     go func() {
         for {
             select {
@@ -529,11 +607,6 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
             }
         }
     }()
-    dtlsConn, err1 := dtlsFunc(dtlsctx, conn1, peer)
-    if err1 != nil {
-        err = fmt.Errorf("failed to connect DTLS: %s", err1)
-        return
-    }
     defer func() {
         if closeErr := dtlsConn.Close(); closeErr != nil {
             err = fmt.Errorf("failed to close DTLS connection: %s", closeErr)
