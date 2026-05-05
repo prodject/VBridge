@@ -222,7 +222,7 @@ struct ContentView: View {
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
                     if newStatus == .disconnected {
-                        runtimeThreadCount = selectedProfileThreadCount
+                        runtimeThreadCount = 1
                     }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
@@ -374,8 +374,7 @@ struct ContentView: View {
     }
 
     private var threadCountText: String {
-        let currentCount = vpnStatus == .connected ? runtimeThreadCountValue : selectedProfileThreadCap
-        return "\(currentCount)/\(selectedProfileThreadCap)"
+        "\(runtimeThreadCountValue)/\(selectedProfileThreadCap)"
     }
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
@@ -409,7 +408,7 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
-            runtimeThreadCount = selectedProfileThreadCount
+            runtimeThreadCount = 1
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -418,7 +417,7 @@ struct ContentView: View {
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
-                nValue: runtimeThreadCountValue,
+                nValue: 1,
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
@@ -438,8 +437,12 @@ struct ContentView: View {
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
             if let manager = managers?.first {
                 self.vpnStatus = manager.connection.status
+                if manager.connection.status == .disconnected {
+                    runtimeThreadCount = 1
+                }
             } else {
                 self.vpnStatus = .disconnected
+                runtimeThreadCount = 1
             }
         }
     }
@@ -564,7 +567,7 @@ struct ContentView: View {
     private func improveSpeed() {
         guard vpnStatus == .connected else { return }
 
-        let nextValue = min(runtimeThreadCountValue + 1, 32)
+        let nextValue = min(runtimeThreadCountValue + 1, selectedProfileThreadCap)
         guard nextValue > runtimeThreadCountValue else { return }
 
         app.increaseTunnelThreads(by: 1) { isSuccess in

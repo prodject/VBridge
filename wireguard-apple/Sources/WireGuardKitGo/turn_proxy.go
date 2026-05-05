@@ -629,11 +629,12 @@ func (c *connectedUDPConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 }
 
 type turnParams struct {
-	host     string
-	port     string
-	link     string
-	udp      bool
-	getCreds getCredsFunc
+    host     string
+    port     string
+    link     string
+    udp      bool
+    getCreds getCredsFunc
+    resetCreds func()
 }
 
 func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UDPAddr, conn2 net.PacketConn, c chan<- error) {
@@ -736,6 +737,9 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	if err1 != nil {
 		if rt := getProxyRuntime(); rt != nil {
 			rt.deliverIncreaseAck(err1)
+		}
+		if turnParams.resetCreds != nil && isAllocationQuotaError(err1) {
+			turnParams.resetCreds()
 		}
 		err = fmt.Errorf("failed to allocate: %s", err1)
 		return
@@ -869,12 +873,19 @@ type turnCred struct {
 	user, pass, addr string
 }
 
-func poolCreds(f getCredsFunc, poolSize int) getCredsFunc {
+func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
     var mu sync.Mutex
     var cached *turnCred
     var cTime time.Time
 
-    return func(link string) (string, string, string, error) {
+    reset := func() {
+        mu.Lock()
+        cached = nil
+        cTime = time.Time{}
+        mu.Unlock()
+    }
+
+    getter := func(link string) (string, string, string, error) {
         mu.Lock()
         defer mu.Unlock()
 
@@ -889,13 +900,15 @@ func poolCreds(f getCredsFunc, poolSize int) getCredsFunc {
                 return "", "", "", err
             }
 
-            cached = &turnCred{u, p, a}
+            cached = &turnCred{user: u, pass: p, addr: a}
             cTime = time.Now()
             log.Printf("Successfully registered User Identity 1/%d", poolSize)
         }
 
         return cached.user, cached.pass, cached.addr, nil
     }
+
+    return getter, reset
 }
 
 //export ProxyIncreaseThreads
@@ -920,7 +933,33 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
         case err := <-ackCh:
             if err != nil {
                 if isAllocationQuotaError(err) {
-                    log.Printf("[Proxy] Increase rejected: TURN allocation quota reached")
+                    log.Printf("[Proxy] Increase rejected: TURN allocation quota reached, refreshing credentials")
+                    if rt.params != nil && rt.params.resetCreds != nil {
+                        rt.params.resetCreds()
+                    }
+
+                    retryAckCh := make(chan error, 1)
+                    rt.setIncreaseAck(retryAckCh)
+                    spawnProxyWorkerPair(rt, false)
+
+                    select {
+                    case retryErr := <-retryAckCh:
+                        if retryErr != nil {
+                            if isAllocationQuotaError(retryErr) {
+                                log.Printf("[Proxy] Retry also rejected: TURN allocation quota reached")
+                            } else {
+                                log.Printf("[Proxy] Retry rejected: %v", retryErr)
+                            }
+                            return C.int(successCount)
+                        }
+                        successCount++
+                        continue
+                    case <-time.After(10 * time.Second):
+                        log.Printf("[Proxy] Retry timed out while waiting for TURN allocation confirmation")
+                        return C.int(successCount)
+                    case <-rt.ctx.Done():
+                        return C.int(successCount)
+                    }
                 } else {
                     log.Printf("[Proxy] Increase rejected: %v", err)
                 }
@@ -984,12 +1023,14 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
         link = link[:idx]
     }
 
+    pooledCreds, resetCreds := poolCreds(getCreds, n)
     params := &turnParams{
-        host:     host,
-        port:     port,
-        link:     link,
-        udp:      udp,
-        getCreds: poolCreds(getCreds, n),
+        host:       host,
+        port:       port,
+        link:       link,
+        udp:        udp,
+        getCreds:   pooledCreds,
+        resetCreds: resetCreds,
     }
 
     listenConnChan := make(chan net.PacketConn)
