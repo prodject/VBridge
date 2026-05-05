@@ -126,7 +126,7 @@ struct ContentView: View {
                         }
                         .disabled(isConnectButtonDisabled)
 
-                        if vpnStatus == .connected && runtimeThreadCountValue < selectedProfileThreadCap {
+                        if vpnStatus == .connected {
                             Button(action: improveSpeed) {
                                 Text("Improve speed")
                                     .font(.subheadline.weight(.semibold))
@@ -221,8 +221,13 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
-                    if newStatus == .disconnected {
+                    switch newStatus {
+                    case .connected:
+                        runtimeThreadCount = selectedProfileThreadCap
+                    case .disconnected:
                         runtimeThreadCount = 1
+                    default:
+                        break
                     }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
@@ -437,8 +442,13 @@ struct ContentView: View {
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
             if let manager = managers?.first {
                 self.vpnStatus = manager.connection.status
-                if manager.connection.status == .disconnected {
+                switch manager.connection.status {
+                case .connected:
+                    runtimeThreadCount = selectedProfileThreadCap
+                case .disconnected:
                     runtimeThreadCount = 1
+                default:
+                    break
                 }
             } else {
                 self.vpnStatus = .disconnected
@@ -567,7 +577,7 @@ struct ContentView: View {
     private func improveSpeed() {
         guard vpnStatus == .connected else { return }
 
-        let nextValue = min(runtimeThreadCountValue + 1, selectedProfileThreadCap)
+        let nextValue = min(runtimeThreadCountValue + 1, 32)
         guard nextValue > runtimeThreadCountValue else { return }
 
         app.increaseTunnelThreads(by: 1) { isSuccess in

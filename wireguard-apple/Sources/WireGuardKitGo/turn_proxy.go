@@ -923,6 +923,11 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
         return 0
     }
 
+    const (
+        increaseAckTimeout      = 10 * time.Second
+        quotaRetryAckTimeout    = 120 * time.Second
+    )
+
     successCount := 0
     for i := 0; i < delta; i++ {
         ackCh := make(chan error, 1)
@@ -954,7 +959,7 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
                         }
                         successCount++
                         continue
-                    case <-time.After(10 * time.Second):
+                    case <-time.After(quotaRetryAckTimeout):
                         log.Printf("[Proxy] Retry timed out while waiting for TURN allocation confirmation")
                         return C.int(successCount)
                     case <-rt.ctx.Done():
@@ -966,7 +971,7 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
                 return C.int(successCount)
             }
             successCount++
-        case <-time.After(10 * time.Second):
+        case <-time.After(increaseAckTimeout):
             log.Printf("[Proxy] Increase timed out while waiting for TURN allocation confirmation")
             return C.int(successCount)
         case <-rt.ctx.Done():
