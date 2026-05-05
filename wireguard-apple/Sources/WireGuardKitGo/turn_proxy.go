@@ -54,6 +54,20 @@ var proxyCancel context.CancelFunc
 var manualCaptchaOnly atomic.Bool
 var proxyStateMu sync.Mutex
 var proxyDone chan struct{}
+var proxyRuntimeMu sync.Mutex
+var proxyRuntime *proxyRuntimeState
+
+type proxyRuntimeState struct {
+    ctx            context.Context
+    peer           *net.UDPAddr
+    params         *turnParams
+    listenConnChan chan net.PacketConn
+    connchan       chan net.PacketConn
+    tick           <-chan time.Time
+    wg             *sync.WaitGroup
+    readyChan      chan struct{}
+    workerCount    atomic.Int32
+}
 
 //export ProxySetLogger
 func ProxySetLogger(context unsafe.Pointer, loggerFn C.proxy_logger_fn_t) {
@@ -98,6 +112,37 @@ func ProxyWaitReady(timeoutMs C.int) C.int {
     case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
         return 0
     }
+}
+
+func spawnProxyWorkerPair(rt *proxyRuntimeState, signalReady bool) {
+    if rt == nil || rt.wg == nil {
+        return
+    }
+
+    var okchan chan<- struct{}
+    if signalReady {
+        okchan = rt.readyChan
+    }
+
+    rt.wg.Go(func() {
+        oneDtlsConnectionLoop(rt.ctx, rt.peer, rt.listenConnChan, rt.connchan, okchan)
+    })
+    rt.wg.Go(func() {
+        oneTurnConnectionLoop(rt.ctx, rt.params, rt.peer, rt.connchan, rt.tick)
+    })
+    rt.workerCount.Add(1)
+}
+
+func setProxyRuntime(rt *proxyRuntimeState) {
+    proxyRuntimeMu.Lock()
+    proxyRuntime = rt
+    proxyRuntimeMu.Unlock()
+}
+
+func getProxyRuntime() *proxyRuntimeState {
+    proxyRuntimeMu.Lock()
+    defer proxyRuntimeMu.Unlock()
+    return proxyRuntime
 }
 
 type ProxyLogger int
@@ -787,51 +832,50 @@ type turnCred struct {
 }
 
 func poolCreds(f getCredsFunc, poolSize int) getCredsFunc {
-	var mu sync.Mutex
-	var pool []turnCred
-	var cTime time.Time
-	var idx int
+    var mu sync.Mutex
+    var cached *turnCred
+    var cTime time.Time
 
-	return func(link string) (string, string, string, error) {
-		mu.Lock()
-		defer mu.Unlock()
+    return func(link string) (string, string, string, error) {
+        mu.Lock()
+        defer mu.Unlock()
 
-		if !cTime.IsZero() && time.Since(cTime) > 10*time.Minute {
-			pool = nil
-			cTime = time.Time{}
-		}
+        if !cTime.IsZero() && time.Since(cTime) > 10*time.Minute {
+            cached = nil
+            cTime = time.Time{}
+        }
 
-		if len(pool) < poolSize {
-			u, p, a, err := f(link)
-			if err == nil {
-				pool = append(pool, turnCred{u, p, a})
-				cTime = time.Now()
-				log.Printf("Successfully registered User Identity %d/%d", len(pool), poolSize)
+        if cached == nil {
+            u, p, a, err := f(link)
+            if err != nil {
+                return "", "", "", err
+            }
 
-				// Space out requests by 1000ms to avoid API limits
-				if len(pool) < poolSize {
-					time.Sleep(1000 * time.Millisecond)
-				}
+            cached = &turnCred{u, p, a}
+            cTime = time.Now()
+            log.Printf("Successfully registered User Identity 1/%d", poolSize)
+        }
 
-				c := pool[len(pool)-1]
-				idx++
-				return c.user, c.pass, c.addr, nil
-			}
+        return cached.user, cached.pass, cached.addr, nil
+    }
+}
 
-			log.Printf("Failed to get unique TURN identity: %v", err)
-			if len(pool) > 0 {
-				log.Printf("Falling back to reusing a previous identity...")
-				c := pool[idx%len(pool)]
-				idx++
-				return c.user, c.pass, c.addr, nil
-			}
-			return "", "", "", err
-		}
+//export ProxyIncreaseThreads
+func ProxyIncreaseThreads(cDelta C.int) C.int {
+    delta := int(cDelta)
+    if delta < 1 {
+        return 0
+    }
 
-		c := pool[idx%len(pool)]
-		idx++
-		return c.user, c.pass, c.addr, nil
-	}
+    rt := getProxyRuntime()
+    if rt == nil {
+        return 0
+    }
+
+    for i := 0; i < delta; i++ {
+        spawnProxyWorkerPair(rt, false)
+    }
+    return C.int(delta)
 }
 
 //export StartProxy
@@ -846,7 +890,7 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     localAddrStr := C.GoString(cLocalAddr)
     turnHost := C.GoString(cTurnHost)
     turnPort := C.GoString(cTurnPort)
-    
+
     host := turnHost
     port := turnPort
     if port == "" {
@@ -877,69 +921,69 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
 
     parts := strings.Split(link, "join/")
     link = parts[len(parts)-1]
-
     if idx := strings.IndexAny(link, "/?#"); idx != -1 {
         link = link[:idx]
     }
 
-	params := &turnParams{
-		host:     host,
-		port:     port,
-		link:     link,
-		udp:      udp,
-		getCreds: poolCreds(getCreds, n),
-	}
+    params := &turnParams{
+        host:     host,
+        port:     port,
+        link:     link,
+        udp:      udp,
+        getCreds: poolCreds(getCreds, n),
+    }
 
     listenConnChan := make(chan net.PacketConn)
-	listenConn, err := net.ListenPacket("udp", localAddrStr)
-	if err != nil {
-		log.Printf("Failed to listen: %s", err)
-		return
-	}
-	
-	context.AfterFunc(ctx, func() {
-		if closeErr := listenConn.Close(); closeErr != nil {
-			log.Printf("Failed to close local connection: %s", closeErr)
-		}
-	})
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case listenConnChan <- listenConn:
-			}
-		}
-	}()
-
+    connchan := make(chan net.PacketConn)
+    okchan := make(chan struct{})
+    t := time.Tick(200 * time.Millisecond)
     wg1 := sync.WaitGroup{}
-	t := time.Tick(200 * time.Millisecond)
 
-	okchan := make(chan struct{})
-	connchan := make(chan net.PacketConn)
+    rt := &proxyRuntimeState{
+        ctx:            ctx,
+        peer:           peer,
+        params:         params,
+        listenConnChan: listenConnChan,
+        connchan:       connchan,
+        tick:           t,
+        wg:             &wg1,
+        readyChan:      okchan,
+    }
+    setProxyRuntime(rt)
+    defer setProxyRuntime(nil)
 
-	wg1.Go(func() {
-		oneDtlsConnectionLoop(ctx, peer, listenConnChan, connchan, okchan)
-	})
-	wg1.Go(func() {
-		oneTurnConnectionLoop(ctx, params, peer, connchan, t)
-	})
+    listenConn, err := net.ListenPacket("udp", localAddrStr)
+    if err != nil {
+        log.Printf("Failed to listen: %s", err)
+        return
+    }
+
+    context.AfterFunc(ctx, func() {
+        if closeErr := listenConn.Close(); closeErr != nil {
+            log.Printf("Failed to close local connection: %s", closeErr)
+        }
+    })
+
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case listenConnChan <- listenConn:
+            }
+        }
+    }()
+
+    spawnProxyWorkerPair(rt, true)
 
     select {
-	case <-okchan:
-	case <-ctx.Done():
-	}
+    case <-okchan:
+    case <-ctx.Done():
+    }
 
-	for i := 0; i < n-1; i++ {
-		cChan := make(chan net.PacketConn)
-		wg1.Go(func() {
-			oneDtlsConnectionLoop(ctx, peer, listenConnChan, cChan, nil)
-		})
-		wg1.Go(func() {
-			oneTurnConnectionLoop(ctx, params, peer, cChan, t)
-		})
-	}
+    for i := 0; i < n-1; i++ {
+        spawnProxyWorkerPair(rt, false)
+    }
 
     log.Printf("Proxy started on %s", localAddrStr)
     wg1.Wait()
@@ -951,6 +995,8 @@ func StopProxy() {
     done := proxyDone
     proxyDone = nil
     proxyStateMu.Unlock()
+
+    setProxyRuntime(nil)
 
     if done != nil {
         close(done)

@@ -44,6 +44,7 @@ extern void StartProxy(
     int useUdp
 );
 extern void StopProxy(void);
+extern int ProxyIncreaseThreads(int delta);
 extern void ProxySetLogger(void *context, logger_fn_t logger_fn);
 extern void ProxySetCaptchaCallback(void *context, captcha_fn_t captcha_fn);
 extern int ProxyWaitReady(int timeoutMs);

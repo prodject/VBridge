@@ -13,7 +13,7 @@ struct ContentView: View {
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
-    @AppStorage("runtimeThreadCount") private var runtimeThreadCount = 1
+    @AppStorage("runtimeThreadCount") private var runtimeThreadCount = 4
 
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
@@ -399,6 +399,9 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
+            if runtimeThreadCountValue < 4 {
+                runtimeThreadCount = 4
+            }
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -552,8 +555,28 @@ struct ContentView: View {
 
     private func improveSpeed() {
         let nextValue = min(runtimeThreadCountValue + 1, 32)
+        guard nextValue > runtimeThreadCountValue else { return }
+
+        if vpnStatus == .connected {
+            app.increaseTunnelThreads(by: 1) { isSuccess in
+                DispatchQueue.main.async {
+                    if isSuccess {
+                        runtimeThreadCount = nextValue
+                        SharedLogger.info("Runtime thread count increased to \(nextValue)")
+                    } else {
+                        SharedLogger.error("Failed to increase runtime thread count")
+                        showAlert(
+                            title: "Speed Boost Failed",
+                            message: "The tunnel rejected the thread increase request."
+                        )
+                    }
+                }
+            }
+            return
+        }
+
         runtimeThreadCount = nextValue
-        SharedLogger.info("Runtime thread count increased to \(nextValue)")
+        SharedLogger.info("Runtime thread count staged to \(nextValue)")
     }
 
     @MainActor
