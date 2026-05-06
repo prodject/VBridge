@@ -34,6 +34,10 @@ struct ContentView: View {
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
     private static let vbridgeType = UTType(filenameExtension: "vbridge", conformingTo: .data)
+    private static let importFileTypes: [UTType] = [
+        Self.amneziaConfType,
+        Self.vbridgeType
+    ].compactMap { $0 }
 
     var body: some View {
         NavigationStack {
@@ -202,21 +206,22 @@ struct ContentView: View {
                     captchaBridge.clear()
                 }
             }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [
-                    Self.amneziaConfType,
-                    Self.vbridgeType
-                ].compactMap { $0 },
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    importFromFile(url)
-                case .failure(let error):
-                    showAlert(title: "Import Error", message: error.localizedDescription)
-                }
+            .sheet(isPresented: $showFileImporter) {
+                DocumentPicker(
+                    contentTypes: Self.importFileTypes,
+                    onPick: { url in
+                        showFileImporter = false
+                        importFromFile(url)
+                    },
+                    onCancel: {
+                        showFileImporter = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
+            .onOpenURL { url in
+                guard url.isFileURL else { return }
+                importFromFile(url)
             }
             .onAppear(perform: checkInitialStatus)
             .onAppear {
