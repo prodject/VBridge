@@ -10,7 +10,7 @@ import os
 
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
-private let captchaRequestDidChangeNotification = "com.prodject.vbridge.captcha.pending.request.changed" as CFString
+private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
 
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
@@ -26,7 +26,7 @@ private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, Un
     defaults.synchronize()
     CFNotificationCenterPostNotification(
         CFNotificationCenterGetDarwinNotifyCenter(),
-        CFNotificationName(captchaRequestDidChangeNotification),
+        captchaRequestDidChangeNotification,
         nil,
         nil,
         true
@@ -44,7 +44,7 @@ private func clearCaptchaRequest() {
     defaults.synchronize()
     CFNotificationCenterPostNotification(
         CFNotificationCenterGetDarwinNotifyCenter(),
-        CFNotificationName(captchaRequestDidChangeNotification),
+        captchaRequestDidChangeNotification,
         nil,
         nil,
         true

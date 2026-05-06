@@ -23,7 +23,7 @@ struct CaptchaRequest: Codable, Identifiable, Equatable {
 }
 
 enum CaptchaBridgeNotification {
-    static let requestDidChange = "com.prodject.vbridge.captcha.pending.request.changed" as CFString
+    static let requestDidChange = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
 }
 
 private func captchaBridgeDarwinCallback(
