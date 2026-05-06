@@ -9,6 +9,10 @@ import NetworkExtension
 struct VBridge: App {
     @AppStorage("appTheme") private var appTheme = "system"
 
+    init() {
+        UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(app: self)

@@ -64,7 +64,7 @@ final class CaptchaBridge: ObservableObject {
             CFNotificationCenterRemoveObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(),
                 Unmanaged.passUnretained(notificationObserver).toOpaque(),
-                CaptchaBridgeNotification.requestDidChange,
+                CaptchaBridgeNotification.requestDidChange.rawValue,
                 nil
             )
         }
@@ -86,25 +86,38 @@ final class CaptchaBridge: ObservableObject {
         do {
             let request = try JSONDecoder().decode(CaptchaRequest.self, from: data)
             if activeRequest != request {
+                if let current = activeRequest {
+                    UserNotificationDispatcher.shared.clearCaptchaNotification(requestID: current.id)
+                }
                 activeRequest = request
                 if let direct = request.directURL, !direct.isEmpty {
                     SharedLogger.info("Captcha request received: \(request.mode.rawValue) -> \(request.url) (direct: \(direct))")
                 } else {
                     SharedLogger.info("Captcha request received: \(request.mode.rawValue) -> \(request.url)")
                 }
+                UserNotificationDispatcher.shared.notifyCaptchaIfNeeded(request: request)
             }
         } catch {
             SharedLogger.error("Failed to decode captcha request: \(error.localizedDescription)")
+            if let current = activeRequest {
+                UserNotificationDispatcher.shared.clearCaptchaNotification(requestID: current.id)
+            }
             activeRequest = nil
         }
     }
 
     func clear() {
         guard let defaults else {
+            if let current = activeRequest {
+                UserNotificationDispatcher.shared.clearCaptchaNotification(requestID: current.id)
+            }
             activeRequest = nil
             return
         }
 
+        if let current = activeRequest {
+            UserNotificationDispatcher.shared.clearCaptchaNotification(requestID: current.id)
+        }
         defaults.removeObject(forKey: storageKey)
         SharedLogger.info("Captcha request cleared")
         activeRequest = nil
@@ -120,6 +133,7 @@ final class CaptchaBridge: ObservableObject {
 
         defaults.set(data, forKey: storageKey)
         activeRequest = request
+        UserNotificationDispatcher.shared.notifyCaptchaIfNeeded(request: request)
     }
 
     private func startMonitoring() {
@@ -143,7 +157,7 @@ final class CaptchaBridge: ObservableObject {
             CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(observer).toOpaque(),
             captchaBridgeDarwinCallback,
-            CaptchaBridgeNotification.requestDidChange,
+            CaptchaBridgeNotification.requestDidChange.rawValue,
             nil,
             .deliverImmediately
         )

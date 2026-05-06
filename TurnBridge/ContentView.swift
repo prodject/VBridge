@@ -11,6 +11,7 @@ struct SettingsSheet: Identifiable {
 struct ContentView: View {
     var app: VBridge
 
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
@@ -30,6 +31,7 @@ struct ContentView: View {
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
     @State private var isCheckingUpdate = false
+    @State private var isUserInitiatedDisconnect = false
 
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
@@ -246,6 +248,13 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
+                    if newStatus == .connected {
+                        isUserInitiatedDisconnect = false
+                        UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+                    } else if newStatus == .disconnected, isUserInitiatedDisconnect {
+                        isUserInitiatedDisconnect = false
+                        UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+                    }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
                     }
@@ -431,7 +440,9 @@ struct ContentView: View {
     private func toggleTunnel() {
         if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
             SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
+            isUserInitiatedDisconnect = true
             cancelConnectWatchdog()
+            UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             app.turnOffTunnel()
             vpnStatus = .disconnecting
         } else {
@@ -443,6 +454,8 @@ struct ContentView: View {
             }
 
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
+            isUserInitiatedDisconnect = false
+            UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             let startingThreadCount = max(selectedProfileThreadCap, 4)
             runtimeThreadCount = startingThreadCount
             vpnStatus = .connecting
@@ -463,6 +476,10 @@ struct ContentView: View {
                     cancelConnectWatchdog()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
+                    presentConnectionIssue(
+                        title: "Connection Failed",
+                        message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
+                    )
                 }
             }
             startConnectWatchdog()
@@ -612,7 +629,7 @@ struct ContentView: View {
                 SharedLogger.error("Connection timeout while waiting for tunnel readiness")
                 app.turnOffTunnel()
                 vpnStatus = .disconnected
-                showAlert(
+                presentConnectionIssue(
                     title: "Connection Timeout",
                     message: "Tunnel startup timed out (\(connectWatchdogTimeout)s). Check Logs and Captcha flow, then try again."
                 )
@@ -623,6 +640,16 @@ struct ContentView: View {
     private func cancelConnectWatchdog() {
         connectWatchdogTask?.cancel()
         connectWatchdogTask = nil
+    }
+
+    private func presentConnectionIssue(title: String, message: String) {
+        DispatchQueue.main.async {
+            if self.scenePhase == .active {
+                self.showAlert(title: title, message: message)
+            } else {
+                UserNotificationDispatcher.shared.notifyConnectionIssue(title: title, message: message)
+            }
+        }
     }
 
     private func resolvedListenAddress(from original: String) -> String {
