@@ -32,6 +32,7 @@ struct ContentView: View {
     @State private var isCheckingUpdate = false
 
     private let connectWatchdogTimeout: UInt64 = 180
+    private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .plainText)
 
     var body: some View {
         NavigationStack {
@@ -202,7 +203,12 @@ struct ContentView: View {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.item],
+                allowedContentTypes: [
+                    Self.amneziaConfType,
+                    .plainText,
+                    .text,
+                    .data
+                ].compactMap { $0 },
                 allowsMultipleSelection: false
             ) { result in
                 switch result {
