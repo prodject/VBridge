@@ -574,80 +574,93 @@ func isTransientDTLSError(err error) bool {
 }
 
 func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.PacketConn, connchan chan<- net.PacketConn, okchan chan<- struct{}, c1 chan<- error) {
-    var err error = nil
-    defer func() { c1 <- err }()
-    dtlsctx, dtlscancel := context.WithCancel(ctx)
-    defer dtlscancel()
-    var conn1, conn2 net.PacketConn
-    var dtlsConn net.Conn
-    var err1 error
-    for attempt := 1; attempt <= dtlsHandshakeMaxAttempts; attempt++ {
-        if dtlsctx.Err() != nil {
-            err = dtlsctx.Err()
-            return
-        }
+	var err error = nil
+	defer func() { c1 <- err }()
+	dtlsctx, dtlscancel := context.WithCancel(ctx)
+	defer dtlscancel()
+	var conn1, conn2 net.PacketConn
+	var dtlsConn net.Conn
+	var err1 error
+	var activeAttemptDone chan struct{}
+	for attempt := 1; attempt <= dtlsHandshakeMaxAttempts; attempt++ {
+		if dtlsctx.Err() != nil {
+			err = dtlsctx.Err()
+			return
+		}
 
-        conn1, conn2 = connutil.AsyncPacketPipe()
-        dtlsConn, err1 = dtlsFunc(dtlsctx, conn1, peer)
-        if err1 == nil {
-            break
-        }
+		conn1, conn2 = connutil.AsyncPacketPipe()
+		attemptDone := make(chan struct{})
+		go func(conn net.PacketConn, done <-chan struct{}) {
+			for {
+				select {
+				case <-dtlsctx.Done():
+					return
+				case <-done:
+					return
+				case connchan <- conn:
+				}
+			}
+		}(conn2, attemptDone)
 
-        if closeErr := conn1.Close(); closeErr != nil {
-            log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
-        }
-        if closeErr := conn2.Close(); closeErr != nil {
-            log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
-        }
+		dtlsConn, err1 = dtlsFunc(dtlsctx, conn1, peer)
+		if err1 == nil {
+			activeAttemptDone = attemptDone
+			break
+		}
 
-        if !isTransientDTLSError(err1) || attempt == dtlsHandshakeMaxAttempts || dtlsctx.Err() != nil {
-            err = fmt.Errorf("failed to connect DTLS after %d attempts: %w", attempt, err1)
-            return
-        }
+		close(attemptDone)
+		if closeErr := conn1.Close(); closeErr != nil {
+			log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
+		}
+		if closeErr := conn2.Close(); closeErr != nil {
+			log.Printf("Failed to close DTLS retry pipe: %s", closeErr)
+		}
 
-        delay := dtlsRetryDelay(attempt)
-        log.Printf("DTLS connect attempt %d/%d failed: %v; retrying in %s", attempt, dtlsHandshakeMaxAttempts, err1, delay)
+		if !isTransientDTLSError(err1) || attempt == dtlsHandshakeMaxAttempts || dtlsctx.Err() != nil {
+			err = fmt.Errorf("failed to connect DTLS after %d attempts: %w", attempt, err1)
+			return
+		}
 
-        timer := time.NewTimer(delay)
-        select {
-        case <-dtlsctx.Done():
-            if !timer.Stop() {
-                <-timer.C
-            }
-            err = dtlsctx.Err()
-            return
-        case <-timer.C:
-        }
-    }
-    go func() {
-        for {
-            select {
-            case <-dtlsctx.Done():
-                return
-            case connchan <- conn2:
-            }
-        }
-    }()
-    defer func() {
-        if closeErr := dtlsConn.Close(); closeErr != nil {
-            err = fmt.Errorf("failed to close DTLS connection: %s", closeErr)
-            return
-        }
-        log.Printf("Closed DTLS connection\n")
-    }()
-    log.Printf("Established DTLS connection!\n")
-    select { case proxyReady <- struct{}{}: default: }
-    go func() {
-        for {
-            select {
-            case <-dtlsctx.Done():
-                return
-            case okchan <- struct{}{}:
-            }
-        }
-    }()
+		delay := dtlsRetryDelay(attempt)
+		log.Printf("DTLS connect attempt %d/%d failed: %v; retrying in %s", attempt, dtlsHandshakeMaxAttempts, err1, delay)
 
-    wg := sync.WaitGroup{}
+		timer := time.NewTimer(delay)
+		select {
+		case <-dtlsctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			err = dtlsctx.Err()
+			return
+		case <-timer.C:
+		}
+	}
+	if activeAttemptDone != nil {
+		defer close(activeAttemptDone)
+	}
+	defer func() {
+		if closeErr := dtlsConn.Close(); closeErr != nil {
+			err = fmt.Errorf("failed to close DTLS connection: %s", closeErr)
+			return
+		}
+		log.Printf("Closed DTLS connection\n")
+	}()
+	log.Printf("Established DTLS connection!\n")
+	select {
+	case proxyReady <- struct{}{}:
+	default:
+	}
+	go func() {
+		for {
+			select {
+			case <-dtlsctx.Done():
+				return
+			case okchan <- struct{}{}:
+			}
+		}
+	}()
+
+	wg := sync.WaitGroup{}
     wg.Add(2)
     context.AfterFunc(dtlsctx, func() {
         listenConn.SetDeadline(time.Now())
