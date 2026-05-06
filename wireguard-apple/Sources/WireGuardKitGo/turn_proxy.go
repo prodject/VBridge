@@ -55,6 +55,7 @@ var proxyCancel context.CancelFunc
 var manualCaptchaOnly atomic.Bool
 var proxyStateMu sync.Mutex
 var proxyDone chan struct{}
+var proxyStartFailed chan struct{}
 var proxyRuntimeMu sync.Mutex
 var proxyRuntime *proxyRuntimeState
 
@@ -90,6 +91,7 @@ var proxyReady = make(chan struct{}, 1)
 func ProxyWaitReady(timeoutMs C.int) C.int {
     proxyStateMu.Lock()
     done := proxyDone
+    startFailed := proxyStartFailed
     proxyStateMu.Unlock()
 
     if done != nil {
@@ -103,6 +105,8 @@ func ProxyWaitReady(timeoutMs C.int) C.int {
     select {
     case <-done:
         return 0
+    case <-startFailed:
+        return 0
     case <-proxyReady:
         if done != nil {
             select {
@@ -114,6 +118,23 @@ func ProxyWaitReady(timeoutMs C.int) C.int {
         return 1
     case <-time.After(time.Duration(timeoutMs) * time.Millisecond):
         return 0
+    }
+}
+
+func signalProxyStartFailure() {
+    proxyStateMu.Lock()
+    failed := proxyStartFailed
+    proxyStateMu.Unlock()
+
+    if failed != nil {
+        select {
+        case failed <- struct{}{}:
+        default:
+        }
+    }
+
+    if proxyCancel != nil {
+        proxyCancel()
     }
 }
 
@@ -918,6 +939,10 @@ func oneDtlsConnectionLoop(ctx context.Context, peer *net.UDPAddr, listenConnCha
 			go oneDtlsConnection(ctx, peer, listenConn, connchan, okchan, c)
 			if err := <-c; err != nil {
 				log.Printf("%s", err)
+				if okchan != nil {
+					signalProxyStartFailure()
+					return
+				}
 			}
 		}
 	}
@@ -1059,6 +1084,7 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     select { case <-proxyReady: default: }
     proxyStateMu.Lock()
     proxyDone = make(chan struct{})
+    proxyStartFailed = make(chan struct{}, 1)
     proxyStateMu.Unlock()
 
     link := C.GoString(cLink)
@@ -1089,11 +1115,12 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     proxyCancel = cancel
     defer cancel()
 
-    peer, err := net.ResolveUDPAddr("udp", peerAddrStr)
-    if err != nil {
-        log.Printf("Resolve UDP error: %v", err)
-        return
-    }
+	peer, err := net.ResolveUDPAddr("udp", peerAddrStr)
+	if err != nil {
+		log.Printf("Resolve UDP error: %v", err)
+		signalProxyStartFailure()
+		return
+	}
 
     parts := strings.Split(link, "join/")
     link = parts[len(parts)-1]
@@ -1130,11 +1157,12 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     setProxyRuntime(rt)
     defer setProxyRuntime(nil)
 
-    listenConn, err := net.ListenPacket("udp", localAddrStr)
-    if err != nil {
-        log.Printf("Failed to listen: %s", err)
-        return
-    }
+	listenConn, err := net.ListenPacket("udp", localAddrStr)
+	if err != nil {
+		log.Printf("Failed to listen: %s", err)
+		signalProxyStartFailure()
+		return
+	}
 
     context.AfterFunc(ctx, func() {
         if closeErr := listenConn.Close(); closeErr != nil {
@@ -1152,12 +1180,13 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
         }
     }()
 
-    spawnProxyWorkerPair(rt, true)
+	spawnProxyWorkerPair(rt, true)
 
-    select {
-    case <-okchan:
-    case <-ctx.Done():
-    }
+	select {
+	case <-okchan:
+	case <-ctx.Done():
+		return
+	}
 
     for i := 0; i < n-1; i++ {
         spawnProxyWorkerPair(rt, false)
@@ -1172,6 +1201,7 @@ func StopProxy() {
     proxyStateMu.Lock()
     done := proxyDone
     proxyDone = nil
+    proxyStartFailed = nil
     proxyStateMu.Unlock()
 
     setProxyRuntime(nil)

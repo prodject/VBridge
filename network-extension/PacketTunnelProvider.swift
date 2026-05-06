@@ -150,8 +150,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             if ready == 0 {
                 StopProxy()
-                sharedLogger.error("DTLS connection timeout!")
-                SharedLogger.error("DTLS connection timeout (120s)", source: .tunnel)
+                sharedLogger.error("TURN proxy failed before DTLS became ready")
+                SharedLogger.error("TURN proxy startup failed before DTLS became ready", source: .tunnel)
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                 return
             }
