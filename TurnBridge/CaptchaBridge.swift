@@ -64,7 +64,7 @@ final class CaptchaBridge: ObservableObject {
             CFNotificationCenterRemoveObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(),
                 Unmanaged.passUnretained(notificationObserver).toOpaque(),
-                CaptchaBridgeNotification.requestDidChange.rawValue,
+                CaptchaBridgeNotification.requestDidChange,
                 nil
             )
         }
