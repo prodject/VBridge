@@ -1,5 +1,6 @@
 import SwiftUI
 import NetworkExtension
+import UniformTypeIdentifiers
 
 struct SettingsSheet: Identifiable {
     let id = UUID()
@@ -19,6 +20,7 @@ struct ContentView: View {
     @StateObject private var store = ProfileStore()
 
     @State private var showImportModal = false
+    @State private var showFileImporter = false
     @State private var showingAlert = false
     @State private var alertTitle = ""
     @State private var alertMessage = ""
@@ -198,6 +200,19 @@ struct ContentView: View {
                     captchaBridge.clear()
                 }
             }
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    importFromFile(url)
+                case .failure(let error):
+                    showAlert(title: "Import Error", message: error.localizedDescription)
+                }
+            }
             .onAppear(perform: checkInitialStatus)
             .onAppear {
                 if !didCheckForUpdates {
@@ -288,6 +303,19 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+
+                Button(action: importFromFilePicker) {
+                    HStack {
+                        Image(systemName: "doc.badge.plus")
+                        Text("Import from File")
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.indigo)
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
@@ -481,6 +509,67 @@ struct ContentView: View {
         }
     }
 
+    private func importFromFilePicker() {
+        withAnimation { showImportModal = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            showFileImporter = true
+        }
+    }
+
+    private func importFromFile(_ url: URL) {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard let rawText = String(data: data, encoding: .utf8) else {
+                throw ConfigParseError.invalidAmneziaConfig("The file is not valid UTF-8 text.")
+            }
+
+            let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix(ConfigParser.scheme) || ConfigParser.legacySchemes.contains(where: { trimmed.hasPrefix($0) }) {
+                let config = try ConfigParser.parse(from: trimmed)
+                let profile = VPNProfile(
+                    name: config.name ?? "Profile",
+                    vkLink: config.turn,
+                    peerAddr: config.peer,
+                    listenAddr: config.listen,
+                    nValue: config.n > 0 ? config.n : 16,
+                    wgQuickConfig: config.wg,
+                    turnHost: config.turnHost ?? "",
+                    turnPort: config.turnPort ?? "",
+                    useUdp: config.udp ?? true
+                )
+                store.addProfile(profile)
+                SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
+                showAlert(title: "Success", message: "Profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+                return
+            }
+
+            let config = try ConfigParser.parseAmnezia(from: trimmed)
+            let profileName = uniqueProfileName(from: url.deletingPathExtension().lastPathComponent)
+            let profile = VPNProfile(
+                name: profileName,
+                vkLink: "",
+                peerAddr: config.peerAddr,
+                listenAddr: "127.0.0.1:9000",
+                nValue: 16,
+                wgQuickConfig: config.wgQuickConfig,
+                turnHost: "",
+                turnPort: "",
+                useUdp: true
+            )
+            store.addProfile(profile)
+            SharedLogger.info("Amnezia profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
+            showAlert(title: "Success", message: "Amnezia profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+        } catch {
+            SharedLogger.error("File import failed: \(error.localizedDescription)")
+            showAlert(title: "Import Error", message: error.localizedDescription)
+        }
+    }
+
     private func addManualProfile() {
         withAnimation { showImportModal = false }
         let profile = VPNProfile(name: "Profile")
@@ -532,6 +621,11 @@ struct ContentView: View {
         guard let index = trimmed.lastIndex(of: ":") else { return nil }
         let portPart = trimmed[trimmed.index(after: index)...]
         return Int(portPart)
+    }
+
+    private func uniqueProfileName(from candidate: String) -> String {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Profile" : store.uniqueName(for: trimmed)
     }
 
     private func checkForUpdates(manual: Bool) async {

@@ -106,6 +106,8 @@ You can use the included `quick_link.py` script to easily generate valid `vbridg
 3. Copy the generated `vbridge://...` link from the terminal output to your iOS clipboard.
 4. Open VBridge, tap the `+` icon, select **Paste from Clipboard**, and tap **Connect**.
 
+You can also import an Amnezia WireGuard `.conf` file through **Import from File**. During import, the original `Endpoint` is saved as `Peer Address (IP:Port)`, while the stored WireGuard config is rewritten to use `Endpoint = 127.0.0.1:9000`.
+
 ## Support VBridge
 
 **Crypto:**
