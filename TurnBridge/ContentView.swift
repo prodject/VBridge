@@ -32,7 +32,8 @@ struct ContentView: View {
     @State private var isCheckingUpdate = false
 
     private let connectWatchdogTimeout: UInt64 = 180
-    private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .plainText)
+    private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
+    private static let vbridgeType = UTType(filenameExtension: "vbridge", conformingTo: .data)
 
     var body: some View {
         NavigationStack {
@@ -205,9 +206,7 @@ struct ContentView: View {
                 isPresented: $showFileImporter,
                 allowedContentTypes: [
                     Self.amneziaConfType,
-                    .plainText,
-                    .text,
-                    .data
+                    Self.vbridgeType
                 ].compactMap { $0 },
                 allowsMultipleSelection: false
             ) { result in
@@ -529,6 +528,11 @@ struct ContentView: View {
         }
 
         do {
+            let ext = url.pathExtension.lowercased()
+            guard ["conf", "vbridge"].contains(ext) else {
+                throw ConfigParseError.invalidScheme
+            }
+
             let data = try Data(contentsOf: url)
             guard let rawText = String(data: data, encoding: .utf8) else {
                 throw ConfigParseError.invalidAmneziaConfig("The file is not valid UTF-8 text.")
