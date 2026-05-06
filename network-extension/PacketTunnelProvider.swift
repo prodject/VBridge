@@ -10,6 +10,7 @@ import os
 
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
+private let captchaRequestDidChangeNotification = "com.prodject.vbridge.captcha.pending.request.changed" as CFString
 
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
@@ -23,6 +24,13 @@ private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, Un
 
     defaults.set(payloadData, forKey: captchaRequestStorageKey)
     defaults.synchronize()
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        CFNotificationName(captchaRequestDidChangeNotification),
+        nil,
+        nil,
+        true
+    )
     sharedLogger.log("[TP]: captcha payload published for app UI")
 }
 
@@ -34,6 +42,13 @@ private func clearCaptchaRequest() {
 
     defaults.removeObject(forKey: captchaRequestStorageKey)
     defaults.synchronize()
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        CFNotificationName(captchaRequestDidChangeNotification),
+        nil,
+        nil,
+        true
+    )
 }
 
 enum PacketTunnelProviderError: String, Error {

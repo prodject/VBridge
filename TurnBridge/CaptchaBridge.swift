@@ -22,6 +22,22 @@ struct CaptchaRequest: Codable, Identifiable, Equatable {
     }
 }
 
+enum CaptchaBridgeNotification {
+    static let requestDidChange = "com.prodject.vbridge.captcha.pending.request.changed" as CFString
+}
+
+private func captchaBridgeDarwinCallback(
+    _ center: CFNotificationCenter?,
+    _ observer: UnsafeMutableRawPointer?,
+    _ name: CFNotificationName?,
+    _ object: UnsafeRawPointer?,
+    _ userInfo: CFDictionary?
+) {
+    guard let observer else { return }
+    let token = Unmanaged<NotificationObserver>.fromOpaque(observer).takeUnretainedValue()
+    token.fire()
+}
+
 @MainActor
 final class CaptchaBridge: ObservableObject {
     @Published var activeRequest: CaptchaRequest?
@@ -29,6 +45,7 @@ final class CaptchaBridge: ObservableObject {
     private let defaults: UserDefaults?
     private let storageKey = "captcha.pending.request"
     private var monitoringTask: Task<Void, Never>?
+    private var notificationObserver: AnyObject?
 
     init() {
         if let groupID = SharedLogger.appGroupID {
@@ -38,10 +55,19 @@ final class CaptchaBridge: ObservableObject {
         }
         refresh()
         startMonitoring()
+        startNotificationObserver()
     }
 
     deinit {
         monitoringTask?.cancel()
+        if let notificationObserver {
+            CFNotificationCenterRemoveObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                Unmanaged.passUnretained(notificationObserver).toOpaque(),
+                CaptchaBridgeNotification.requestDidChange,
+                nil
+            )
+        }
     }
 
     func refresh() {
@@ -103,5 +129,35 @@ final class CaptchaBridge: ObservableObject {
                 try? await Task.sleep(nanoseconds: 750_000_000)
             }
         }
+    }
+
+    private func startNotificationObserver() {
+        let observer = NotificationObserver { [weak self] in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
+        notificationObserver = observer
+
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(observer).toOpaque(),
+            captchaBridgeDarwinCallback,
+            CaptchaBridgeNotification.requestDidChange,
+            nil,
+            .deliverImmediately
+        )
+    }
+}
+
+private final class NotificationObserver {
+    private let handler: () -> Void
+
+    init(handler: @escaping () -> Void) {
+        self.handler = handler
+    }
+
+    func fire() {
+        handler()
     }
 }
