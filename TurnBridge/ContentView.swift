@@ -15,8 +15,6 @@ struct ContentView: View {
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
-    @AppStorage("runtimeThreadCount") private var runtimeThreadCount = 4
-
     @State private var vpnStatus: NEVPNStatus = .disconnected
     @StateObject private var store = ProfileStore()
 
@@ -72,9 +70,6 @@ struct ContentView: View {
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundColor(.secondary)
 
-                        Text(threadCountText)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 16)
@@ -136,17 +131,6 @@ struct ContentView: View {
                         }
                         .disabled(isConnectButtonDisabled)
 
-                        if vpnStatus == .connected {
-                            Button(action: improveSpeed) {
-                                Text("Improve speed")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(Color.green.opacity(0.14))
-                                    .foregroundColor(.green)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
-                        }
                     }
                     .padding(24)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
@@ -405,22 +389,6 @@ struct ContentView: View {
         }
     }
 
-    private var selectedProfileThreadCount: Int {
-        max(store.selectedProfile?.nValue ?? runtimeThreadCountValue, 1)
-    }
-
-    private var runtimeThreadCountValue: Int {
-        max(runtimeThreadCount, 1)
-    }
-
-    private var selectedProfileThreadCap: Int {
-        selectedProfileThreadCount
-    }
-
-    private var threadCountText: String {
-        "\(runtimeThreadCountValue)/\(selectedProfileThreadCap)"
-    }
-
     private func validateConfig(_ profile: VPNProfile) -> String? {
         if profile.vkLink.isEmpty {
             return "Please provide a valid TURN Server URL."
@@ -456,8 +424,7 @@ struct ContentView: View {
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
             isUserInitiatedDisconnect = false
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
-            let startingThreadCount = max(selectedProfileThreadCap, 4)
-            runtimeThreadCount = startingThreadCount
+            let configuredThreadCount = max(profile.nValue, 1)
             vpnStatus = .connecting
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
@@ -466,7 +433,7 @@ struct ContentView: View {
                 vkLink: profile.vkLink,
                 peerAddr: profile.peerAddr,
                 listenAddr: effectiveListenAddr,
-                nValue: startingThreadCount,
+                nValue: configuredThreadCount,
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
@@ -689,33 +656,6 @@ struct ContentView: View {
             if manual {
                 await MainActor.run {
                     showAlert(title: "No Updates", message: "You already have the latest version.")
-                }
-            }
-        }
-    }
-
-    private func improveSpeed() {
-        guard vpnStatus == .connected else { return }
-
-        let nextValue = min(runtimeThreadCountValue + 1, 32)
-        guard nextValue > runtimeThreadCountValue else { return }
-
-        if var profile = store.selectedProfile {
-            profile.nValue = nextValue
-            store.selectedProfile = profile
-        }
-
-        app.increaseTunnelThreads(by: 1) { isSuccess in
-            DispatchQueue.main.async {
-                if isSuccess {
-                    runtimeThreadCount = nextValue
-                    SharedLogger.info("Runtime thread count increased to \(nextValue)")
-                } else {
-                    SharedLogger.error("Failed to increase runtime thread count")
-                    showAlert(
-                        title: "Speed Boost Failed",
-                        message: "The tunnel rejected the live increase request. Reconnect to apply \(nextValue) connections."
-                    )
                 }
             }
         }

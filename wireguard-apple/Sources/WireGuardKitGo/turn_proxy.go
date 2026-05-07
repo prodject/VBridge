@@ -58,6 +58,8 @@ var proxyStartFailed chan struct{}
 var proxyRuntimeMu sync.Mutex
 var proxyRuntime *proxyRuntimeState
 
+const relayPacketBufferSize = 64 * 1024
+
 type proxyRuntimeState struct {
     ctx            context.Context
     peer           *net.UDPAddr
@@ -686,7 +688,7 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
     go func() {
         defer wg.Done()
         defer dtlscancel()
-        buf := make([]byte, 1600)
+        buf := make([]byte, relayPacketBufferSize)
         for {
             select {
             case <-dtlsctx.Done():
@@ -712,7 +714,7 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
     go func() {
         defer wg.Done()
         defer dtlscancel()
-        buf := make([]byte, 1600)
+        buf := make([]byte, relayPacketBufferSize)
         for {
             select {
             case <-dtlsctx.Done():
@@ -896,7 +898,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	go func() {
 		defer wg.Done()
 		defer turncancel()
-		buf := make([]byte, 1600)
+		buf := make([]byte, relayPacketBufferSize)
 		for {
 			select {
 			case <-turnctx.Done():
@@ -923,7 +925,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	go func() {
 		defer wg.Done()
 		defer turncancel()
-		buf := make([]byte, 1600)
+		buf := make([]byte, relayPacketBufferSize)
 		for {
 			select {
 			case <-turnctx.Done():

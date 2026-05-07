@@ -56,17 +56,6 @@ enum PacketTunnelProviderError: String, Error {
     case cantParseWgQuickConfig
 }
 
-private struct TunnelCommand: Codable {
-    let command: String
-    let delta: Int?
-}
-
-private struct TunnelCommandResponse: Codable {
-    let ok: Bool
-    let appliedDelta: Int?
-    let message: String?
-}
-
 private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<CChar>?) -> Void = { context, level, messageCStr in
     guard let cStr = messageCStr else { return }
     let message = String(cString: cStr).trimmingCharacters(in: .newlines)
@@ -197,27 +186,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             #endif
         }
     }
-    
-
-    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
-        guard
-            let command = try? JSONDecoder().decode(TunnelCommand.self, from: messageData),
-            command.command == "increaseThreads"
-        else {
-            completionHandler?(nil)
-            return
-        }
-
-        let delta = max(command.delta ?? 1, 1)
-        let applied = ProxyIncreaseThreads(Int32(delta))
-        let response = TunnelCommandResponse(
-            ok: applied > 0,
-            appliedDelta: applied > 0 ? delta : nil,
-            message: applied > 0 ? "Threads increased" : "Unable to increase threads"
-        )
-        completionHandler?(try? JSONEncoder().encode(response))
-    }
-
     override func sleep(completionHandler: @escaping () -> Void) {
         // Add code here to get ready to sleep.
         completionHandler()
