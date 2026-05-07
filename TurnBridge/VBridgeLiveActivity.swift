@@ -93,8 +93,9 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         }
 
         private func speedText(_ value: Double?, fallback: String) -> String? {
-            guard let value, value.isFinite, value > 0 else { return fallback }
-            return String(format: "%.1f Mbps", value)
+            guard let value, value.isFinite else { return fallback }
+            let clampedValue = max(value, 0)
+            return String(format: "%.1f Mbps", clampedValue)
         }
     }
 
@@ -235,20 +236,18 @@ final class VBridgeLiveActivityCoordinator {
         uploadSpeedMbps: Double? = nil
     ) {
         let updatedAt = Date()
-        let snapshot = VBridgeLiveActivitySnapshot(
+        VBridgeLiveActivityStore.update(
             profileName: profileName,
-            content: .init(
-                phase: phase,
-                activeConnections: activeConnections,
-                totalConnections: totalConnections,
-                relayIP: relayIP,
-                estimatedRemainingSeconds: estimatedRemainingSeconds,
-                downloadSpeedMbps: downloadSpeedMbps,
-                uploadSpeedMbps: uploadSpeedMbps,
-                updatedAt: updatedAt
-            )
+            phase: phase,
+            activeConnections: activeConnections,
+            totalConnections: totalConnections,
+            relayIP: relayIP,
+            estimatedRemainingSeconds: estimatedRemainingSeconds,
+            downloadSpeedMbps: downloadSpeedMbps,
+            uploadSpeedMbps: uploadSpeedMbps,
+            updatedAt: updatedAt
         )
-        VBridgeLiveActivityStore.save(snapshot)
+        guard let snapshot = VBridgeLiveActivityStore.load() else { return }
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             return

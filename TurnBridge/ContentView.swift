@@ -40,6 +40,7 @@ struct ContentView: View {
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var speedTestTask: Task<Void, Never>?
+    @State private var didRunSpeedTestForCurrentConnection = false
     @State private var pendingShortcutActionTask: Task<Void, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
@@ -545,6 +546,9 @@ struct ContentView: View {
                 )
                 self.hasLoadedInitialStatus = true
                 self.refreshConnectionProgress()
+                if currentStatus == .connected {
+                    self.startSpeedTestIfNeeded(profileName: selectedProfileName)
+                }
                 self.refreshWidgetTimelines()
                 self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
                 self.schedulePendingShortcutActionConsumption()
@@ -604,26 +608,28 @@ struct ContentView: View {
                 relayIP: latestRelayIPFromLogs(),
                 estimatedRemainingSeconds: estimatedRemainingSeconds
             )
-            return
-        }
-
-        guard let profile else {
+        } else if let profile {
+            let target = effectiveConnectionTarget(for: profile)
+            let fallbackProgress = vpnStatus == .connected ? target : 0
+            connectionProgressText = "\(fallbackProgress)/\(target)"
+            syncLiveActivityState(
+                profileName: profileName,
+                phase: liveActivityPhase(for: vpnStatus),
+                activeConnections: fallbackProgress,
+                totalConnections: target,
+                relayIP: latestRelayIPFromLogs(),
+                estimatedRemainingSeconds: estimatedRemainingSeconds(activeConnections: fallbackProgress, totalConnections: target)
+            )
+        } else {
             connectionProgressText = nil
             syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
-            return
         }
 
-        let target = effectiveConnectionTarget(for: profile)
-        let fallbackProgress = vpnStatus == .connected ? target : 0
-        connectionProgressText = "\(fallbackProgress)/\(target)"
-        syncLiveActivityState(
-            profileName: profileName,
-            phase: liveActivityPhase(for: vpnStatus),
-            activeConnections: fallbackProgress,
-            totalConnections: target,
-            relayIP: latestRelayIPFromLogs(),
-            estimatedRemainingSeconds: estimatedRemainingSeconds(activeConnections: fallbackProgress, totalConnections: target)
-        )
+        if vpnStatus == .connected {
+            startSpeedTestIfNeeded(profileName: profileName)
+        } else {
+            cancelSpeedTest()
+        }
     }
 
     private func handleWidgetURL(_ url: URL) -> Bool {
@@ -831,6 +837,7 @@ struct ContentView: View {
             startSpeedTestIfNeeded(profileName: profileName)
         } else {
             cancelSpeedTest()
+            didRunSpeedTestForCurrentConnection = false
         }
     }
 
@@ -855,10 +862,12 @@ struct ContentView: View {
     private func startSpeedTestIfNeeded(profileName: String) {
         guard #available(iOS 16.1, *) else { return }
         guard speedTestTask == nil else { return }
+        guard !didRunSpeedTestForCurrentConnection else { return }
         guard vpnStatus == .connected else { return }
 
+        didRunSpeedTestForCurrentConnection = true
         speedTestTask = Task(priority: .utility) { [profileName] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
 
             let result = await runSpeedTest()
@@ -882,45 +891,118 @@ struct ContentView: View {
     }
 
     private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
-        async let download = measureDownloadSpeedMbps()
-        async let upload = measureUploadSpeedMbps()
-        return await (download, upload)
-    }
-
-    private func measureDownloadSpeedMbps() async -> Double? {
-        guard let url = URL(string: "https://speed.cloudflare.com/__down?bytes=2000000") else { return nil }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        guard let firstSample = await sampleRuntimeTransferBytes() else {
+            return (nil, nil)
+        }
 
         let start = Date()
-        do {
-            let (temporaryURL, response) = try await URLSession.shared.download(for: request)
-            guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else { return nil }
-            let attributes = try FileManager.default.attributesOfItem(atPath: temporaryURL.path)
-            let bytes = (attributes[.size] as? NSNumber)?.doubleValue ?? 0
-            let elapsed = max(Date().timeIntervalSince(start), 0.001)
-            return bytes > 0 ? (bytes * 8.0 / elapsed) / 1_000_000.0 : nil
-        } catch {
-            return nil
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        guard !Task.isCancelled else { return (nil, nil) }
+
+        guard let secondSample = await sampleRuntimeTransferBytes() else {
+            return (nil, nil)
+        }
+
+        let elapsed = max(Date().timeIntervalSince(start), 0.001)
+        let downloadDelta = secondSample.downloadBytes >= firstSample.downloadBytes
+            ? secondSample.downloadBytes - firstSample.downloadBytes
+            : 0
+        let uploadDelta = secondSample.uploadBytes >= firstSample.uploadBytes
+            ? secondSample.uploadBytes - firstSample.uploadBytes
+            : 0
+
+        let downloadMbps = Double(downloadDelta) * 8.0 / elapsed / 1_000_000.0
+        let uploadMbps = Double(uploadDelta) * 8.0 / elapsed / 1_000_000.0
+        return (downloadMbps, uploadMbps)
+    }
+
+    private func sampleRuntimeTransferBytes() async -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
+        return await withCheckedContinuation { continuation in
+            NETunnelProviderManager.loadAllFromPreferences { managers, error in
+                guard error == nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                guard let manager = managers?.first,
+                      let session = manager.connection as? NETunnelProviderSession,
+                      session.status == .connected else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                guard (try? session.sendProviderMessage(Data([0]), responseHandler: { response in
+                    guard let response,
+                          let settings = String(data: response, encoding: .utf8),
+                          let totals = runtimeTransferBytes(from: settings) else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    continuation.resume(returning: totals)
+                })) != nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+            }
         }
     }
 
-    private func measureUploadSpeedMbps() async -> Double? {
-        guard let url = URL(string: "https://speed.cloudflare.com/__up") else { return nil }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
-        request.httpMethod = "POST"
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    private func runtimeTransferBytes(from settings: String) -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
+        var totalDownloadBytes: UInt64 = 0
+        var totalUploadBytes: UInt64 = 0
+        var currentDownloadBytes: UInt64?
+        var currentUploadBytes: UInt64?
+        var inPeerSection = false
+        var sawPeer = false
+        var currentPeerStarted = false
 
-        let payload = Data(repeating: 0xAB, count: 1_000_000)
-        let start = Date()
-        do {
-            let (_, response) = try await URLSession.shared.upload(for: request, from: payload)
-            guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else { return nil }
-            let elapsed = max(Date().timeIntervalSince(start), 0.001)
-            return payload.isEmpty ? nil : (Double(payload.count) * 8.0 / elapsed) / 1_000_000.0
-        } catch {
-            return nil
+        func finalizePeer() {
+            guard currentPeerStarted else { return }
+            sawPeer = true
+            totalDownloadBytes &+= currentDownloadBytes ?? 0
+            totalUploadBytes &+= currentUploadBytes ?? 0
+            currentDownloadBytes = nil
+            currentUploadBytes = nil
+            currentPeerStarted = false
         }
+
+        for rawLine in settings.split(omittingEmptySubsequences: false) { $0.isNewline } {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty {
+                if inPeerSection {
+                    finalizePeer()
+                }
+                inPeerSection = false
+                continue
+            }
+
+            guard let equalsIndex = line.firstIndex(of: "=") else { continue }
+            let key = line[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = line[line.index(after: equalsIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if key == "public_key" {
+                if inPeerSection {
+                    finalizePeer()
+                }
+                inPeerSection = true
+                currentPeerStarted = true
+                continue
+            }
+
+            guard inPeerSection else { continue }
+
+            if key == "rx_bytes" {
+                currentDownloadBytes = UInt64(value)
+            } else if key == "tx_bytes" {
+                currentUploadBytes = UInt64(value)
+            }
+        }
+
+        if inPeerSection {
+            finalizePeer()
+        }
+
+        return sawPeer ? (totalDownloadBytes, totalUploadBytes) : nil
     }
 
     private func effectiveConnectionTarget(for profile: VPNProfile) -> Int {
