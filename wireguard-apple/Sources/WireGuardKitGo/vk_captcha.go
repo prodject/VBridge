@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "crypto/md5"
     "crypto/rand"
     "crypto/sha256"
     "crypto/tls"
