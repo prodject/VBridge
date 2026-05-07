@@ -1,6 +1,9 @@
 import SwiftUI
 import NetworkExtension
 import UniformTypeIdentifiers
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 struct SettingsSheet: Identifiable {
     let id = UUID()
@@ -30,6 +33,7 @@ struct ContentView: View {
     @State private var isDownloadingUpdate = false
     @State private var isCheckingUpdate = false
     @State private var isUserInitiatedDisconnect = false
+    @State private var hasLoadedInitialStatus = false
     @State private var connectionProgressText: String?
     @State private var logMonitoringTask: Task<Void, Never>?
 
@@ -213,6 +217,9 @@ struct ContentView: View {
                 .ignoresSafeArea()
             }
             .onOpenURL { url in
+                if handleWidgetURL(url) {
+                    return
+                }
                 guard url.isFileURL else { return }
                 importFromFile(url)
             }
@@ -224,6 +231,11 @@ struct ContentView: View {
                 }
                 startLogMonitoring()
                 refreshConnectionProgress()
+            }
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .active {
+                    consumePendingShortcutAction()
+                }
             }
             .onDisappear {
                 stopLogMonitoring()
@@ -245,6 +257,7 @@ struct ContentView: View {
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
                     refreshConnectionProgress()
+                    refreshWidgetTimelines()
                     if newStatus == .connected {
                         isUserInitiatedDisconnect = false
                         UserNotificationDispatcher.shared.clearConnectionIssueNotification()
@@ -462,6 +475,7 @@ struct ContentView: View {
                         message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
                     )
                 }
+                refreshWidgetTimelines()
             }
             startConnectWatchdog()
         }
@@ -474,7 +488,9 @@ struct ContentView: View {
             } else {
                 self.vpnStatus = .disconnected
             }
+            self.hasLoadedInitialStatus = true
             self.refreshConnectionProgress()
+            self.consumePendingShortcutAction()
         }
     }
 
@@ -515,6 +531,54 @@ struct ContentView: View {
             return
         }
         connectionProgressText = "0/\(effectiveConnectionTarget(for: profile))"
+    }
+
+    private func handleWidgetURL(_ url: URL) -> Bool {
+        guard url.scheme == "vbridge" else {
+            return false
+        }
+
+        switch url.host?.lowercased() {
+        case "toggle":
+            PendingShortcutActionStore.store(.toggle)
+        case "connect":
+            PendingShortcutActionStore.store(.connect)
+        case "disconnect":
+            PendingShortcutActionStore.store(.disconnect)
+        default:
+            break
+        }
+
+        consumePendingShortcutAction()
+        return true
+    }
+
+    private func refreshWidgetTimelines() {
+#if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+#endif
+    }
+
+    private func consumePendingShortcutAction() {
+        guard hasLoadedInitialStatus else {
+            return
+        }
+        guard let action = PendingShortcutActionStore.consume() else {
+            return
+        }
+
+        switch action {
+        case .toggle:
+            toggleTunnel()
+        case .connect:
+            if vpnStatus == .disconnected || vpnStatus == .invalid {
+                toggleTunnel()
+            }
+        case .disconnect:
+            if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
+                toggleTunnel()
+            }
+        }
     }
 
     private func latestConnectionProgressFromLogs() -> String? {

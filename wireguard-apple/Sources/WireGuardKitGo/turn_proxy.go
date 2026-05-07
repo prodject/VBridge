@@ -611,14 +611,12 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
 		conn1, conn2 = connutil.AsyncPacketPipe()
 		attemptDone := make(chan struct{})
 		go func(conn net.PacketConn, done <-chan struct{}) {
-			for {
-				select {
-				case <-dtlsctx.Done():
-					return
-				case <-done:
-					return
-				case connchan <- conn:
-				}
+			select {
+			case <-dtlsctx.Done():
+				return
+			case <-done:
+				return
+			case connchan <- conn:
 			}
 		}(conn2, attemptDone)
 
@@ -999,14 +997,10 @@ func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *ne
 		case <-ctx.Done():
 			return
 		case conn2 := <-connchan:
-			select {
-			case <-t:
-				c := make(chan error)
-				go oneTurnConnection(ctx, turnParams, peer, conn2, c)
-				if err := <-c; err != nil {
-					log.Printf("%s", err)
-				}
-			default:
+			c := make(chan error)
+			go oneTurnConnection(ctx, turnParams, peer, conn2, c)
+			if err := <-c; err != nil {
+				log.Printf("%s", err)
 			}
 		}
 	}
@@ -1017,41 +1011,53 @@ type turnCred struct {
 }
 
 func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
-    var mu sync.Mutex
-    var cached *turnCred
-    var cTime time.Time
+	var mu sync.Mutex
+	var cached []*turnCred
+	var next int
+	var cTime time.Time
 
-    reset := func() {
-        mu.Lock()
-        cached = nil
-        cTime = time.Time{}
-        mu.Unlock()
-    }
+	if poolSize < 1 {
+		poolSize = 1
+	}
 
-    getter := func(link string) (string, string, string, error) {
-        mu.Lock()
-        defer mu.Unlock()
+	reset := func() {
+		mu.Lock()
+		cached = nil
+		next = 0
+		cTime = time.Time{}
+		mu.Unlock()
+	}
 
-        if !cTime.IsZero() && time.Since(cTime) > 10*time.Minute {
-            cached = nil
-            cTime = time.Time{}
-        }
+	getter := func(link string) (string, string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
 
-        if cached == nil {
-            u, p, a, err := f(link)
-            if err != nil {
-                return "", "", "", err
-            }
+		if !cTime.IsZero() && time.Since(cTime) > 10*time.Minute {
+			cached = nil
+			next = 0
+			cTime = time.Time{}
+		}
 
-            cached = &turnCred{user: u, pass: p, addr: a}
-            cTime = time.Now()
-            log.Printf("Successfully registered User Identity 1/%d", poolSize)
-        }
+		if len(cached) < poolSize {
+			u, p, a, err := f(link)
+			if err != nil {
+				return "", "", "", err
+			}
 
-        return cached.user, cached.pass, cached.addr, nil
-    }
+			cached = append(cached, &turnCred{user: u, pass: p, addr: a})
+			if cTime.IsZero() {
+				cTime = time.Now()
+			}
+			log.Printf("Successfully registered User Identity %d/%d", len(cached), poolSize)
+			return u, p, a, nil
+		}
 
-    return getter, reset
+		cred := cached[next]
+		next = (next + 1) % len(cached)
+		return cred.user, cred.pass, cred.addr, nil
+	}
+
+	return getter, reset
 }
 
 //export ProxyIncreaseThreads

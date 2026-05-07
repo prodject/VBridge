@@ -11,6 +11,7 @@
 		A7EBA64F2F606A38003CA7F3 /* network-extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A7EBA6442F606A38003CA7F3 /* network-extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
+		B1A1C0012F00000000000002 /* VBridgeWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +29,13 @@
 			remoteGlobalIDString = A7EBA6552F606B0F003CA7F3;
 			remoteInfo = WireguardGoBridge;
 		};
+		B1A1C0012F00000000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A7EBA6242F606924003CA7F3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;
+			remoteInfo = VBridgeWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -38,6 +46,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A7EBA64F2F606A38003CA7F3 /* network-extension.appex in Embed Foundation Extensions */,
+				B1A1C0012F00000000000002 /* VBridgeWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -48,6 +57,7 @@
 		A7EBA62C2F606924003CA7F3 /* VBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7EBA6442F606A38003CA7F3 /* network-extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "network-extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7EBA6462F606A38003CA7F3 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
+		B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "VBridgeWidgetExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -84,6 +94,11 @@
 			path = "network-extension";
 			sourceTree = "<group>";
 		};
+		B1A1C0012F00000000000007 /* WidgetExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WidgetExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -104,6 +119,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B1A1C0012F0000000000000C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -112,6 +134,7 @@
 			children = (
 				A7EBA62E2F606924003CA7F3 /* VBridge */,
 				A7EBA6482F606A38003CA7F3 /* network-extension */,
+				B1A1C0012F00000000000007 /* WidgetExtension */,
 				A7EBA6452F606A38003CA7F3 /* Frameworks */,
 				A7EBA62D2F606924003CA7F3 /* Products */,
 			);
@@ -122,6 +145,7 @@
 			children = (
 				A7EBA62C2F606924003CA7F3 /* VBridge.app */,
 				A7EBA6442F606A38003CA7F3 /* network-extension.appex */,
+				B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -168,6 +192,7 @@
 			);
 			dependencies = (
 				A7EBA64E2F606A38003CA7F3 /* PBXTargetDependency */,
+				B1A1C0012F00000000000005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A7EBA62E2F606924003CA7F3 /* VBridge */,
@@ -204,6 +229,28 @@
 			productReference = A7EBA6442F606A38003CA7F3 /* network-extension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		B1A1C0012F00000000000006 /* VBridgeWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1A1C0012F00000000000008 /* Build configuration list for PBXNativeTarget "VBridgeWidgetExtension" */;
+			buildPhases = (
+				B1A1C0012F0000000000000B /* Sources */,
+				B1A1C0012F0000000000000C /* Frameworks */,
+				B1A1C0012F0000000000000D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B1A1C0012F00000000000007 /* WidgetExtension */,
+			);
+			name = VBridgeWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = VBridgeWidgetExtension;
+			productReference = B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -221,6 +268,9 @@
 						CreatedOnToolsVersion = 26.0.1;
 					};
 					A7EBA6552F606B0F003CA7F3 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					B1A1C0012F00000000000006 = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
 				};
@@ -245,6 +295,7 @@
 				A7EBA62B2F606924003CA7F3 /* VBridge */,
 				A7EBA6432F606A38003CA7F3 /* network-extension */,
 				A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */,
+				B1A1C0012F00000000000006 /* VBridgeWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -258,6 +309,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A7EBA6422F606A38003CA7F3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1A1C0012F0000000000000D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -281,6 +339,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B1A1C0012F0000000000000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -293,6 +358,11 @@
 			isa = PBXTargetDependency;
 			target = A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */;
 			targetProxy = A7EBA65C2F606C00003CA7F3 /* PBXContainerItemProxy */;
+		};
+		B1A1C0012F00000000000005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;
+			targetProxy = B1A1C0012F00000000000004 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -442,6 +512,14 @@
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is used to scan WireGuard QR configuration.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_CFBundleURLTypes = (
+					{
+						CFBundleURLName = com.prodject.vbridge;
+						CFBundleURLSchemes = (
+							vbridge,
+						);
+					},
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -491,6 +569,14 @@
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is used to scan WireGuard QR configuration.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_CFBundleURLTypes = (
+					{
+						CFBundleURLName = com.prodject.vbridge;
+						CFBundleURLSchemes = (
+							vbridge,
+						);
+					},
+				);
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -601,6 +687,64 @@
 			};
 			name = Release;
 		};
+		B1A1C0012F00000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = WidgetExtension/WidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.8;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.widget;
+				PRODUCT_NAME = VBridgeWidgetExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B1A1C0012F0000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = WidgetExtension/WidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.8;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.widget;
+				PRODUCT_NAME = VBridgeWidgetExtension;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -636,6 +780,15 @@
 			buildConfigurations = (
 				A7EBA6572F606B0F003CA7F3 /* Debug */,
 				A7EBA6582F606B0F003CA7F3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B1A1C0012F00000000000008 /* Build configuration list for PBXNativeTarget "VBridgeWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1A1C0012F00000000000009 /* Debug */,
+				B1A1C0012F0000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
