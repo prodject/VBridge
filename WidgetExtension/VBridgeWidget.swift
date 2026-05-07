@@ -72,7 +72,7 @@ private struct WidgetSnapshot: Equatable {
     }
 
     var actionURL: URL {
-        URL(string: "vbridge://toggle")!
+        URL(string: "vbridge://refresh")!
     }
 
     static let placeholder = WidgetSnapshot(
@@ -301,15 +301,31 @@ private struct WidgetCardView: View {
     var body: some View {
         let snapshot = entry.snapshot
         ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
             LinearGradient(
                 colors: [
-                    Color(red: 0.08, green: 0.12, blue: 0.22),
-                    Color(red: 0.04, green: 0.24, blue: 0.36),
-                    Color(red: 0.10, green: 0.46, blue: 0.52)
+                    Color(red: 0.10, green: 0.24, blue: 0.46).opacity(0.52),
+                    Color(red: 0.12, green: 0.42, blue: 0.58).opacity(0.42),
+                    Color(red: 0.10, green: 0.50, blue: 0.56).opacity(0.34)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+
+            Circle()
+                .fill(snapshot.statusAccent.opacity(0.24))
+                .frame(width: family == .systemSmall ? 110 : 140, height: family == .systemSmall ? 110 : 140)
+                .blur(radius: 28)
+                .offset(x: family == .systemSmall ? 56 : 86, y: family == .systemSmall ? -40 : -50)
+
+            Circle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: family == .systemSmall ? 84 : 104, height: family == .systemSmall ? 84 : 104)
+                .blur(radius: 24)
+                .offset(x: family == .systemSmall ? -58 : -72, y: family == .systemSmall ? 44 : 56)
+
             content(snapshot: snapshot)
         }
         .widgetURL(snapshot.actionURL)
@@ -325,20 +341,12 @@ private struct WidgetCardView: View {
         }
     }
 
-    private var activePrompt: String {
-        "Tap to connect"
-    }
-
-    private var disconnectPrompt: String {
-        "Tap to disconnect"
-    }
-
     private func prompt(for snapshot: WidgetSnapshot) -> String {
-        snapshot.state == .connected || snapshot.state == .connecting ? disconnectPrompt : activePrompt
+        "Tap to refresh"
     }
 
     private func smallLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VBridge")
@@ -392,11 +400,12 @@ private struct WidgetCardView: View {
                     .foregroundStyle(.white.opacity(0.86))
             }
         }
-        .padding(10)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
     }
 
     private func mediumLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VBridge")
@@ -463,7 +472,8 @@ private struct WidgetCardView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
     }
 }
 
@@ -471,26 +481,40 @@ private struct PingCompactView: View {
     let sample: PingSample
 
     var body: some View {
+        let badgeText = sample.badgeText
+        let latencyText = sample.compactLatencyText
+        let dotColor = sample.dotColor
+        let activeDotCount = sample.dotCount
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
-                Text(sample.badgeText)
+                Text(verbatim: badgeText)
                     .font(.system(size: 9, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                 Circle()
-                    .fill(sample.dotColor)
+                    .fill(dotColor)
                     .frame(width: 5, height: 5)
                 Spacer(minLength: 0)
-                Text(sample.compactLatencyText)
+                Text(verbatim: latencyText)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
             }
 
             HStack(spacing: 2) {
-                ForEach(0..<5, id: \.self) { index in
-                    Capsule(style: .continuous)
-                        .fill(index < sample.dotCount ? sample.dotColor : .white.opacity(0.16))
-                        .frame(width: 8, height: 3)
-                }
+                Capsule(style: .continuous)
+                    .fill(activeDotCount > 0 ? dotColor : .white.opacity(0.16))
+                    .frame(width: 8, height: 3)
+                Capsule(style: .continuous)
+                    .fill(activeDotCount > 1 ? dotColor : .white.opacity(0.16))
+                    .frame(width: 8, height: 3)
+                Capsule(style: .continuous)
+                    .fill(activeDotCount > 2 ? dotColor : .white.opacity(0.16))
+                    .frame(width: 8, height: 3)
+                Capsule(style: .continuous)
+                    .fill(activeDotCount > 3 ? dotColor : .white.opacity(0.16))
+                    .frame(width: 8, height: 3)
+                Capsule(style: .continuous)
+                    .fill(activeDotCount > 4 ? dotColor : .white.opacity(0.16))
+                    .frame(width: 8, height: 3)
             }
         }
         .padding(.vertical, 4)
@@ -508,8 +532,9 @@ private struct VBridgeWidget: Widget {
                 .containerBackground(.clear, for: .widget)
         }
         .configurationDisplayName("VBridge")
-        .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
+        .description("Shows connection count, relay IP, and refreshes when you open it.")
         .supportedFamilies([.systemSmall, .systemMedium])
+        .contentMarginsDisabled()
     }
 }
 

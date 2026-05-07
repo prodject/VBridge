@@ -35,6 +35,7 @@ struct ContentView: View {
     @State private var isUserInitiatedDisconnect = false
     @State private var hasLoadedInitialStatus = false
     @State private var connectionProgressText: String?
+    @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var pendingShortcutActionTask: Task<Void, Never>?
 
@@ -230,6 +231,7 @@ struct ContentView: View {
                     didCheckForUpdates = true
                     Task { await checkForUpdates(manual: false) }
                 }
+                lastWidgetRefreshSignature = widgetRefreshSignature()
                 startLogMonitoring()
                 refreshConnectionProgress()
                 schedulePendingShortcutActionConsumption()
@@ -497,6 +499,7 @@ struct ContentView: View {
             }
             self.hasLoadedInitialStatus = true
             self.refreshConnectionProgress()
+            self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
             self.schedulePendingShortcutActionConsumption()
         }
     }
@@ -508,6 +511,11 @@ struct ContentView: View {
                 do {
                     try await Task.sleep(nanoseconds: 300_000_000)
                     await MainActor.run {
+                        let signature = widgetRefreshSignature()
+                        if signature != lastWidgetRefreshSignature {
+                            lastWidgetRefreshSignature = signature
+                            refreshWidgetTimelines()
+                        }
                         refreshConnectionProgress()
                     }
                 } catch {
@@ -546,6 +554,8 @@ struct ContentView: View {
         }
 
         switch url.host?.lowercased() {
+        case "refresh":
+            refreshWidgetTimelines()
         case "toggle":
             PendingShortcutActionStore.store(.toggle)
         case "connect":
@@ -564,6 +574,32 @@ struct ContentView: View {
 #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
+    }
+
+    private func widgetRefreshSignature() -> String {
+        var status = ""
+        var workers = ""
+        var relay = ""
+
+        for line in SharedLogger.readLogs().reversed() {
+            if status.isEmpty, line.contains("VPN status:") {
+                status = line
+            }
+
+            if workers.isEmpty, line.contains("Connected workers ") {
+                workers = line
+            }
+
+            if relay.isEmpty, line.contains("relayed-address=") {
+                relay = line
+            }
+
+            if !status.isEmpty, !workers.isEmpty, !relay.isEmpty {
+                break
+            }
+        }
+
+        return [status, workers, relay].joined(separator: "|")
     }
 
     private func schedulePendingShortcutActionConsumption() {
