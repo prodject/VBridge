@@ -15,6 +15,7 @@ struct ContentView: View {
     var app: VBridge
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("autoUpdateEnabled") private var autoUpdateEnabled = true
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
@@ -130,9 +131,13 @@ struct ContentView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.14))
-                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
+                            .background(updateButtonBackground)
+                            .foregroundColor(updateButtonForeground)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(updateButtonBorder, lineWidth: 1)
+                            )
                         }
                         .disabled(isCheckingUpdate || isDownloadingUpdate)
 
@@ -426,6 +431,23 @@ struct ContentView: View {
         case .connecting, .disconnecting: return .orange
         default: return Color(red: 0.53, green: 0.37, blue: 0.98)
         }
+    }
+
+    private var updateButtonBackground: Color {
+        if colorScheme == .dark {
+            return Color(red: 0.31, green: 0.20, blue: 0.68).opacity(0.92)
+        }
+        return Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.14)
+    }
+
+    private var updateButtonForeground: Color {
+        colorScheme == .dark ? .white : Color(red: 0.53, green: 0.37, blue: 0.98)
+    }
+
+    private var updateButtonBorder: Color {
+        colorScheme == .dark
+            ? .white.opacity(0.14)
+            : Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.18)
     }
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
