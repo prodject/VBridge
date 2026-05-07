@@ -30,6 +30,48 @@ struct VBridge: App {
             return nil
         }
     }
+
+    private func normalizedWgQuickConfig(_ wgQuickConfig: String, listenAddr: String) -> String {
+        var inPeerSection = false
+        var rewrittenLines: [String] = []
+        rewrittenLines.reserveCapacity(wgQuickConfig.count / 16)
+
+        for line in wgQuickConfig.components(separatedBy: .newlines) {
+            let lineWithoutHashComment: String
+            if let commentRange = line.range(of: "#") {
+                lineWithoutHashComment = String(line[..<commentRange.lowerBound])
+            } else {
+                lineWithoutHashComment = line
+            }
+
+            let trimmedLine = lineWithoutHashComment.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowercasedLine = trimmedLine.lowercased()
+
+            if lowercasedLine == "[peer]" {
+                inPeerSection = true
+                rewrittenLines.append(line)
+                continue
+            }
+
+            if lowercasedLine == "[interface]" {
+                inPeerSection = false
+                rewrittenLines.append(line)
+                continue
+            }
+
+            if inPeerSection, let equalsIndex = trimmedLine.firstIndex(of: "=") {
+                let key = trimmedLine[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if key == "endpoint" {
+                    rewrittenLines.append("Endpoint = \(listenAddr)")
+                    continue
+                }
+            }
+
+            rewrittenLines.append(line)
+        }
+
+        return rewrittenLines.joined(separator: "\n")
+    }
     
     func turnOnTunnel(
         vkLink: String,
@@ -43,6 +85,7 @@ struct VBridge: App {
         completionHandler: @escaping (Bool) -> Void
     ) {
         SharedLogger.info("Connecting... peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
+        let normalizedConfig = normalizedWgQuickConfig(wgQuickConfig, listenAddr: listenAddr)
 
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
             if let error = error {
@@ -64,7 +107,7 @@ struct VBridge: App {
             protocolConfiguration.serverAddress = cleanIP
 
             protocolConfiguration.providerConfiguration = [
-                "wgQuickConfig": wgQuickConfig,
+                "wgQuickConfig": normalizedConfig,
                 "vkLink": vkLink,
                 "peerAddr": peerAddr,
                 "listenAddr": listenAddr,

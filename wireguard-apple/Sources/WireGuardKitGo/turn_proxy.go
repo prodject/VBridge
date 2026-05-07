@@ -69,7 +69,9 @@ type proxyRuntimeState struct {
     tick           <-chan time.Time
     wg             *sync.WaitGroup
     readyChan      chan struct{}
+    targetWorkers  int32
     workerCount    atomic.Int32
+    connectedWorkers atomic.Int32
     increaseAckMu  sync.Mutex
     increaseAck    chan error
 }
@@ -664,6 +666,18 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
 		log.Printf("Closed DTLS connection\n")
 	}()
 	log.Printf("Established DTLS connection!\n")
+    if rt := getProxyRuntime(); rt != nil {
+        connectedWorkers := rt.connectedWorkers.Add(1)
+        log.Printf("[Proxy] Connected workers %d/%d", connectedWorkers, rt.targetWorkers)
+        defer func() {
+            remainingWorkers := rt.connectedWorkers.Add(-1)
+            if remainingWorkers < 0 {
+                rt.connectedWorkers.Store(0)
+                remainingWorkers = 0
+            }
+            log.Printf("[Proxy] Connected workers %d/%d", remainingWorkers, rt.targetWorkers)
+        }()
+    }
 	select {
 	case proxyReady <- struct{}{}:
 	default:
@@ -1175,16 +1189,17 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     t := time.Tick(200 * time.Millisecond)
     wg1 := sync.WaitGroup{}
 
-    rt := &proxyRuntimeState{
-        ctx:            ctx,
-        peer:           peer,
-        params:         params,
-        listenConnChan: listenConnChan,
-        connchan:       connchan,
-        tick:           t,
-        wg:             &wg1,
-        readyChan:      okchan,
-    }
+	    rt := &proxyRuntimeState{
+	        ctx:            ctx,
+	        peer:           peer,
+	        params:         params,
+	        listenConnChan: listenConnChan,
+	        connchan:       connchan,
+	        tick:           t,
+	        wg:             &wg1,
+	        readyChan:      okchan,
+            targetWorkers:  int32(n),
+	    }
     setProxyRuntime(rt)
     defer setProxyRuntime(nil)
 

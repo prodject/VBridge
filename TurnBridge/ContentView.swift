@@ -30,6 +30,8 @@ struct ContentView: View {
     @State private var isDownloadingUpdate = false
     @State private var isCheckingUpdate = false
     @State private var isUserInitiatedDisconnect = false
+    @State private var connectionProgressText: String?
+    @State private var logMonitoringTask: Task<Void, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
@@ -70,6 +72,11 @@ struct ContentView: View {
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundColor(.secondary)
 
+                        if let connectionProgressText {
+                            Text(connectionProgressText)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 16)
@@ -215,6 +222,11 @@ struct ContentView: View {
                     didCheckForUpdates = true
                     Task { await checkForUpdates(manual: false) }
                 }
+                startLogMonitoring()
+                refreshConnectionProgress()
+            }
+            .onDisappear {
+                stopLogMonitoring()
             }
             .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { notification in
                 if let connection = notification.object as? NEVPNConnection {
@@ -232,6 +244,7 @@ struct ContentView: View {
                     }()
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
+                    refreshConnectionProgress()
                     if newStatus == .connected {
                         isUserInitiatedDisconnect = false
                         UserNotificationDispatcher.shared.clearConnectionIssueNotification()
@@ -426,6 +439,7 @@ struct ContentView: View {
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             let configuredThreadCount = max(profile.nValue, 1)
             vpnStatus = .connecting
+            refreshConnectionProgress()
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
             SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
@@ -460,7 +474,86 @@ struct ContentView: View {
             } else {
                 self.vpnStatus = .disconnected
             }
+            self.refreshConnectionProgress()
         }
+    }
+
+    private func startLogMonitoring() {
+        stopLogMonitoring()
+        logMonitoringTask = Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    await MainActor.run {
+                        refreshConnectionProgress()
+                    }
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    private func stopLogMonitoring() {
+        logMonitoringTask?.cancel()
+        logMonitoringTask = nil
+    }
+
+    private func refreshConnectionProgress() {
+        guard vpnStatus == .connecting || vpnStatus == .connected || vpnStatus == .reasserting else {
+            connectionProgressText = nil
+            return
+        }
+
+        if let progress = latestConnectionProgressFromLogs() {
+            connectionProgressText = progress
+            return
+        }
+
+        guard let profile = store.selectedProfile else {
+            connectionProgressText = nil
+            return
+        }
+        connectionProgressText = "0/\(effectiveConnectionTarget(for: profile))"
+    }
+
+    private func latestConnectionProgressFromLogs() -> String? {
+        for line in SharedLogger.readLogs().reversed() {
+            guard let range = line.range(of: "Connected workers ") else { continue }
+            let suffix = line[range.upperBound...]
+            let value = suffix.split(separator: " ").first.map(String.init) ?? String(suffix)
+            let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
+            guard parts.count == 2, Int(parts[0]) != nil, Int(parts[1]) != nil else { continue }
+            return "\(parts[0])/\(parts[1])"
+        }
+        return nil
+    }
+
+    private func effectiveConnectionTarget(for profile: VPNProfile) -> Int {
+        isAmneziaObfuscated(profile.wgQuickConfig) ? 1 : max(profile.nValue, 1)
+    }
+
+    private func isAmneziaObfuscated(_ config: String) -> Bool {
+        let lowered = config.lowercased()
+        let markers = [
+            "jc =",
+            "jmin =",
+            "jmax =",
+            "s1 =",
+            "s2 =",
+            "s3 =",
+            "s4 =",
+            "h1 =",
+            "h2 =",
+            "h3 =",
+            "h4 =",
+            "i1 =",
+            "i2 =",
+            "i3 =",
+            "i4 =",
+            "i5 ="
+        ]
+        return markers.contains { lowered.contains($0) }
     }
 
     private func importFromClipboard() {

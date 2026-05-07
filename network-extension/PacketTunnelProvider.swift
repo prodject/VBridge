@@ -71,12 +71,32 @@ private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, In
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
-    private lazy var adapter: WireGuardAdapter = {
+	    private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { [weak self] _, message in
             sharedLogger.log("[WG]: \(message, privacy: .public)")
             SharedLogger.info(message, source: .wireguard)
         }
-    }()
+	    }()
+
+    private func usesAmneziaObfuscation(_ tunnelConfiguration: TunnelConfiguration) -> Bool {
+        let interface = tunnelConfiguration.interface
+        return interface.junkPacketCount != nil
+            || interface.junkPacketMinSize != nil
+            || interface.junkPacketMaxSize != nil
+            || interface.initPacketJunkSize != nil
+            || interface.responsePacketJunkSize != nil
+            || interface.cookieReplyPacketJunkSize != nil
+            || interface.transportPacketJunkSize != nil
+            || interface.initPacketMagicHeader != nil
+            || interface.responsePacketMagicHeader != nil
+            || interface.underloadPacketMagicHeader != nil
+            || interface.transportPacketMagicHeader != nil
+            || interface.specialJunk1 != nil
+            || interface.specialJunk2 != nil
+            || interface.specialJunk3 != nil
+            || interface.specialJunk4 != nil
+            || interface.specialJunk5 != nil
+    }
 
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
@@ -117,12 +137,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
             return
         }
-        let nValue = Int32(nValueInt)
+        let requestedNValue = Int32(nValueInt)
+        let useSingleProxyWorker = usesAmneziaObfuscation(tunnelConfiguration)
+        let nValue = useSingleProxyWorker ? Int32(1) : requestedNValue
         let manualCaptcha = (providerConfiguration["manualCaptcha"] as? Bool) ?? false
         let turnHost = (providerConfiguration["turnHost"] as? String) ?? ""
         let turnPort = (providerConfiguration["turnPort"] as? String) ?? ""
         let useUdp = (providerConfiguration["useUdp"] as? Bool) ?? true
 
+        if useSingleProxyWorker && requestedNValue != 1 {
+            SharedLogger.warning(
+                "Amnezia obfuscation detected; forcing a single proxy connection to preserve handshake packet order",
+                source: .tunnel
+            )
+        }
         SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), ManualCaptcha: \(manualCaptcha), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
         SharedLogger.info("Starting TURN proxy...", source: .tunnel)
 

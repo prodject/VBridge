@@ -9,6 +9,7 @@ struct LogView: View {
     @State private var autoScroll = true
     @State private var showFilters = false
     @State private var monitoringTask: Task<Void, Never>? = nil
+    @State private var lastSnapshot = ""
 
     var filteredEntries: [LogEntry] {
         entries.filter { entry in
@@ -66,7 +67,7 @@ struct LogView: View {
         monitoringTask = Task {
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    try await Task.sleep(nanoseconds: 300_000_000)
                     loadLogs()
                 } catch {
                     break
@@ -81,9 +82,32 @@ struct LogView: View {
     }
 
     private func loadLogs() {
-        let newEntries = SharedLogger.readEntries()
-        if newEntries.count != entries.count {
-            entries = newEntries
+        let rawLines = SharedLogger.readLogs()
+        let snapshot = "\(rawLines.count)|\(rawLines.last ?? "")"
+        guard snapshot != lastSnapshot else { return }
+
+        lastSnapshot = snapshot
+        entries = rawLines
+            .compactMap(LogEntry.parse)
+            .reversed()
+    }
+
+    private var newestEntryID: Int? {
+        filteredEntries.isEmpty ? nil : 0
+    }
+
+    private var autoScrollIcon: String {
+        autoScroll ? "arrow.up.to.line.compact" : "arrow.up.to.line"
+    }
+
+    private var autoScrollAnchor: UnitPoint {
+        .top
+    }
+
+    private func scrollToLatest(using proxy: ScrollViewProxy) {
+        guard autoScroll, let newestEntryID else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(newestEntryID, anchor: autoScrollAnchor)
         }
     }
 
@@ -115,7 +139,7 @@ struct LogView: View {
                 }
 
                 Button(action: { autoScroll.toggle() }) {
-                    Image(systemName: autoScroll ? "arrow.down.to.line.compact" : "arrow.down.to.line")
+                    Image(systemName: autoScrollIcon)
                         .foregroundColor(autoScroll ? .blue : .secondary)
                 }
             }
@@ -184,10 +208,11 @@ struct LogView: View {
             }
             .background(Color(UIColor.secondarySystemBackground))
             .onChange(of: filteredEntries.count) { _ in
-                if autoScroll && !filteredEntries.isEmpty {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(filteredEntries.count - 1, anchor: .bottom)
-                    }
+                scrollToLatest(using: proxy)
+            }
+            .onChange(of: autoScroll) { isEnabled in
+                if isEnabled {
+                    scrollToLatest(using: proxy)
                 }
             }
         }
