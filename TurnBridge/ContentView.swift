@@ -518,13 +518,24 @@ struct ContentView: View {
 
     private func checkInitialStatus() {
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
-            if let manager = managers?.first {
-                self.vpnStatus = manager.connection.status
-            } else {
-                self.vpnStatus = .disconnected
-            }
+            let currentStatus = managers?.first?.connection.status ?? .disconnected
+            let statusName: String = {
+                switch currentStatus {
+                case .connected:     return "Connected"
+                case .connecting:    return "Connecting"
+                case .disconnected:  return "Disconnected"
+                case .disconnecting: return "Disconnecting"
+                case .reasserting:   return "Reasserting"
+                case .invalid:       return "Invalid"
+                @unknown default:    return "Unknown"
+                }
+            }()
+
+            self.vpnStatus = currentStatus
+            SharedLogger.updateWidgetLiveState(status: statusName)
             self.hasLoadedInitialStatus = true
             self.refreshConnectionProgress()
+            self.refreshWidgetTimelines()
             self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
             self.schedulePendingShortcutActionConsumption()
         }

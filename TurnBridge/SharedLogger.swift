@@ -197,6 +197,120 @@ public struct SharedLogger {
         return container?.appendingPathComponent("vpn_tunnel.log")
     }
 
+    private static let widgetLiveStateStatusKey = "widget.live.status"
+    private static let widgetLiveStateActiveConnectionsKey = "widget.live.activeConnections"
+    private static let widgetLiveStateTotalConnectionsKey = "widget.live.totalConnections"
+    private static let widgetLiveStateRelayIPKey = "widget.live.relayIP"
+    private static let widgetLiveStateUpdatedAtKey = "widget.live.updatedAt"
+
+    private enum WidgetLiveState: String {
+        case connected
+        case connecting
+        case disconnected
+        case unknown
+    }
+
+    private static func widgetLiveStateDefaults() -> UserDefaults? {
+        guard let groupID = appGroupID else { return nil }
+        return UserDefaults(suiteName: groupID)
+    }
+
+    private static func normalizedWidgetState(from rawValue: String) -> WidgetLiveState? {
+        let lowered = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.contains("disconnecting") || lowered.contains("disconnected") {
+            return .disconnected
+        }
+        if lowered.contains("reasserting") || lowered.contains("connecting") {
+            return .connecting
+        }
+        if lowered.contains("connected") {
+            return .connected
+        }
+        if lowered.contains("invalid") || lowered.contains("unknown") {
+            return .unknown
+        }
+        return nil
+    }
+
+    private static func parseConnectedWorkers(from message: String) -> (Int, Int)? {
+        guard let range = message.range(of: "Connected workers ") else { return nil }
+        let suffix = message[range.upperBound...]
+        let value = suffix.split(separator: " ").first.map(String.init) ?? String(suffix)
+        let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2,
+              let active = Int(parts[0]),
+              let total = Int(parts[1]) else {
+            return nil
+        }
+        return (active, total)
+    }
+
+    private static func parseRelayIP(from message: String) -> String? {
+        guard let range = message.range(of: "relayed-address=") else { return nil }
+        let suffix = message[range.upperBound...]
+        let value = String(suffix).split(separator: " ").first.map(String.init) ?? String(suffix)
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if trimmed.hasPrefix("["),
+           let endIndex = trimmed.firstIndex(of: "]") {
+            return String(trimmed[trimmed.index(after: trimmed.startIndex)..<endIndex])
+        }
+
+        if let lastColon = trimmed.lastIndex(of: ":") {
+            let host = String(trimmed[..<lastColon])
+            let port = String(trimmed[trimmed.index(after: lastColon)...])
+            if !host.isEmpty, !port.isEmpty, port.allSatisfy(\.isNumber) {
+                return host
+            }
+        }
+
+        return trimmed
+    }
+
+    public static func updateWidgetLiveState(status rawStatus: String? = nil,
+                                             activeConnections: Int? = nil,
+                                             totalConnections: Int? = nil,
+                                             relayIP: String? = nil) {
+        guard let defaults = widgetLiveStateDefaults() else { return }
+
+        if let rawStatus, let normalizedStatus = normalizedWidgetState(from: rawStatus) {
+            defaults.set(normalizedStatus.rawValue, forKey: widgetLiveStateStatusKey)
+            defaults.removeObject(forKey: widgetLiveStateActiveConnectionsKey)
+            defaults.removeObject(forKey: widgetLiveStateTotalConnectionsKey)
+            defaults.removeObject(forKey: widgetLiveStateRelayIPKey)
+        }
+
+        if let activeConnections {
+            defaults.set(activeConnections, forKey: widgetLiveStateActiveConnectionsKey)
+        }
+
+        if let totalConnections {
+            defaults.set(totalConnections, forKey: widgetLiveStateTotalConnectionsKey)
+        }
+
+        if let relayIP {
+            defaults.set(relayIP, forKey: widgetLiveStateRelayIPKey)
+        }
+
+        defaults.set(Date(), forKey: widgetLiveStateUpdatedAtKey)
+    }
+
+    private static func updateWidgetLiveStateIfNeeded(message: String) {
+        if message.contains("VPN status:") {
+            let statusValue = message.replacingOccurrences(of: "VPN status:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            updateWidgetLiveState(status: statusValue)
+        }
+
+        if let (activeConnections, totalConnections) = parseConnectedWorkers(from: message) {
+            updateWidgetLiveState(activeConnections: activeConnections, totalConnections: totalConnections)
+        }
+
+        if let relayIP = parseRelayIP(from: message) {
+            updateWidgetLiveState(relayIP: relayIP)
+        }
+    }
+
     private static let maxLogSize: UInt64 = 500 * 1024
     private static let rotationKeepRatio: Double = 0.6
 
@@ -219,6 +333,8 @@ public struct SharedLogger {
         } else {
             try? data.write(to: url)
         }
+
+        updateWidgetLiveStateIfNeeded(message: message)
     }
 
     // MARK: - Convenience

@@ -6,6 +6,17 @@ private enum WidgetAppGroup {
     static let identifier = "group.com.prodject.vbridge"
 }
 
+private enum WidgetLiveStateStore {
+    static let statusKey = "widget.live.status"
+    static let activeConnectionsKey = "widget.live.activeConnections"
+    static let totalConnectionsKey = "widget.live.totalConnections"
+    static let relayIPKey = "widget.live.relayIP"
+
+    static var defaults: UserDefaults? {
+        UserDefaults(suiteName: WidgetAppGroup.identifier)
+    }
+}
+
 private struct WidgetSnapshot: Equatable {
     enum State: String {
         case connected
@@ -85,6 +96,10 @@ private struct WidgetSnapshot: Equatable {
     )
 
     static func load() -> WidgetSnapshot {
+        if let liveState = loadPersistedLiveState() {
+            return liveState
+        }
+
         guard let logURL = logURL(),
               let content = try? String(contentsOf: logURL, encoding: .utf8) else {
             return WidgetSnapshot(
@@ -108,7 +123,21 @@ private struct WidgetSnapshot: Equatable {
             if relayIP == nil, let range = line.range(of: "relayed-address=") {
                 let suffix = line[range.upperBound...]
                 let value = String(suffix).split(separator: " ").first.map(String.init) ?? String(suffix)
-                relayIP = value.split(separator: ":", maxSplits: 1).first.map(String.init)
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("["),
+                   let endIndex = trimmed.firstIndex(of: "]") {
+                    relayIP = String(trimmed[trimmed.index(after: trimmed.startIndex)..<endIndex])
+                } else if let lastColon = trimmed.lastIndex(of: ":") {
+                    let host = String(trimmed[..<lastColon])
+                    let port = String(trimmed[trimmed.index(after: lastColon)...])
+                    if !host.isEmpty, !port.isEmpty, port.allSatisfy(\.isNumber) {
+                        relayIP = host
+                    } else {
+                        relayIP = trimmed.isEmpty ? nil : trimmed
+                    }
+                } else {
+                    relayIP = trimmed.isEmpty ? nil : trimmed
+                }
             }
 
             if (activeConnections == nil || totalConnections == nil), let range = line.range(of: "Connected workers ") {
@@ -138,6 +167,45 @@ private struct WidgetSnapshot: Equatable {
             totalConnections: totalConnections,
             relayIP: relayIP,
             pings: pings,
+            lastUpdated: .now
+        )
+    }
+
+    private static func loadPersistedLiveState() -> WidgetSnapshot? {
+        guard let defaults = WidgetLiveStateStore.defaults else { return nil }
+        guard defaults.object(forKey: WidgetLiveStateStore.statusKey) != nil ||
+              defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) != nil ||
+              defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) != nil ||
+              defaults.object(forKey: WidgetLiveStateStore.relayIPKey) != nil else {
+            return nil
+        }
+
+        let state: State = {
+            guard let rawStatus = defaults.string(forKey: WidgetLiveStateStore.statusKey)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+                return .unknown
+            }
+            switch rawStatus {
+            case "connected":
+                return .connected
+            case "connecting":
+                return .connecting
+            case "disconnected", "disconnecting":
+                return .disconnected
+            default:
+                return .unknown
+            }
+        }()
+
+        let activeConnections = defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) as? Int
+        let totalConnections = defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) as? Int
+        let relayIP = defaults.string(forKey: WidgetLiveStateStore.relayIPKey)
+
+        return WidgetSnapshot(
+            state: state,
+            activeConnections: activeConnections,
+            totalConnections: totalConnections,
+            relayIP: relayIP,
+            pings: state == .connected ? PingSample.loadAll() : PingSample.placeholderSamples,
             lastUpdated: .now
         )
     }
@@ -289,7 +357,8 @@ private struct WidgetProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
         let snapshot = WidgetSnapshot.load()
-        let refreshDate = Calendar.current.date(byAdding: .second, value: snapshot.state == .connected ? 30 : 300, to: .now) ?? .now.addingTimeInterval(60)
+        let refreshInterval = snapshot.state == .connected ? 30 : 60
+        let refreshDate = Calendar.current.date(byAdding: .second, value: refreshInterval, to: .now) ?? .now.addingTimeInterval(TimeInterval(refreshInterval))
         completion(Timeline(entries: [WidgetEntry(date: .now, snapshot: snapshot)], policy: .after(refreshDate)))
     }
 }
@@ -306,13 +375,12 @@ private struct WidgetCardView: View {
 
             LinearGradient(
                 colors: [
-                    Color(red: 0.93, green: 0.93, blue: 0.95).opacity(0.96),
-                    Color(red: 0.84, green: 0.83, blue: 0.89).opacity(0.94),
-                    Color(red: 0.71, green: 0.63, blue: 0.94).opacity(0.92),
-                    Color(red: 0.56, green: 0.40, blue: 0.97).opacity(0.95)
+                    Color(red: 0.07, green: 0.76, blue: 0.91).opacity(0.98),
+                    Color(red: 0.77, green: 0.44, blue: 0.93).opacity(0.98),
+                    Color(red: 0.96, green: 0.31, blue: 0.35).opacity(0.98)
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
 
             Circle()
