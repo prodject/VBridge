@@ -518,7 +518,7 @@ struct ContentView: View {
                     cancelConnectWatchdog()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
-                    endLiveActivity(immediate: true, profileName: profile.name)
+                    endLiveActivity(profileName: profile.name, immediate: true)
                     presentConnectionIssue(
                         title: "Connection Failed",
                         message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
@@ -814,8 +814,9 @@ struct ContentView: View {
             activeConnections: progress?.active,
             totalConnections: progress?.total,
             relayIP: latestRelayIPFromLogs(),
-            estimatedRemainingSeconds: progress.map {
-                estimatedRemainingSeconds(activeConnections: $0.active, totalConnections: $0.total)
+            estimatedRemainingSeconds: progress.flatMap {
+                guard let total = $0.total else { return nil }
+                return estimatedRemainingSeconds(activeConnections: $0.active, totalConnections: total)
             }
         )
     }
