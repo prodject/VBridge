@@ -278,7 +278,6 @@ func vkDelayRandom(minMs, maxMs int) {
 func getCreds(link string) (resUser string, resPass string, resTurn string, resErr error) {
     profile := getRandomProfile()
     name := generateName()
-	escapedName := neturl.QueryEscape(name)
 
     log.Printf("Connecting - Name: %s | UA: %s", name, profile.UserAgent)
 
@@ -381,7 +380,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 
         vkDelayRandom(200, 400)
 
-        data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", link, escapedName, token1)
+        data = buildAnonymousTokenPayload(link, name, token1, "", "", "", "", "")
         reqURL := fmt.Sprintf(anonymousURL, creds.ClientID)
 
         token2 = ""
@@ -417,11 +416,16 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                     captchaErr.CaptchaAttempt = "1"
                                 }
 
-                                data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
-                                    "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
-                                    "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
-                                    link, escapedName, captchaErr.CaptchaSid, successToken,
-                                    captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+                                data = buildAnonymousTokenPayload(
+                                    link,
+                                    name,
+                                    token1,
+                                    captchaErr.CaptchaSid,
+                                    "",
+                                    successToken,
+                                    captchaErr.CaptchaTs,
+                                    captchaErr.CaptchaAttempt,
+                                )
                                 continue
                             }
 
@@ -433,8 +437,16 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                     break
                                 }
 
-                                data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&captcha_key=%s&captcha_sid=%s&access_token=%s",
-                                    link, escapedName, neturl.QueryEscape(captchaKey), captchaErr.CaptchaSid, token1)
+                                data = buildAnonymousTokenPayload(
+                                    link,
+                                    name,
+                                    token1,
+                                    captchaErr.CaptchaSid,
+                                    captchaKey,
+                                    "",
+                                    captchaErr.CaptchaTs,
+                                    captchaErr.CaptchaAttempt,
+                                )
                                 continue
                             }
 
@@ -451,11 +463,16 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                 captchaErr.CaptchaAttempt = "1"
                             }
 
-                            data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s"+
-                                "&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s"+
-                                "&captcha_ts=%s&captcha_attempt=%s&access_token=%s",
-                                link, escapedName, captchaErr.CaptchaSid, successToken,
-                                captchaErr.CaptchaTs, captchaErr.CaptchaAttempt, token1)
+                            data = buildAnonymousTokenPayload(
+                                link,
+                                name,
+                                token1,
+                                captchaErr.CaptchaSid,
+                                "",
+                                successToken,
+                                captchaErr.CaptchaTs,
+                                captchaErr.CaptchaAttempt,
+                            )
                             continue
                         }
                     }

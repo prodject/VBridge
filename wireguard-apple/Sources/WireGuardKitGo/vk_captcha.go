@@ -2,7 +2,6 @@ package main
 
 import (
     "context"
-    "crypto/md5"
     "crypto/rand"
     "crypto/sha256"
     "crypto/tls"
@@ -120,7 +119,10 @@ func ParseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 }
 
 func (e *VkCaptchaError) IsCaptchaError() bool {
-    return e.ErrorCode == 14 && e.RedirectUri != "" && e.SessionToken != ""
+    if e.ErrorCode != 14 {
+        return false
+    }
+    return (e.RedirectUri != "" && e.SessionToken != "") || (e.CaptchaImg != "" && e.CaptchaSid != "")
 }
 
 func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, error) {
@@ -181,17 +183,7 @@ func fetchPowInput(ctx context.Context, client *http.Client, profile Profile, re
         return "", 0, nil, err
     }
 
-    req.Header.Set("User-Agent", profile.UserAgent)
-    req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-    req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-    req.Header.Set("sec-ch-ua", profile.SecChUa)
-    req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
-    req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
-    req.Header.Set("Sec-Fetch-Site", "none")
-    req.Header.Set("Sec-Fetch-Mode", "navigate")
-    req.Header.Set("Sec-Fetch-Dest", "document")
-    req.Header.Set("Sec-GPC", "1")
-    req.Header.Set("DNT", "1")
+    applyCaptchaDocumentHeaders(req.Header, profile.UserAgent)
 
     resp, err := client.Do(req)
     if err != nil {
@@ -260,21 +252,8 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
             return nil, err
         }
 
-        req.Header.Set("User-Agent", profile.UserAgent)
+        applyCaptchaApiHeaders(req.Header, profile.UserAgent)
         req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-        req.Header.Set("Accept", "*/*")
-        req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-        req.Header.Set("Origin", "https://id.vk.ru")
-        req.Header.Set("Referer", "https://id.vk.ru/")
-        req.Header.Set("sec-ch-ua", profile.SecChUa)
-        req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
-        req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
-        req.Header.Set("Sec-Fetch-Site", "same-site")
-        req.Header.Set("Sec-Fetch-Mode", "cors")
-        req.Header.Set("Sec-Fetch-Dest", "empty")
-        req.Header.Set("Sec-GPC", "1")
-        req.Header.Set("DNT", "1")
-        req.Header.Set("Priority", "u=1, i")
 
         httpResp, err := client.Do(req)
         if err != nil {
@@ -331,8 +310,7 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
 
     cursorJSON := generateFakeCursor()
     answer := base64.StdEncoding.EncodeToString([]byte("{}"))
-    debugInfoBytes := md5.Sum([]byte(profile.UserAgent + strconv.FormatInt(time.Now().UnixNano(), 10)))
-    debugInfo := hex.EncodeToString(debugInfoBytes[:])
+    debugInfo := captchaDebugInfo
     connectionRtt := "[50,50,50,50,50,50,50,50,50,50]"
     connectionDownlink := "[9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5]"
 
@@ -374,6 +352,10 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
         }
     }
 
+    if status == "ERROR_LIMIT" {
+        return "", fmt.Errorf("check status: %s", status)
+    }
+
     // Checkbox failed — try slider captcha
     log.Printf("[Captcha] Checkbox failed, trying slider captcha...")
 
@@ -384,6 +366,9 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
         settingsResp.ShowCaptchaType,
         describeCaptchaTypes(settingsResp.SettingsByType),
     )
+    if !hasSlider && settingsResp.ShowCaptchaType != sliderCaptchaType {
+        return "", fmt.Errorf("check status: %s (slider settings not found)", status)
+    }
 
     sliderToken, sliderErr := solveSliderCaptcha(vkReq, baseParams, browserFp, hash, sliderSettings)
     if sliderErr != nil {
@@ -398,7 +383,7 @@ func callCaptchaNotRobot(ctx context.Context, client *http.Client, profile Profi
 func buildCaptchaDeviceJSON(profile Profile) string {
     return fmt.Sprintf(
         `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1040,"innerWidth":1920,"innerHeight":969,"devicePixelRatio":1,"language":"en-US","languages":["en-US"],"webdriver":false,"hardwareConcurrency":8,"deviceMemory":8,"connectionEffectiveType":"4g","notificationsPermission":"default","userAgent":"%s","platform":"Win32"}`,
-        profile.UserAgent,
+        normalizeCaptchaUserAgent(profile.UserAgent),
     )
 }
 
