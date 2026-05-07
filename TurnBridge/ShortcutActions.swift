@@ -36,7 +36,7 @@ enum PendingShortcutActionStore {
 struct ToggleVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Toggle VBridge VPN"
     static var description = IntentDescription("Opens VBridge and toggles the tunnel.")
-    static var openAppWhenRun = true
+    static var supportedModes: IntentModes { [.background, .foreground(.immediate)] }
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
@@ -49,7 +49,7 @@ struct ToggleVPNIntent: AppIntent {
 struct ConnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Connect VBridge VPN"
     static var description = IntentDescription("Opens VBridge and connects the tunnel.")
-    static var openAppWhenRun = true
+    static var supportedModes: IntentModes { [.background, .foreground(.immediate)] }
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
@@ -62,7 +62,7 @@ struct ConnectVPNIntent: AppIntent {
 struct DisconnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Disconnect VBridge VPN"
     static var description = IntentDescription("Opens VBridge and disconnects the tunnel.")
-    static var openAppWhenRun = true
+    static var supportedModes: IntentModes { [.background, .foreground(.immediate)] }
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {

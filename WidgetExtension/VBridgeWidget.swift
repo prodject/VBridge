@@ -202,6 +202,19 @@ private struct PingSample: Equatable {
         return "\(latencyMs) ms"
     }
 
+    var badgeText: String {
+        switch name {
+        case "Cloudflare":
+            return "CF"
+        case "Google":
+            return "GO"
+        case "Yandex":
+            return "YN"
+        default:
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+
     static let targets: [(String, URL)] = [
         ("Cloudflare", URL(string: "https://www.cloudflare.com/cdn-cgi/trace")!),
         ("Google", URL(string: "https://www.google.com/generate_204")!),
@@ -292,19 +305,37 @@ private struct WidgetCardView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            if family == .systemSmall {
-                smallLayout(snapshot: snapshot)
-            } else {
-                mediumLayout(snapshot: snapshot)
-            }
+            content(snapshot: snapshot)
         }
         .widgetURL(snapshot.actionURL)
     }
 
+    @ViewBuilder
+    private func content(snapshot: WidgetSnapshot) -> some View {
+        switch family {
+        case .systemSmall:
+            smallLayout(snapshot: snapshot)
+        default:
+            mediumLayout(snapshot: snapshot)
+        }
+    }
+
+    private var activePrompt: String {
+        "Tap to connect"
+    }
+
+    private var disconnectPrompt: String {
+        "Tap to disconnect"
+    }
+
+    private func prompt(for snapshot: WidgetSnapshot) -> String {
+        snapshot.state == .connected || snapshot.state == .connecting ? disconnectPrompt : activePrompt
+    }
+
     private func smallLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("VBridge")
                         .font(.system(size: 16, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
@@ -313,28 +344,93 @@ private struct WidgetCardView: View {
                         .foregroundStyle(.white.opacity(0.75))
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 Image(systemName: snapshot.statusSymbol)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(snapshot.statusAccent)
-                    .padding(10)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(8)
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(snapshot.connectionsText)
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("active connections")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "network")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(snapshot.relayText)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Text(prompt(for: snapshot))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(14)
+    }
+
+    private func mediumLayout(snapshot: WidgetSnapshot) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("VBridge")
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(snapshot.statusLabel)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: snapshot.statusSymbol)
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(snapshot.statusAccent)
+                        .padding(9)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
                     Text(snapshot.connectionsText)
                         .font(.system(size: 32, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("connections")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    Text("active connections")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 HStack(spacing: 8) {
                     Image(systemName: "network")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                     Text(snapshot.relayText)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -342,114 +438,67 @@ private struct WidgetCardView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
+
+                Spacer(minLength: 0)
+
+                HStack {
+                    Text(prompt(for: snapshot))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.86))
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 0)
-
-            HStack {
-                Text(snapshot.state == .connected || snapshot.state == .connecting ? "Tap to disconnect" : "Tap to connect")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Live pings")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.8))
 
-                Spacer()
-
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .padding(16)
-    }
-
-    private func mediumLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("VBridge")
-                        .font(.system(size: 20, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(snapshot.statusLabel)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.75))
+                VStack(spacing: 8) {
+                    ForEach(snapshot.pings, id: \.name) { ping in
+                        PingBadgeView(sample: ping)
+                    }
                 }
 
-                Spacer()
-
-                Image(systemName: snapshot.statusSymbol)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(snapshot.statusAccent)
-                    .padding(10)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Spacer(minLength: 0)
             }
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(snapshot.connectionsText)
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("connections")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Text(snapshot.relayText)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-
-            VStack(spacing: 10) {
-                ForEach(snapshot.pings, id: \.name) { ping in
-                    PingRowView(sample: ping)
-                }
-            }
-
-            Spacer(minLength: 0)
-
-            HStack {
-                Text("Live pings every 30s")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
-
-                Spacer()
-
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(width: 128, alignment: .leading)
         }
         .padding(16)
     }
 }
 
-private struct PingRowView: View {
+private struct PingBadgeView: View {
     let sample: PingSample
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(sample.name)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: 88, alignment: .leading)
-
-            HStack(spacing: 4) {
-                ForEach(0..<5, id: \.self) { index in
-                    Circle()
-                        .fill(index < sample.dotCount ? sample.dotColor : .white.opacity(0.18))
-                        .frame(width: 6, height: 6)
-                }
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(sample.badgeText)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer(minLength: 0)
+                Text(sample.latencyText)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
             }
 
-            Spacer()
-
-            Text(sample.latencyText)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
+            HStack(spacing: 3) {
+                ForEach(0..<5, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(index < sample.dotCount ? sample.dotColor : .white.opacity(0.18))
+                        .frame(width: 10, height: 4)
+                }
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)

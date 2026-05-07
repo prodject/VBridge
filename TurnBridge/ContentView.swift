@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var hasLoadedInitialStatus = false
     @State private var connectionProgressText: String?
     @State private var logMonitoringTask: Task<Void, Never>?
+    @State private var pendingShortcutActionTask: Task<Void, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
@@ -231,17 +232,20 @@ struct ContentView: View {
                 }
                 startLogMonitoring()
                 refreshConnectionProgress()
+                schedulePendingShortcutActionConsumption()
             }
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
-                    consumePendingShortcutAction()
+                    schedulePendingShortcutActionConsumption()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShortcutActionDidChange)) { _ in
-                consumePendingShortcutAction()
+                schedulePendingShortcutActionConsumption()
             }
             .onDisappear {
                 stopLogMonitoring()
+                pendingShortcutActionTask?.cancel()
+                pendingShortcutActionTask = nil
             }
             .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { notification in
                 if let connection = notification.object as? NEVPNConnection {
@@ -493,7 +497,7 @@ struct ContentView: View {
             }
             self.hasLoadedInitialStatus = true
             self.refreshConnectionProgress()
-            self.consumePendingShortcutAction()
+            self.schedulePendingShortcutActionConsumption()
         }
     }
 
@@ -552,7 +556,7 @@ struct ContentView: View {
             break
         }
 
-        consumePendingShortcutAction()
+        schedulePendingShortcutActionConsumption()
         return true
     }
 
@@ -562,12 +566,26 @@ struct ContentView: View {
 #endif
     }
 
-    private func consumePendingShortcutAction() {
+    private func schedulePendingShortcutActionConsumption() {
+        pendingShortcutActionTask?.cancel()
+        pendingShortcutActionTask = Task {
+            for _ in 0..<6 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                if await MainActor.run({ consumePendingShortcutActionIfReady() }) {
+                    return
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func consumePendingShortcutActionIfReady() -> Bool {
         guard hasLoadedInitialStatus else {
-            return
+            return false
         }
         guard let action = PendingShortcutActionStore.consume() else {
-            return
+            return false
         }
 
         switch action {
@@ -582,6 +600,7 @@ struct ContentView: View {
                 toggleTunnel()
             }
         }
+        return true
     }
 
     private func latestConnectionProgressFromLogs() -> String? {
