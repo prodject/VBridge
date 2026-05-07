@@ -5,11 +5,9 @@
 import SwiftUI
 import NetworkExtension
 import AppIntents
-import UIKit
 
 @main
 struct VBridge: App {
-    @UIApplicationDelegateAdaptor(VBridgeAppDelegate.self) private var appDelegate
     @AppStorage("appTheme") private var appTheme = "system"
 
     init() {
@@ -17,7 +15,6 @@ struct VBridge: App {
         if #available(iOS 16.0, *) {
             VBridgeAppShortcuts.updateAppShortcutParameters()
         }
-        VBridgeQuickActionType.register()
     }
 
     var body: some Scene {

@@ -15,7 +15,7 @@ private enum WidgetControlActionStore {
     }
 }
 
-@available(iOSApplicationExtension 18.0, *)
+@available(iOS 18.0, *)
 struct ConnectVPNControlIntent: AppIntent {
     static var title: LocalizedStringResource = "Connect VBridge VPN"
     static var description = IntentDescription("Opens VBridge and connects the tunnel.")
@@ -28,7 +28,7 @@ struct ConnectVPNControlIntent: AppIntent {
     }
 }
 
-@available(iOSApplicationExtension 18.0, *)
+@available(iOS 18.0, *)
 struct VBridgeConnectControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.prodject.vbridge.control.connect") {
