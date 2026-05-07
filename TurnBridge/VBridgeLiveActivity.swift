@@ -255,7 +255,7 @@ final class VBridgeLiveActivityCoordinator {
             relevanceScore: snapshot.content.phase == .connecting ? 1.0 : 0.75
         )
 
-        if let currentActivity, currentActivity.attributes.profileName == snapshot.profileName {
+        if let currentActivity = activity, currentActivity.attributes.profileName == snapshot.profileName {
             await currentActivity.update(content)
             if snapshot.content.phase == .disconnected {
                 await currentActivity.end(content, dismissalPolicy: .immediate)
@@ -290,7 +290,7 @@ final class VBridgeLiveActivityCoordinator {
         )
         let dismissalPolicy: ActivityUIDismissalPolicy = immediate ? .immediate : .default
 
-        if let currentActivity, currentActivity.attributes.profileName == snapshot.profileName {
+        if let currentActivity = activity, currentActivity.attributes.profileName == snapshot.profileName {
             await currentActivity.end(content, dismissalPolicy: dismissalPolicy)
             activity = nil
             return

@@ -152,6 +152,26 @@ private struct WidgetSnapshot: Equatable {
         }
     }
 
+    init(
+        profileName: String,
+        state: State,
+        activeConnections: Int?,
+        totalConnections: Int?,
+        relayIP: String?,
+        estimatedRemainingSeconds: Int?,
+        pings: [PingSample],
+        lastUpdated: Date
+    ) {
+        self.profileName = profileName
+        self.state = state
+        self.activeConnections = activeConnections
+        self.totalConnections = totalConnections
+        self.relayIP = relayIP
+        self.estimatedRemainingSeconds = estimatedRemainingSeconds
+        self.pings = pings
+        self.lastUpdated = lastUpdated
+    }
+
     static let placeholder = WidgetSnapshot(
         profileName: "VBridge",
         state: .connected,
@@ -165,7 +185,7 @@ private struct WidgetSnapshot: Equatable {
 
     static func load() -> WidgetSnapshot {
         if let liveState = VBridgeLiveActivityStore.load() {
-            return WidgetSnapshot(liveState: liveState)
+            return WidgetSnapshot(liveSnapshot: liveState)
         }
 
         guard let logURL = logURL(),
