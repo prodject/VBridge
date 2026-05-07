@@ -42,6 +42,8 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         var totalConnections: Int?
         var relayIP: String?
         var estimatedRemainingSeconds: Int?
+        var downloadSpeedMbps: Double?
+        var uploadSpeedMbps: Double?
         var updatedAt: Date
 
         var progressFraction: Double? {
@@ -74,6 +76,25 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
             formatter.unitsStyle = .abbreviated
             formatter.zeroFormattingBehavior = clampedSeconds >= 3600 ? [.pad] : [.dropAll]
             return formatter.string(from: TimeInterval(clampedSeconds))
+        }
+
+        var downloadSpeedText: String? {
+            speedText(downloadSpeedMbps, fallback: "DL --")
+        }
+
+        var uploadSpeedText: String? {
+            speedText(uploadSpeedMbps, fallback: "UL --")
+        }
+
+        var speedSummaryText: String {
+            let download = downloadSpeedText ?? "DL --"
+            let upload = uploadSpeedText ?? "UL --"
+            return "\(download)  •  \(upload)"
+        }
+
+        private func speedText(_ value: Double?, fallback: String) -> String? {
+            guard let value, value.isFinite, value > 0 else { return fallback }
+            return String(format: "%.1f Mbps", value)
         }
     }
 
@@ -126,6 +147,8 @@ enum VBridgeLiveActivityStore {
         totalConnections: Int? = nil,
         relayIP: String? = nil,
         estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil,
         updatedAt: Date = .now
     ) {
         var snapshot = load() ?? VBridgeLiveActivitySnapshot(
@@ -136,6 +159,8 @@ enum VBridgeLiveActivityStore {
                 totalConnections: nil,
                 relayIP: nil,
                 estimatedRemainingSeconds: nil,
+                downloadSpeedMbps: nil,
+                uploadSpeedMbps: nil,
                 updatedAt: updatedAt
             )
         )
@@ -150,11 +175,15 @@ enum VBridgeLiveActivityStore {
                 snapshot.content.totalConnections = nil
                 snapshot.content.relayIP = nil
                 snapshot.content.estimatedRemainingSeconds = nil
+                snapshot.content.downloadSpeedMbps = nil
+                snapshot.content.uploadSpeedMbps = nil
             } else if phase == .disconnected || phase == .unknown {
                 snapshot.content.activeConnections = nil
                 snapshot.content.totalConnections = nil
                 snapshot.content.relayIP = nil
                 snapshot.content.estimatedRemainingSeconds = nil
+                snapshot.content.downloadSpeedMbps = nil
+                snapshot.content.uploadSpeedMbps = nil
             }
         }
         if let activeConnections {
@@ -168,6 +197,12 @@ enum VBridgeLiveActivityStore {
         }
         if let estimatedRemainingSeconds {
             snapshot.content.estimatedRemainingSeconds = estimatedRemainingSeconds
+        }
+        if let downloadSpeedMbps {
+            snapshot.content.downloadSpeedMbps = downloadSpeedMbps
+        }
+        if let uploadSpeedMbps {
+            snapshot.content.uploadSpeedMbps = uploadSpeedMbps
         }
         snapshot.content.updatedAt = updatedAt
         save(snapshot)
@@ -195,7 +230,9 @@ final class VBridgeLiveActivityCoordinator {
         activeConnections: Int? = nil,
         totalConnections: Int? = nil,
         relayIP: String? = nil,
-        estimatedRemainingSeconds: Int? = nil
+        estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil
     ) {
         let updatedAt = Date()
         let snapshot = VBridgeLiveActivitySnapshot(
@@ -206,6 +243,8 @@ final class VBridgeLiveActivityCoordinator {
                 totalConnections: totalConnections,
                 relayIP: relayIP,
                 estimatedRemainingSeconds: estimatedRemainingSeconds,
+                downloadSpeedMbps: downloadSpeedMbps,
+                uploadSpeedMbps: uploadSpeedMbps,
                 updatedAt: updatedAt
             )
         )
@@ -234,6 +273,8 @@ final class VBridgeLiveActivityCoordinator {
                 totalConnections: nil,
                 relayIP: nil,
                 estimatedRemainingSeconds: nil,
+                downloadSpeedMbps: nil,
+                uploadSpeedMbps: nil,
                 updatedAt: updatedAt
             )
         )

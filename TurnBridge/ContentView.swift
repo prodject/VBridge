@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var connectionStartedAt: Date?
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
+    @State private var speedTestTask: Task<Void, Never>?
     @State private var pendingShortcutActionTask: Task<Void, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
@@ -474,6 +475,7 @@ struct ContentView: View {
             SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
             isUserInitiatedDisconnect = true
             cancelConnectWatchdog()
+            cancelSpeedTest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             let currentProgress = latestConnectionProgressFromLogs()
             syncLiveActivityState(
@@ -516,6 +518,7 @@ struct ContentView: View {
             ) { isSuccess in
                 if !isSuccess {
                     cancelConnectWatchdog()
+                    cancelSpeedTest()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
                     endLiveActivity(profileName: profile.name, immediate: true)
@@ -783,7 +786,9 @@ struct ContentView: View {
         activeConnections: Int? = nil,
         totalConnections: Int? = nil,
         relayIP: String? = nil,
-        estimatedRemainingSeconds: Int? = nil
+        estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil
     ) {
         guard #available(iOS 16.1, *) else { return }
         Task { @MainActor in
@@ -793,7 +798,9 @@ struct ContentView: View {
                 activeConnections: activeConnections,
                 totalConnections: totalConnections,
                 relayIP: relayIP,
-                estimatedRemainingSeconds: estimatedRemainingSeconds
+                estimatedRemainingSeconds: estimatedRemainingSeconds,
+                downloadSpeedMbps: downloadSpeedMbps,
+                uploadSpeedMbps: uploadSpeedMbps
             )
         }
     }
@@ -804,6 +811,7 @@ struct ContentView: View {
         let progress = latestConnectionProgressFromLogs()
 
         if phase == .disconnected {
+            cancelSpeedTest()
             endLiveActivity(profileName: profileName, immediate: true)
             return
         }
@@ -818,17 +826,100 @@ struct ContentView: View {
                 estimatedRemainingSeconds(activeConnections: $0.active, totalConnections: $0.total)
             }
         )
+
+        if phase == .connected {
+            startSpeedTestIfNeeded(profileName: profileName)
+        } else {
+            cancelSpeedTest()
+        }
     }
 
     private func endLiveActivity(profileName: String? = nil, immediate: Bool) {
         guard #available(iOS 16.1, *) else { return }
         let resolvedProfileName = profileName ?? store.selectedProfile?.name ?? "VBridge"
+        cancelSpeedTest()
         Task { @MainActor in
             VBridgeLiveActivityCoordinator.shared.end(
                 profileName: resolvedProfileName,
                 finalPhase: .disconnected,
                 immediate: immediate
             )
+        }
+    }
+
+    private func cancelSpeedTest() {
+        speedTestTask?.cancel()
+        speedTestTask = nil
+    }
+
+    private func startSpeedTestIfNeeded(profileName: String) {
+        guard #available(iOS 16.1, *) else { return }
+        guard speedTestTask == nil else { return }
+        guard vpnStatus == .connected else { return }
+
+        speedTestTask = Task(priority: .utility) { [profileName] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            let result = await runSpeedTest()
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self.speedTestTask = nil
+                guard self.vpnStatus == .connected else { return }
+                self.syncLiveActivityState(
+                    profileName: profileName,
+                    phase: .connected,
+                    activeConnections: self.latestConnectionProgressFromLogs()?.active,
+                    totalConnections: self.latestConnectionProgressFromLogs()?.total,
+                    relayIP: self.latestRelayIPFromLogs(),
+                    estimatedRemainingSeconds: nil,
+                    downloadSpeedMbps: result.downloadMbps,
+                    uploadSpeedMbps: result.uploadMbps
+                )
+            }
+        }
+    }
+
+    private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
+        async let download = measureDownloadSpeedMbps()
+        async let upload = measureUploadSpeedMbps()
+        return await (download, upload)
+    }
+
+    private func measureDownloadSpeedMbps() async -> Double? {
+        guard let url = URL(string: "https://speed.cloudflare.com/__down?bytes=2000000") else { return nil }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+
+        let start = Date()
+        do {
+            let (temporaryURL, response) = try await URLSession.shared.download(for: request)
+            guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else { return nil }
+            let attributes = try FileManager.default.attributesOfItem(atPath: temporaryURL.path)
+            let bytes = (attributes[.size] as? NSNumber)?.doubleValue ?? 0
+            let elapsed = max(Date().timeIntervalSince(start), 0.001)
+            return bytes > 0 ? (bytes * 8.0 / elapsed) / 1_000_000.0 : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func measureUploadSpeedMbps() async -> Double? {
+        guard let url = URL(string: "https://speed.cloudflare.com/__up") else { return nil }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+
+        let payload = Data(repeating: 0xAB, count: 1_000_000)
+        let start = Date()
+        do {
+            let (_, response) = try await URLSession.shared.upload(for: request, from: payload)
+            guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else { return nil }
+            let elapsed = max(Date().timeIntervalSince(start), 0.001)
+            return payload.isEmpty ? nil : (Double(payload.count) * 8.0 / elapsed) / 1_000_000.0
+        } catch {
+            return nil
         }
     }
 

@@ -184,22 +184,30 @@ private struct WidgetSnapshot: Equatable {
     )
 
     static func load() -> WidgetSnapshot {
+        let logSnapshot = loadFromLogs()
         if let liveState = VBridgeLiveActivityStore.load() {
-            return WidgetSnapshot(liveSnapshot: liveState)
+            return WidgetSnapshot(
+                liveSnapshot: liveState,
+                fallback: logSnapshot
+            )
         }
 
+        return logSnapshot ?? WidgetSnapshot(
+            profileName: "VBridge",
+            state: .unknown,
+            activeConnections: nil,
+            totalConnections: nil,
+            relayIP: nil,
+            estimatedRemainingSeconds: nil,
+            pings: PingSample.placeholderSamples,
+            lastUpdated: .now
+        )
+    }
+
+    private static func loadFromLogs() -> WidgetSnapshot? {
         guard let logURL = logURL(),
               let content = try? String(contentsOf: logURL, encoding: .utf8) else {
-            return WidgetSnapshot(
-                profileName: "VBridge",
-                state: .unknown,
-                activeConnections: nil,
-                totalConnections: nil,
-                relayIP: nil,
-                estimatedRemainingSeconds: nil,
-                pings: PingSample.placeholderSamples,
-                lastUpdated: .now
-            )
+            return nil
         }
 
         let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
@@ -264,14 +272,18 @@ private struct WidgetSnapshot: Equatable {
     }
 
     init(liveSnapshot: VBridgeLiveActivitySnapshot) {
+        self.init(liveSnapshot: liveSnapshot, fallback: nil)
+    }
+
+    init(liveSnapshot: VBridgeLiveActivitySnapshot, fallback: WidgetSnapshot?) {
         let state = State(rawValue: liveSnapshot.content.phase.rawValue) ?? .unknown
         self.profileName = liveSnapshot.profileName
         self.state = state
-        self.activeConnections = liveSnapshot.content.activeConnections
-        self.totalConnections = liveSnapshot.content.totalConnections
-        self.relayIP = liveSnapshot.content.relayIP
-        self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds
-        self.pings = state == .connected ? PingSample.loadAll() : PingSample.placeholderSamples
+        self.activeConnections = liveSnapshot.content.activeConnections ?? fallback?.activeConnections
+        self.totalConnections = liveSnapshot.content.totalConnections ?? fallback?.totalConnections
+        self.relayIP = liveSnapshot.content.relayIP ?? fallback?.relayIP
+        self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds ?? fallback?.estimatedRemainingSeconds
+        self.pings = state == .connected ? PingSample.loadAll() : (fallback?.pings ?? PingSample.placeholderSamples)
         self.lastUpdated = liveSnapshot.content.updatedAt
     }
 
@@ -805,11 +817,13 @@ private struct VBridgeLiveActivityWidget: Widget {
             liveActivityLockScreenView(state: context.state)
                 .activityBackgroundTint(Color.black.opacity(0.92))
                 .activitySystemActionForegroundColor(.white)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 6)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     liveActivityHeader(state: context.state)
+                        .padding(.leading, 2)
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
@@ -817,10 +831,14 @@ private struct VBridgeLiveActivityWidget: Widget {
                         Text(context.state.phase.displayTitle)
                             .font(.system(size: 12, weight: .semibold, design: .default))
                             .foregroundStyle(.white.opacity(0.86))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
 
-                        Text(context.state.remainingText ?? context.state.progressText ?? "VPN")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        Text(context.state.speedSummaryText)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
                     }
                 }
 
@@ -832,9 +850,11 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(liveActivityTint(for: context.state.phase))
             } compactTrailing: {
-                Text(context.state.remainingText ?? context.state.progressText ?? context.state.phase.displayTitle)
+                Text(String(context.state.activeConnections ?? 0))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             } minimal: {
                 Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
                     .font(.system(size: 12, weight: .semibold))
@@ -845,18 +865,21 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             liveActivityHeader(state: state)
 
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(state.progressText ?? "0/0")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(state.phase.displayTitle)
                         .font(.system(size: 12, weight: .semibold, design: .default))
                         .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(1)
 
                     Text(state.remainingText ?? state.relayText)
                         .font(.system(size: 12, weight: .semibold, design: .default))
@@ -869,6 +892,11 @@ private struct VBridgeLiveActivityWidget: Widget {
                 .tint(liveActivityTint(for: state.phase))
                 .progressViewStyle(.linear)
 
+            HStack(spacing: 8) {
+                speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
+                speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
+            }
+
             HStack(spacing: 6) {
                 Image(systemName: "network")
                     .font(.system(size: 11, weight: .semibold))
@@ -877,10 +905,11 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
     }
 
     private func liveActivityHeader(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
@@ -901,24 +930,34 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             ProgressView(value: state.progressFraction ?? 0)
                 .tint(liveActivityTint(for: state.phase))
                 .progressViewStyle(.linear)
+
+            HStack(spacing: 8) {
+                speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
+                speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
+            }
 
             HStack(alignment: .center, spacing: 10) {
                 Text(state.progressText ?? "0/0")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Spacer(minLength: 0)
 
-                Text(state.remainingText ?? state.phase.displayTitle)
-                    .font(.system(size: 12, weight: .semibold, design: .default))
+                Text(state.speedSummaryText)
+                    .font(.system(size: 11, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
         }
-        .padding(.top, 2)
+        .padding(.top, 4)
+        .padding(.horizontal, 4)
     }
 
     private func liveActivityTint(for phase: VBridgeLiveActivityPhase) -> Color {
@@ -932,6 +971,25 @@ private struct VBridgeLiveActivityWidget: Widget {
         case .unknown:
             return .white.opacity(0.75)
         }
+    }
+
+    private func speedChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold, design: .default))
+                .foregroundStyle(.white.opacity(0.66))
+                .lineLimit(1)
+
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
