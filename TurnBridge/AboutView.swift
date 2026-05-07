@@ -13,8 +13,7 @@ struct AboutView: View {
                 .padding(.top, 40)
             
             Text("VBridge")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+                .font(.system(size: 34, weight: .bold, design: .default))
             
             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                 .foregroundColor(.secondary)
@@ -58,11 +57,11 @@ struct AboutView: View {
                         
                         Image(systemName: "arrow.up.right")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.blue.opacity(0.7))
+                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.75))
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                     .padding()
-                    .background(Color.blue.opacity(0.1))
+                    .background(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.1))
                     .cornerRadius(12)
                 }
             }

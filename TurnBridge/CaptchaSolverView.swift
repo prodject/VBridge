@@ -26,7 +26,7 @@ struct CaptchaSolverView: View {
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
                     Text("Manual Captcha")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .default))
                     Text(request.mode == .proxy ? "Proxy fallback" : "Image fallback")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -40,7 +40,7 @@ struct CaptchaSolverView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "safari.fill")
                         .font(.system(size: 36, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color(red: 0.53, green: 0.37, blue: 0.98))
                     Text("The captcha page opens in your browser.")
                         .font(.headline)
                         .multilineTextAlignment(.center)

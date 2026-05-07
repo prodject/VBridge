@@ -20,6 +20,7 @@ struct VBridge: App {
     var body: some Scene {
         WindowGroup {
             ContentView(app: self)
+                .tint(Color(red: 0.59, green: 0.41, blue: 0.98))
                 .preferredColorScheme(preferredColorScheme)
         }
     }

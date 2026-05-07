@@ -40,12 +40,12 @@ struct LogView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button(action: copyLogs) {
                     Image(systemName: "doc.on.doc")
-                        .foregroundColor(.blue)
+                        .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                 }
                 if let logURL = SharedLogger.logFileURL {
                     ShareLink(item: logURL) {
                         Image(systemName: "square.and.arrow.up")
-                            .foregroundColor(.blue)
+                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                     }
                 }
                 Button(action: { SharedLogger.clearLogs(); entries = [] }) {
@@ -135,12 +135,12 @@ struct LogView: View {
 
                 Button(action: { withAnimation { showFilters.toggle() } }) {
                     Image(systemName: showFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        .foregroundColor(hasActiveFilters ? .blue : .secondary)
+                        .foregroundColor(hasActiveFilters ? Color(red: 0.53, green: 0.37, blue: 0.98) : .secondary)
                 }
 
                 Button(action: { autoScroll.toggle() }) {
                     Image(systemName: autoScrollIcon)
-                        .foregroundColor(autoScroll ? .blue : .secondary)
+                        .foregroundColor(autoScroll ? Color(red: 0.53, green: 0.37, blue: 0.98) : .secondary)
                 }
             }
 
@@ -281,13 +281,13 @@ struct LogView: View {
 
     private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(isActive ? Color.blue.opacity(0.2) : Color(UIColor.tertiarySystemBackground))
-                .foregroundColor(isActive ? .blue : .secondary)
-                .cornerRadius(6)
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(isActive ? Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.2) : Color(UIColor.tertiarySystemBackground))
+                    .foregroundColor(isActive ? Color(red: 0.53, green: 0.37, blue: 0.98) : .secondary)
+                    .cornerRadius(6)
         }
     }
 
@@ -312,7 +312,7 @@ struct LogView: View {
 
     private func sourceColor(_ source: LogSource) -> Color {
         switch source {
-        case .app: return .blue
+        case .app: return Color(red: 0.53, green: 0.37, blue: 0.98)
         case .tunnel: return .purple
         case .wireguard: return .green
         }

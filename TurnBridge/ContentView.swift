@@ -52,9 +52,9 @@ struct ContentView: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color.blue.opacity(0.18),
-                        Color.cyan.opacity(0.08),
-                        Color.mint.opacity(0.08)
+                        Color(red: 0.94, green: 0.93, blue: 0.97).opacity(0.96),
+                        Color(red: 0.86, green: 0.82, blue: 0.96).opacity(0.92),
+                        Color(red: 0.66, green: 0.54, blue: 0.97).opacity(0.86)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -64,23 +64,27 @@ struct ContentView: View {
                 VStack(spacing: 20) {
                     VStack(spacing: 4) {
                         Text("VBridge")
-                            .font(.system(size: 44, weight: .black, design: .rounded))
+                            .font(.system(size: 44, weight: .bold, design: .default))
                             .foregroundStyle(
                                 LinearGradient(
-                                    colors: [.blue, .cyan, .mint],
+                                    colors: [
+                                        Color(red: 0.32, green: 0.30, blue: 0.40),
+                                        Color(red: 0.53, green: 0.37, blue: 0.98),
+                                        Color(red: 0.40, green: 0.48, blue: 0.96)
+                                    ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
-                            .shadow(color: .blue.opacity(0.25), radius: 10, x: 0, y: 5)
+                            .shadow(color: Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.22), radius: 10, x: 0, y: 5)
 
                         Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 14, weight: .semibold, design: .default))
                             .foregroundColor(.secondary)
 
                         if let connectionProgressText {
                             Text(connectionProgressText)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .font(.system(size: 13, weight: .semibold, design: .default))
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -94,7 +98,7 @@ struct ContentView: View {
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                                    .stroke(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16), lineWidth: 1)
                             )
                             .padding(.horizontal, 20)
                     }
@@ -102,11 +106,11 @@ struct ContentView: View {
                     Spacer(minLength: 0)
 
                     VStack(spacing: 22) {
-                        Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 112, height: 112)
-                            .foregroundColor(iconColor)
+                            Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 112, height: 112)
+                                .foregroundColor(iconColor)
                             .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
                             .scaleEffect(vpnStatus == .connecting ? 1.08 : 1.0)
                             .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
@@ -118,16 +122,16 @@ struct ContentView: View {
                                 if isCheckingUpdate || isDownloadingUpdate {
                                     ProgressView()
                                         .progressViewStyle(.circular)
-                                        .tint(.blue)
+                                        .tint(Color(red: 0.53, green: 0.37, blue: 0.98))
                                         .scaleEffect(0.8)
                                 }
                                 Text(isDownloadingUpdate ? "Downloading update..." : (isCheckingUpdate ? "Checking..." : "Check update"))
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.system(size: 15, weight: .semibold, design: .default))
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.blue.opacity(0.12))
-                            .foregroundColor(.blue)
+                            .background(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.14))
+                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                         .disabled(isCheckingUpdate || isDownloadingUpdate)
@@ -163,15 +167,15 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        if vpnStatus == .disconnected {
-                            withAnimation { showImportModal = true }
-                        }
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+                Button(action: {
+                    if vpnStatus == .disconnected {
+                        withAnimation { showImportModal = true }
                     }
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+                }
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -340,7 +344,7 @@ struct ContentView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Color.blue)
+                    .background(Color(red: 0.53, green: 0.37, blue: 0.98))
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
@@ -401,7 +405,7 @@ struct ContentView: View {
         switch vpnStatus {
         case .connected: return .red
         case .connecting, .disconnecting: return .orange
-        default: return .blue
+        default: return Color(red: 0.53, green: 0.37, blue: 0.98)
         }
     }
 
@@ -420,7 +424,7 @@ struct ContentView: View {
         switch vpnStatus {
         case .connected: return .green
         case .connecting, .disconnecting: return .orange
-        default: return .gray
+        default: return Color(red: 0.53, green: 0.37, blue: 0.98)
         }
     }
 

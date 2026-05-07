@@ -306,29 +306,29 @@ private struct WidgetCardView: View {
 
             LinearGradient(
                 colors: [
-                    Color(red: 0.98, green: 0.98, blue: 1.00).opacity(0.88),
-                    Color(red: 0.93, green: 0.91, blue: 0.99).opacity(0.92),
-                    Color(red: 0.78, green: 0.70, blue: 1.00).opacity(0.92),
-                    Color(red: 0.60, green: 0.45, blue: 0.98).opacity(0.94)
+                    Color(red: 0.93, green: 0.93, blue: 0.95).opacity(0.96),
+                    Color(red: 0.84, green: 0.83, blue: 0.89).opacity(0.94),
+                    Color(red: 0.71, green: 0.63, blue: 0.94).opacity(0.92),
+                    Color(red: 0.56, green: 0.40, blue: 0.97).opacity(0.95)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
             Circle()
-                .fill(Color.white.opacity(0.42))
-                .frame(width: family == .systemSmall ? 122 : 156, height: family == .systemSmall ? 122 : 156)
-                .blur(radius: 34)
-                .offset(x: family == .systemSmall ? -58 : -78, y: family == .systemSmall ? -52 : -66)
+                .fill(Color(red: 0.95, green: 0.95, blue: 0.97).opacity(0.28))
+                .frame(width: family == .systemSmall ? 124 : 160, height: family == .systemSmall ? 124 : 160)
+                .blur(radius: 36)
+                .offset(x: family == .systemSmall ? -60 : -82, y: family == .systemSmall ? -50 : -66)
 
             Circle()
-                .fill(Color(red: 0.44, green: 0.28, blue: 0.98).opacity(0.32))
+                .fill(Color(red: 0.48, green: 0.31, blue: 0.98).opacity(0.34))
                 .frame(width: family == .systemSmall ? 132 : 168, height: family == .systemSmall ? 132 : 168)
                 .blur(radius: 30)
                 .offset(x: family == .systemSmall ? 58 : 82, y: family == .systemSmall ? 52 : 72)
 
             Circle()
-                .fill(Color(red: 0.20, green: 0.34, blue: 0.98).opacity(0.22))
+                .fill(Color(red: 0.38, green: 0.50, blue: 0.98).opacity(0.18))
                 .frame(width: family == .systemSmall ? 96 : 126, height: family == .systemSmall ? 96 : 126)
                 .blur(radius: 24)
                 .offset(x: family == .systemSmall ? 18 : 28, y: family == .systemSmall ? 18 : 24)
@@ -357,10 +357,10 @@ private struct WidgetCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VBridge")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 10, weight: .semibold, design: .default))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
@@ -373,12 +373,12 @@ private struct WidgetCardView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .font(.system(size: 24, weight: .bold, design: .default))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
                 Text("active connections")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.70))
             }
 
@@ -397,7 +397,7 @@ private struct WidgetCardView: View {
 
             HStack {
                 Text(prompt(for: snapshot))
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.84))
 
                 Spacer(minLength: 0)
@@ -416,10 +416,10 @@ private struct WidgetCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VBridge")
-                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 10, weight: .semibold, design: .default))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
@@ -432,13 +432,13 @@ private struct WidgetCardView: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .font(.system(size: 24, weight: .bold, design: .default))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
 
                 Text("active connections")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -457,7 +457,7 @@ private struct WidgetCardView: View {
 
             HStack {
                 Text(prompt(for: snapshot))
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.84))
 
                 Spacer(minLength: 0)
@@ -469,7 +469,7 @@ private struct WidgetCardView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ping")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.75))
 
                 HStack(alignment: .top, spacing: 6) {
@@ -495,7 +495,7 @@ private struct PingCompactView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Text(verbatim: badgeText)
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .font(.system(size: 9, weight: .bold, design: .default))
                     .foregroundStyle(.white)
                 Circle()
                     .fill(dotColor)
