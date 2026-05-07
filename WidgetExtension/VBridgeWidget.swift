@@ -306,25 +306,32 @@ private struct WidgetCardView: View {
 
             LinearGradient(
                 colors: [
-                    Color(red: 0.10, green: 0.24, blue: 0.46).opacity(0.52),
-                    Color(red: 0.12, green: 0.42, blue: 0.58).opacity(0.42),
-                    Color(red: 0.10, green: 0.50, blue: 0.56).opacity(0.34)
+                    Color(red: 0.98, green: 0.98, blue: 1.00).opacity(0.88),
+                    Color(red: 0.93, green: 0.91, blue: 0.99).opacity(0.92),
+                    Color(red: 0.78, green: 0.70, blue: 1.00).opacity(0.92),
+                    Color(red: 0.60, green: 0.45, blue: 0.98).opacity(0.94)
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
 
             Circle()
-                .fill(snapshot.statusAccent.opacity(0.24))
-                .frame(width: family == .systemSmall ? 110 : 140, height: family == .systemSmall ? 110 : 140)
-                .blur(radius: 28)
-                .offset(x: family == .systemSmall ? 56 : 86, y: family == .systemSmall ? -40 : -50)
+                .fill(Color.white.opacity(0.42))
+                .frame(width: family == .systemSmall ? 122 : 156, height: family == .systemSmall ? 122 : 156)
+                .blur(radius: 34)
+                .offset(x: family == .systemSmall ? -58 : -78, y: family == .systemSmall ? -52 : -66)
 
             Circle()
-                .fill(Color.white.opacity(0.10))
-                .frame(width: family == .systemSmall ? 84 : 104, height: family == .systemSmall ? 84 : 104)
+                .fill(Color(red: 0.44, green: 0.28, blue: 0.98).opacity(0.32))
+                .frame(width: family == .systemSmall ? 132 : 168, height: family == .systemSmall ? 132 : 168)
+                .blur(radius: 30)
+                .offset(x: family == .systemSmall ? 58 : 82, y: family == .systemSmall ? 52 : 72)
+
+            Circle()
+                .fill(Color(red: 0.20, green: 0.34, blue: 0.98).opacity(0.22))
+                .frame(width: family == .systemSmall ? 96 : 126, height: family == .systemSmall ? 96 : 126)
                 .blur(radius: 24)
-                .offset(x: family == .systemSmall ? -58 : -72, y: family == .systemSmall ? 44 : 56)
+                .offset(x: family == .systemSmall ? 18 : 28, y: family == .systemSmall ? 18 : 24)
 
             content(snapshot: snapshot)
         }
