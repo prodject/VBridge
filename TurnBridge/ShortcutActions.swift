@@ -28,7 +28,7 @@ enum PendingShortcutActionStore {
 }
 
 @available(iOS 16.0, *)
-public struct ToggleVPNIntent: AppIntent {
+struct ToggleVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Toggle VBridge VPN"
     static var description = IntentDescription("Opens VBridge and toggles the tunnel.")
     static var openAppWhenRun = true
@@ -41,7 +41,7 @@ public struct ToggleVPNIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
-public struct ConnectVPNIntent: AppIntent {
+struct ConnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Connect VBridge VPN"
     static var description = IntentDescription("Opens VBridge and connects the tunnel.")
     static var openAppWhenRun = true
@@ -54,7 +54,7 @@ public struct ConnectVPNIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
-public struct DisconnectVPNIntent: AppIntent {
+struct DisconnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Disconnect VBridge VPN"
     static var description = IntentDescription("Opens VBridge and disconnects the tunnel.")
     static var openAppWhenRun = true
@@ -67,36 +67,34 @@ public struct DisconnectVPNIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
-public struct VBridgeAppShortcuts: AppShortcutsProvider {
+struct VBridgeAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: ToggleVPNIntent(),
-                phrases: [
-                    "Toggle VPN in \(.applicationName)",
-                    "Switch VPN in \(.applicationName)"
-                ],
-                shortTitle: "Toggle VPN",
-                systemImageName: "arrow.2.circlepath"
-            ),
-            AppShortcut(
-                intent: ConnectVPNIntent(),
-                phrases: [
-                    "Connect VPN in \(.applicationName)",
-                    "Start VPN in \(.applicationName)"
-                ],
-                shortTitle: "Connect VPN",
-                systemImageName: "lock.shield"
-            ),
-            AppShortcut(
-                intent: DisconnectVPNIntent(),
-                phrases: [
-                    "Disconnect VPN in \(.applicationName)",
-                    "Stop VPN in \(.applicationName)"
-                ],
-                shortTitle: "Disconnect VPN",
-                systemImageName: "lock.open"
-            )
-        ]
+        AppShortcut(
+            intent: ToggleVPNIntent(),
+            phrases: [
+                "Toggle VPN in \(.applicationName)",
+                "Switch VPN in \(.applicationName)"
+            ],
+            shortTitle: "Toggle VPN",
+            systemImageName: "arrow.2.circlepath"
+        )
+        AppShortcut(
+            intent: ConnectVPNIntent(),
+            phrases: [
+                "Connect VPN in \(.applicationName)",
+                "Start VPN in \(.applicationName)"
+            ],
+            shortTitle: "Connect VPN",
+            systemImageName: "lock.shield"
+        )
+        AppShortcut(
+            intent: DisconnectVPNIntent(),
+            phrases: [
+                "Disconnect VPN in \(.applicationName)",
+                "Stop VPN in \(.applicationName)"
+            ],
+            shortTitle: "Disconnect VPN",
+            systemImageName: "lock.open"
+        )
     }
 }

@@ -1,4 +1,3 @@
-import AppIntents
 import SwiftUI
 import NetworkExtension
 import UniformTypeIdentifiers
@@ -130,8 +129,6 @@ struct ContentView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                         .disabled(isCheckingUpdate || isDownloadingUpdate)
-
-                        ShortcutsLink()
 
                         Button(action: toggleTunnel) {
                             Text(buttonText)
