@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 // MARK: - Log Level
 
@@ -273,27 +276,37 @@ public struct SharedLogger {
                                              totalConnections: Int? = nil,
                                              relayIP: String? = nil) {
         guard let defaults = widgetLiveStateDefaults() else { return }
+        var didUpdate = false
 
         if let rawStatus, let normalizedStatus = normalizedWidgetState(from: rawStatus) {
             defaults.set(normalizedStatus.rawValue, forKey: widgetLiveStateStatusKey)
             defaults.removeObject(forKey: widgetLiveStateActiveConnectionsKey)
             defaults.removeObject(forKey: widgetLiveStateTotalConnectionsKey)
             defaults.removeObject(forKey: widgetLiveStateRelayIPKey)
+            didUpdate = true
         }
 
         if let activeConnections {
             defaults.set(activeConnections, forKey: widgetLiveStateActiveConnectionsKey)
+            didUpdate = true
         }
 
         if let totalConnections {
             defaults.set(totalConnections, forKey: widgetLiveStateTotalConnectionsKey)
+            didUpdate = true
         }
 
         if let relayIP {
             defaults.set(relayIP, forKey: widgetLiveStateRelayIPKey)
+            didUpdate = true
         }
 
         defaults.set(Date(), forKey: widgetLiveStateUpdatedAtKey)
+        defaults.synchronize()
+
+        if didUpdate {
+            reloadWidgetTimelinesIfAvailable()
+        }
     }
 
     private static func updateWidgetLiveStateIfNeeded(message: String) {
@@ -309,6 +322,12 @@ public struct SharedLogger {
         if let relayIP = parseRelayIP(from: message) {
             updateWidgetLiveState(relayIP: relayIP)
         }
+    }
+
+    private static func reloadWidgetTimelinesIfAvailable() {
+#if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+#endif
     }
 
     private static let maxLogSize: UInt64 = 500 * 1024

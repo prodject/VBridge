@@ -1,4 +1,5 @@
 import Foundation
+import AppIntents
 import WidgetKit
 import SwiftUI
 
@@ -14,6 +15,46 @@ private enum WidgetLiveStateStore {
 
     static var defaults: UserDefaults? {
         UserDefaults(suiteName: WidgetAppGroup.identifier)
+    }
+}
+
+private enum WidgetActionStore {
+    static let suiteName = WidgetAppGroup.identifier
+    static let key = "pending.shortcut.action"
+
+    static var defaults: UserDefaults? {
+        UserDefaults(suiteName: suiteName)
+    }
+
+    static func storeConnectAction() {
+        defaults?.set("connect", forKey: key)
+        defaults?.synchronize()
+    }
+}
+
+@available(iOS 17.0, *)
+private struct RefreshVBridgeWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh VBridge Widget"
+    static var description = IntentDescription("Refreshes the widget without opening the app.")
+    static var openAppWhenRun = false
+    static var isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+        return .result()
+    }
+}
+
+@available(iOS 17.0, *)
+private struct ConnectVBridgeWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Connect VBridge VPN"
+    static var description = IntentDescription("Opens VBridge and connects the tunnel.")
+    static var openAppWhenRun = true
+    static var isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        WidgetActionStore.storeConnectAction()
+        return .result()
     }
 }
 
@@ -80,10 +121,6 @@ private struct WidgetSnapshot: Equatable {
 
     var relayText: String {
         relayIP ?? "No relay IP"
-    }
-
-    var actionURL: URL {
-        URL(string: "vbridge://refresh")!
     }
 
     static let placeholder = WidgetSnapshot(
@@ -196,8 +233,12 @@ private struct WidgetSnapshot: Equatable {
             }
         }()
 
-        let activeConnections = defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) as? Int
-        let totalConnections = defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) as? Int
+        let activeConnections = defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) != nil
+            ? defaults.integer(forKey: WidgetLiveStateStore.activeConnectionsKey)
+            : nil
+        let totalConnections = defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) != nil
+            ? defaults.integer(forKey: WidgetLiveStateStore.totalConnectionsKey)
+            : nil
         let relayIP = defaults.string(forKey: WidgetLiveStateStore.relayIPKey)
 
         return WidgetSnapshot(
@@ -403,7 +444,6 @@ private struct WidgetCardView: View {
 
             content(snapshot: snapshot)
         }
-        .widgetURL(snapshot.actionURL)
     }
 
     @ViewBuilder
@@ -411,13 +451,11 @@ private struct WidgetCardView: View {
         switch family {
         case .systemSmall:
             smallLayout(snapshot: snapshot)
-        default:
+        case .systemMedium:
             mediumLayout(snapshot: snapshot)
+        default:
+            largeLayout(snapshot: snapshot)
         }
-    }
-
-    private func prompt(for snapshot: WidgetSnapshot) -> String {
-        "Tap to refresh"
     }
 
     private func smallLayout(snapshot: WidgetSnapshot) -> some View {
@@ -463,17 +501,7 @@ private struct WidgetCardView: View {
 
             Spacer(minLength: 0)
 
-            HStack {
-                Text(prompt(for: snapshot))
-                    .font(.system(size: 10, weight: .semibold, design: .default))
-                    .foregroundStyle(.white.opacity(0.84))
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.86))
-            }
+            refreshRow()
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
@@ -523,16 +551,83 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.6)
             }
 
-            HStack {
-                Text(prompt(for: snapshot))
+            refreshRow()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Ping")
                     .font(.system(size: 10, weight: .semibold, design: .default))
-                    .foregroundStyle(.white.opacity(0.84))
+                    .foregroundStyle(.white.opacity(0.75))
+
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(snapshot.pings, id: \.name) { ping in
+                        PingCompactView(sample: ping)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+    }
+
+    private func largeLayout(snapshot: WidgetSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("VBridge")
+                        .font(.system(size: 15, weight: .bold, design: .default))
+                        .foregroundStyle(.white)
+                    Text(snapshot.statusLabel)
+                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.86))
+                Image(systemName: snapshot.statusSymbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(snapshot.statusAccent)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(snapshot.connectionsText)
+                    .font(.system(size: 24, weight: .bold, design: .default))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+
+                Text("active connections")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+
+            HStack(spacing: 5) {
+                Image(systemName: "network")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+                Text(snapshot.relayText)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+
+            HStack(spacing: 8) {
+                if #available(iOS 17.0, *) {
+                    Button(intent: RefreshVBridgeWidgetIntent()) {
+                        actionButtonLabel(title: "Refresh", systemImage: "arrow.clockwise.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(intent: ConnectVBridgeWidgetIntent()) {
+                        actionButtonLabel(title: "Connect", systemImage: "lock.shield.fill")
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    actionButtonLabel(title: "Refresh", systemImage: "arrow.clockwise.circle.fill")
+                    actionButtonLabel(title: "Connect", systemImage: "lock.shield.fill")
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -549,6 +644,56 @@ private struct WidgetCardView: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
+    }
+
+    @ViewBuilder
+    private func refreshRow() -> some View {
+        if #available(iOS 17.0, *) {
+            Button(intent: RefreshVBridgeWidgetIntent()) {
+                HStack {
+                    Text("Tap to refresh")
+                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .foregroundStyle(.white.opacity(0.84))
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack {
+                Text("Open app to refresh")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.84))
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+            }
+        }
+    }
+
+    private func actionButtonLabel(title: String, systemImage: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .default))
+                .foregroundStyle(.white.opacity(0.84))
+
+            Spacer(minLength: 0)
+
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.86))
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -608,7 +753,7 @@ private struct VBridgeWidget: Widget {
         }
         .configurationDisplayName("VBridge")
         .description("Shows connection count, relay IP, and refreshes when you open it.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
     }
 }
