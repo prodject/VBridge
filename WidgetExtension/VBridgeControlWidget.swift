@@ -33,13 +33,9 @@ struct VBridgeConnectControlWidget: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.prodject.vbridge.control.connect") {
             ControlWidgetButton(action: ConnectVPNControlIntent()) {
-                Label {
-                    Text("VPN")
-                } icon: {
-                    Image(systemName: "wave.3.right.circle")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.gray.opacity(0.82))
-                }
+                Label("VPN", systemImage: "wave.3.right.circle")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.gray.opacity(0.82))
                 .controlWidgetActionHint("Connect VPN")
             }
         }

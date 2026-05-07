@@ -511,7 +511,6 @@ private struct VBridgeWidget: Widget {
             .configurationDisplayName("VBridge")
             .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
             .supportedFamilies([.systemSmall, .systemMedium])
-            .contentMarginsDisabled()
         } else {
             StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
                 WidgetCardView(entry: entry)
