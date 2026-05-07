@@ -66,34 +66,32 @@ struct DisconnectVPNIntent: AppIntent {
 @available(iOS 16.0, *)
 struct VBridgeAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: ToggleVPNIntent(),
-                phrases: [
-                    "Toggle VPN in \(.applicationName)",
-                    "Switch VPN in \(.applicationName)"
-                ],
-                shortTitle: "Toggle VPN",
-                systemImageName: "arrow.2.circlepath"
-            ),
-            AppShortcut(
-                intent: ConnectVPNIntent(),
-                phrases: [
-                    "Connect VPN in \(.applicationName)",
-                    "Start VPN in \(.applicationName)"
-                ],
-                shortTitle: "Connect VPN",
-                systemImageName: "lock.shield"
-            ),
-            AppShortcut(
-                intent: DisconnectVPNIntent(),
-                phrases: [
-                    "Disconnect VPN in \(.applicationName)",
-                    "Stop VPN in \(.applicationName)"
-                ],
-                shortTitle: "Disconnect VPN",
-                systemImageName: "lock.open"
-            )
-        ]
+        AppShortcut(
+            intent: ToggleVPNIntent(),
+            phrases: [
+                "Toggle VPN in \(.applicationName)",
+                "Switch VPN in \(.applicationName)"
+            ],
+            shortTitle: "Toggle VPN",
+            systemImageName: "arrow.2.circlepath"
+        )
+        AppShortcut(
+            intent: ConnectVPNIntent(),
+            phrases: [
+                "Connect VPN in \(.applicationName)",
+                "Start VPN in \(.applicationName)"
+            ],
+            shortTitle: "Connect VPN",
+            systemImageName: "lock.shield"
+        )
+        AppShortcut(
+            intent: DisconnectVPNIntent(),
+            phrases: [
+                "Disconnect VPN in \(.applicationName)",
+                "Stop VPN in \(.applicationName)"
+            ],
+            shortTitle: "Disconnect VPN",
+            systemImageName: "lock.open"
+        )
     }
 }

@@ -11,9 +11,9 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Auto-Update Pipeline:** The app can check GitHub Releases and download the latest IPA directly.
 * **Manual Update Trigger:** Dedicated **Check update** action on the main screen.
 * **Manual Captcha Mode:** Optional mode to disable automatic captcha solving and force manual flow.
-* **Amnezia 2.0 Config Support:** Import and use Amnezia 2.0 `.conf` profiles directly. (test)
+* **Amnezia 2.0 Config Support:** Import and use Amnezia 2.0 `.conf` profiles directly.
 * **Widget Support:** Small and medium widgets with live connection state, relay IP, and ping dots for Cloudflare / Google / Yandex.
-* **Shortcut Support:** Quick launch, connect, or disconnect from Shortcuts.
+* **Shortcut Support:** Connect, disconnect, or toggle the VPN from Shortcuts.
 * **Theme Control:** User-selectable app theme (System / Light / Dark).
 * **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.
 * **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`1.X`) and release artifact publishing.
