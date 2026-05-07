@@ -530,7 +530,6 @@
 						);
 					},
 				);
-				INFOPLIST_KEY_com.wireguard.ios.app_group_id = group.com.prodject.vbridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -588,7 +587,6 @@
 						);
 					},
 				);
-				INFOPLIST_KEY_com.wireguard.ios.app_group_id = group.com.prodject.vbridge;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -623,7 +621,6 @@
 				INFOPLIST_FILE = "network-extension/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "VBridge Extension";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_com.wireguard.ios.app_group_id = group.com.prodject.vbridge;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -655,7 +652,6 @@
 				INFOPLIST_FILE = "network-extension/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "VBridge Extension";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_com.wireguard.ios.app_group_id = group.com.prodject.vbridge;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
