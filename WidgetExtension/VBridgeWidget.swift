@@ -202,6 +202,11 @@ private struct PingSample: Equatable {
         return "\(latencyMs) ms"
     }
 
+    var compactLatencyText: String {
+        guard let latencyMs else { return "--" }
+        return "\(latencyMs)ms"
+    }
+
     var badgeText: String {
         switch name {
         case "Cloudflare":
@@ -391,7 +396,7 @@ private struct WidgetCardView: View {
     }
 
     private func mediumLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VBridge")
@@ -447,7 +452,7 @@ private struct WidgetCardView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Live pings")
+                Text("Ping")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.75))
 
@@ -475,7 +480,7 @@ private struct PingCompactView: View {
                     .fill(sample.dotColor)
                     .frame(width: 5, height: 5)
                 Spacer(minLength: 0)
-                Text(sample.latencyText)
+                Text(sample.compactLatencyText)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
             }
@@ -498,18 +503,23 @@ private struct VBridgeWidget: Widget {
     let kind = "VBridgeWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
-            if #available(iOSApplicationExtension 17.0, *) {
+        if #available(iOSApplicationExtension 17.0, *) {
+            StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
                 WidgetCardView(entry: entry)
                     .containerBackground(.clear, for: .widget)
-            } else {
+            }
+            .configurationDisplayName("VBridge")
+            .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
+            .supportedFamilies([.systemSmall, .systemMedium])
+            .contentMarginsDisabled()
+        } else {
+            StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
                 WidgetCardView(entry: entry)
             }
+            .configurationDisplayName("VBridge")
+            .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
+            .supportedFamilies([.systemSmall, .systemMedium])
         }
-        .configurationDisplayName("VBridge")
-        .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
-        .supportedFamilies([.systemSmall, .systemMedium])
-        .contentMarginsDisabled()
     }
 }
 
