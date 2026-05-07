@@ -75,6 +75,13 @@
 			);
 			target = A7EBA6432F606A38003CA7F3 /* network-extension */;
 		};
+		B1A1C0012F00000000000003 /* Exceptions for "WidgetExtension" folder in "VBridgeWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -96,6 +103,9 @@
 		};
 		B1A1C0012F00000000000007 /* WidgetExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B1A1C0012F00000000000003 /* Exceptions for "WidgetExtension" folder in "VBridgeWidgetExtension" target */,
+			);
 			path = WidgetExtension;
 			sourceTree = "<group>";
 		};
