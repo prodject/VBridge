@@ -110,6 +110,10 @@ public struct SharedLogger {
     private static let _appGroupID: String? = {
         var candidates: [String] = []
 
+        if let configuredAppGroup = appGroupFromInfoDictionary() {
+            candidates.append(configuredAppGroup)
+        }
+
         // 1) Try reading App Group from code signature entitlements in the Mach-O binary.
         if let groups = appGroupsFromBinary() {
             candidates.append(contentsOf: groups)
@@ -135,6 +139,18 @@ public struct SharedLogger {
     }()
 
     static var appGroupID: String? { _appGroupID }
+
+    private static func appGroupFromInfoDictionary() -> String? {
+        if let bundleGroup = Bundle.main.object(forInfoDictionaryKey: "com.wireguard.ios.app_group_id") as? String,
+           !bundleGroup.isEmpty {
+            return bundleGroup
+        }
+        if let bundleGroup = Bundle.main.object(forInfoDictionaryKey: "com.wireguard.macos.app_group_id") as? String,
+           !bundleGroup.isEmpty {
+            return bundleGroup
+        }
+        return nil
+    }
 
     private static func appGroupsFromBinary() -> [String]? {
         // Try own executable first
