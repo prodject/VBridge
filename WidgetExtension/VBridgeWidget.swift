@@ -479,5 +479,8 @@ private struct VBridgeWidget: Widget {
 struct VBridgeWidgetBundle: WidgetBundle {
     var body: some Widget {
         VBridgeWidget()
+        if #available(iOSApplicationExtension 18.0, *) {
+            VBridgeConnectControlWidget()
+        }
     }
 }

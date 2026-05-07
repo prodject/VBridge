@@ -4,6 +4,7 @@
 
 import SwiftUI
 import NetworkExtension
+import AppIntents
 import UIKit
 
 @main
