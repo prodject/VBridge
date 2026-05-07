@@ -237,6 +237,9 @@ struct ContentView: View {
                     consumePendingShortcutAction()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pendingShortcutActionDidChange)) { _ in
+                consumePendingShortcutAction()
+            }
             .onDisappear {
                 stopLogMonitoring()
             }

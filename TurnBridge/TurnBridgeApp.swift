@@ -4,13 +4,19 @@
 
 import SwiftUI
 import NetworkExtension
+import UIKit
 
 @main
 struct VBridge: App {
+    @UIApplicationDelegateAdaptor(VBridgeAppDelegate.self) private var appDelegate
     @AppStorage("appTheme") private var appTheme = "system"
 
     init() {
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
+        if #available(iOS 16.0, *) {
+            VBridgeAppShortcuts.updateAppShortcutParameters()
+        }
+        VBridgeQuickActionType.register()
     }
 
     var body: some Scene {

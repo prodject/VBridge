@@ -7,6 +7,10 @@ enum PendingShortcutAction: String {
     case disconnect
 }
 
+extension Notification.Name {
+    static let pendingShortcutActionDidChange = Notification.Name("pendingShortcutActionDidChange")
+}
+
 enum PendingShortcutActionStore {
     private static let suiteName = "group.com.prodject.vbridge"
     private static let key = "pending.shortcut.action"
@@ -17,6 +21,7 @@ enum PendingShortcutActionStore {
 
     static func store(_ action: PendingShortcutAction) {
         defaults?.set(action.rawValue, forKey: key)
+        NotificationCenter.default.post(name: .pendingShortcutActionDidChange, object: nil)
     }
 
     static func consume() -> PendingShortcutAction? {
