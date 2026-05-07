@@ -503,22 +503,13 @@ private struct VBridgeWidget: Widget {
     let kind = "VBridgeWidget"
 
     var body: some WidgetConfiguration {
-        if #available(iOSApplicationExtension 17.0, *) {
-            StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
-                WidgetCardView(entry: entry)
-                    .containerBackground(.clear, for: .widget)
-            }
-            .configurationDisplayName("VBridge")
-            .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
-            .supportedFamilies([.systemSmall, .systemMedium])
-        } else {
-            StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
-                WidgetCardView(entry: entry)
-            }
-            .configurationDisplayName("VBridge")
-            .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
-            .supportedFamilies([.systemSmall, .systemMedium])
+        StaticConfiguration(kind: kind, provider: WidgetProvider()) { entry in
+            WidgetCardView(entry: entry)
+                .containerBackground(.clear, for: .widget)
         }
+        .configurationDisplayName("VBridge")
+        .description("Shows connection count, relay IP, and opens the app to toggle the tunnel.")
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
