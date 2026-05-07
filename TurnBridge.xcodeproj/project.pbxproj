@@ -6,9 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
+	/* Begin PBXBuildFile section */
 		A7EBA6472F606A38003CA7F3 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A7EBA6462F606A38003CA7F3 /* NetworkExtension.framework */; };
 		A7EBA64F2F606A38003CA7F3 /* network-extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A7EBA6442F606A38003CA7F3 /* network-extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B1A1C0012F00000000000002 /* VBridgeWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 /* End PBXBuildFile section */
@@ -45,6 +46,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A7EBA64F2F606A38003CA7F3 /* network-extension.appex in Embed Foundation Extensions */,
+				B1A1C0012F00000000000002 /* VBridgeWidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -200,6 +202,7 @@
 			);
 			dependencies = (
 				A7EBA64E2F606A38003CA7F3 /* PBXTargetDependency */,
+				B1A1C0012F00000000000005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A7EBA62E2F606924003CA7F3 /* VBridge */,
@@ -301,6 +304,7 @@
 			targets = (
 				A7EBA62B2F606924003CA7F3 /* VBridge */,
 				A7EBA6432F606A38003CA7F3 /* network-extension */,
+				B1A1C0012F00000000000006 /* VBridgeWidgetExtension */,
 				A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */,
 			);
 		};
@@ -359,6 +363,11 @@
 			isa = PBXTargetDependency;
 			target = A7EBA6432F606A38003CA7F3 /* network-extension */;
 			targetProxy = A7EBA64D2F606A38003CA7F3 /* PBXContainerItemProxy */;
+		};
+		B1A1C0012F00000000000005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;
+			targetProxy = B1A1C0012F00000000000004 /* PBXContainerItemProxy */;
 		};
 		A7EBA65D2F606C00003CA7F3 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
