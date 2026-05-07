@@ -572,7 +572,7 @@ struct ContentView: View {
             for _ in 0..<6 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard !Task.isCancelled else { return }
-                if await MainActor.run({ consumePendingShortcutActionIfReady() }) {
+                if await MainActor.run(body: consumePendingShortcutActionIfReady) {
                     return
                 }
             }
