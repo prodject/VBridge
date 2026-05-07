@@ -36,7 +36,7 @@ struct VBridgeConnectControlWidget: ControlWidget {
                 Label {
                     Text("VPN")
                 } icon: {
-                    Image(systemName: "lock.shield.fill")
+                    Image(systemName: "wave.3.right.circle")
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.gray.opacity(0.82))
                 }
