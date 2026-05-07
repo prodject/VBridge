@@ -200,25 +200,7 @@ public struct SharedLogger {
         return container?.appendingPathComponent("vpn_tunnel.log")
     }
 
-    private static let widgetLiveStateStatusKey = "widget.live.status"
-    private static let widgetLiveStateActiveConnectionsKey = "widget.live.activeConnections"
-    private static let widgetLiveStateTotalConnectionsKey = "widget.live.totalConnections"
-    private static let widgetLiveStateRelayIPKey = "widget.live.relayIP"
-    private static let widgetLiveStateUpdatedAtKey = "widget.live.updatedAt"
-
-    private enum WidgetLiveState: String {
-        case connected
-        case connecting
-        case disconnected
-        case unknown
-    }
-
-    private static func widgetLiveStateDefaults() -> UserDefaults? {
-        guard let groupID = appGroupID else { return nil }
-        return UserDefaults(suiteName: groupID)
-    }
-
-    private static func normalizedWidgetState(from rawValue: String) -> WidgetLiveState? {
+    private static func normalizedWidgetState(from rawValue: String) -> VBridgeLiveActivityPhase? {
         let lowered = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lowered.contains("disconnecting") || lowered.contains("disconnected") {
             return .disconnected
@@ -271,56 +253,53 @@ public struct SharedLogger {
         return trimmed
     }
 
-    public static func updateWidgetLiveState(status rawStatus: String? = nil,
-                                             activeConnections: Int? = nil,
-                                             totalConnections: Int? = nil,
-                                             relayIP: String? = nil) {
-        guard let defaults = widgetLiveStateDefaults() else { return }
-        var didUpdate = false
-
-        if let rawStatus, let normalizedStatus = normalizedWidgetState(from: rawStatus) {
-            defaults.set(normalizedStatus.rawValue, forKey: widgetLiveStateStatusKey)
-            defaults.removeObject(forKey: widgetLiveStateActiveConnectionsKey)
-            defaults.removeObject(forKey: widgetLiveStateTotalConnectionsKey)
-            defaults.removeObject(forKey: widgetLiveStateRelayIPKey)
-            didUpdate = true
-        }
-
-        if let activeConnections {
-            defaults.set(activeConnections, forKey: widgetLiveStateActiveConnectionsKey)
-            didUpdate = true
-        }
-
-        if let totalConnections {
-            defaults.set(totalConnections, forKey: widgetLiveStateTotalConnectionsKey)
-            didUpdate = true
-        }
-
-        if let relayIP {
-            defaults.set(relayIP, forKey: widgetLiveStateRelayIPKey)
-            didUpdate = true
-        }
-
-        defaults.set(Date(), forKey: widgetLiveStateUpdatedAtKey)
-        defaults.synchronize()
-
-        if didUpdate {
-            reloadWidgetTimelinesIfAvailable()
-        }
+    public static func updateWidgetLiveState(
+        status rawStatus: String? = nil,
+        activeConnections: Int? = nil,
+        totalConnections: Int? = nil,
+        relayIP: String? = nil,
+        profileName: String? = nil,
+        estimatedRemainingSeconds: Int? = nil
+    ) {
+        let phase = rawStatus.flatMap(normalizedWidgetState(from:))
+        VBridgeLiveActivityStore.update(
+            profileName: profileName,
+            phase: phase,
+            activeConnections: activeConnections,
+            totalConnections: totalConnections,
+            relayIP: relayIP,
+            estimatedRemainingSeconds: estimatedRemainingSeconds
+        )
+        reloadWidgetTimelinesIfAvailable()
     }
 
     private static func updateWidgetLiveStateIfNeeded(message: String) {
+        var phase: VBridgeLiveActivityPhase?
         if message.contains("VPN status:") {
             let statusValue = message.replacingOccurrences(of: "VPN status:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            updateWidgetLiveState(status: statusValue)
+            phase = normalizedWidgetState(from: statusValue)
         }
 
-        if let (activeConnections, totalConnections) = parseConnectedWorkers(from: message) {
-            updateWidgetLiveState(activeConnections: activeConnections, totalConnections: totalConnections)
+        var parsedActiveConnections: Int?
+        var parsedTotalConnections: Int?
+        if let parsed = parseConnectedWorkers(from: message) {
+            parsedActiveConnections = parsed.0
+            parsedTotalConnections = parsed.1
         }
 
+        var parsedRelayIP: String?
         if let relayIP = parseRelayIP(from: message) {
-            updateWidgetLiveState(relayIP: relayIP)
+            parsedRelayIP = relayIP
+        }
+
+        if phase != nil || parsedActiveConnections != nil || parsedTotalConnections != nil || parsedRelayIP != nil {
+            VBridgeLiveActivityStore.update(
+                phase: phase,
+                activeConnections: parsedActiveConnections,
+                totalConnections: parsedTotalConnections,
+                relayIP: parsedRelayIP
+            )
+            reloadWidgetTimelinesIfAvailable()
         }
     }
 

@@ -1,21 +1,11 @@
 import Foundation
 import AppIntents
+import ActivityKit
 import WidgetKit
 import SwiftUI
 
 private enum WidgetAppGroup {
     static let identifier = "group.com.prodject.vbridge"
-}
-
-private enum WidgetLiveStateStore {
-    static let statusKey = "widget.live.status"
-    static let activeConnectionsKey = "widget.live.activeConnections"
-    static let totalConnectionsKey = "widget.live.totalConnections"
-    static let relayIPKey = "widget.live.relayIP"
-
-    static var defaults: UserDefaults? {
-        UserDefaults(suiteName: WidgetAppGroup.identifier)
-    }
 }
 
 private enum WidgetActionStore {
@@ -66,10 +56,12 @@ private struct WidgetSnapshot: Equatable {
         case unknown
     }
 
+    let profileName: String
     let state: State
     let activeConnections: Int?
     let totalConnections: Int?
     let relayIP: String?
+    let estimatedRemainingSeconds: Int?
     let pings: [PingSample]
     let lastUpdated: Date
 
@@ -123,27 +115,68 @@ private struct WidgetSnapshot: Equatable {
         relayIP ?? "No relay IP"
     }
 
+    var progressFraction: Double? {
+        guard let activeConnections, let totalConnections, totalConnections > 0 else {
+            return nil
+        }
+        return min(max(Double(activeConnections) / Double(totalConnections), 0), 1)
+    }
+
+    var remainingText: String? {
+        guard let estimatedRemainingSeconds else { return nil }
+        let clampedSeconds = max(estimatedRemainingSeconds, 0)
+        guard clampedSeconds > 0 else {
+            return "Almost there"
+        }
+
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = clampedSeconds >= 3600 ? [.hour, .minute] : [.minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = clampedSeconds >= 3600 ? [.pad] : [.dropAll]
+        return formatter.string(from: TimeInterval(clampedSeconds))
+    }
+
+    var summaryText: String {
+        switch state {
+        case .connected:
+            return relayIP.map { "Secured via \($0)" } ?? "VPN is up"
+        case .connecting:
+            if let remainingText {
+                return "ETA \(remainingText)"
+            }
+            return "Negotiating tunnel"
+        case .disconnected:
+            return "Tap to connect"
+        case .unknown:
+            return "Waiting for status"
+        }
+    }
+
     static let placeholder = WidgetSnapshot(
+        profileName: "VBridge",
         state: .connected,
         activeConnections: 6,
         totalConnections: 10,
         relayIP: "193.203.43.9",
+        estimatedRemainingSeconds: 32,
         pings: PingSample.placeholderSamples,
         lastUpdated: .now
     )
 
     static func load() -> WidgetSnapshot {
-        if let liveState = loadPersistedLiveState() {
-            return liveState
+        if let liveState = VBridgeLiveActivityStore.load() {
+            return WidgetSnapshot(liveState: liveState)
         }
 
         guard let logURL = logURL(),
               let content = try? String(contentsOf: logURL, encoding: .utf8) else {
             return WidgetSnapshot(
+                profileName: "VBridge",
                 state: .unknown,
                 activeConnections: nil,
                 totalConnections: nil,
                 relayIP: nil,
+                estimatedRemainingSeconds: nil,
                 pings: PingSample.placeholderSamples,
                 lastUpdated: .now
             )
@@ -199,56 +232,27 @@ private struct WidgetSnapshot: Equatable {
         let pings = state == .connected ? PingSample.loadAll() : PingSample.placeholderSamples
 
         return WidgetSnapshot(
+            profileName: "VBridge",
             state: state,
             activeConnections: activeConnections,
             totalConnections: totalConnections,
             relayIP: relayIP,
+            estimatedRemainingSeconds: nil,
             pings: pings,
             lastUpdated: .now
         )
     }
 
-    private static func loadPersistedLiveState() -> WidgetSnapshot? {
-        guard let defaults = WidgetLiveStateStore.defaults else { return nil }
-        guard defaults.object(forKey: WidgetLiveStateStore.statusKey) != nil ||
-              defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) != nil ||
-              defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) != nil ||
-              defaults.object(forKey: WidgetLiveStateStore.relayIPKey) != nil else {
-            return nil
-        }
-
-        let state: State = {
-            guard let rawStatus = defaults.string(forKey: WidgetLiveStateStore.statusKey)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
-                return .unknown
-            }
-            switch rawStatus {
-            case "connected":
-                return .connected
-            case "connecting":
-                return .connecting
-            case "disconnected", "disconnecting":
-                return .disconnected
-            default:
-                return .unknown
-            }
-        }()
-
-        let activeConnections = defaults.object(forKey: WidgetLiveStateStore.activeConnectionsKey) != nil
-            ? defaults.integer(forKey: WidgetLiveStateStore.activeConnectionsKey)
-            : nil
-        let totalConnections = defaults.object(forKey: WidgetLiveStateStore.totalConnectionsKey) != nil
-            ? defaults.integer(forKey: WidgetLiveStateStore.totalConnectionsKey)
-            : nil
-        let relayIP = defaults.string(forKey: WidgetLiveStateStore.relayIPKey)
-
-        return WidgetSnapshot(
-            state: state,
-            activeConnections: activeConnections,
-            totalConnections: totalConnections,
-            relayIP: relayIP,
-            pings: state == .connected ? PingSample.loadAll() : PingSample.placeholderSamples,
-            lastUpdated: .now
-        )
+    init(liveSnapshot: VBridgeLiveActivitySnapshot) {
+        let state = State(rawValue: liveSnapshot.content.phase.rawValue) ?? .unknown
+        self.profileName = liveSnapshot.profileName
+        self.state = state
+        self.activeConnections = liveSnapshot.content.activeConnections
+        self.totalConnections = liveSnapshot.content.totalConnections
+        self.relayIP = liveSnapshot.content.relayIP
+        self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds
+        self.pings = state == .connected ? PingSample.loadAll() : PingSample.placeholderSamples
+        self.lastUpdated = liveSnapshot.content.updatedAt
     }
 
     private static func logURL() -> URL? {
@@ -462,7 +466,7 @@ private struct WidgetCardView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("VBridge")
+                    Text(snapshot.profileName)
                         .font(.system(size: 14, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
@@ -483,9 +487,18 @@ private struct WidgetCardView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
-                Text("active connections")
+                Text(snapshot.summaryText)
                     .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.70))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+
+            if snapshot.state == .connecting {
+                ProgressView(value: snapshot.progressFraction ?? 0)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.7, anchor: .center)
             }
 
             HStack(spacing: 5) {
@@ -511,7 +524,7 @@ private struct WidgetCardView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("VBridge")
+                    Text(snapshot.profileName)
                         .font(.system(size: 15, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
@@ -533,7 +546,7 @@ private struct WidgetCardView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
 
-                Text("active connections")
+                Text(snapshot.summaryText)
                     .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
@@ -549,6 +562,17 @@ private struct WidgetCardView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+            }
+
+            if snapshot.state == .connecting {
+                ProgressView(value: snapshot.progressFraction ?? 0)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.7, anchor: .center)
+
+                Text(snapshot.remainingText ?? "Working")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.78))
             }
 
             refreshRow()
@@ -573,7 +597,7 @@ private struct WidgetCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("VBridge")
+                    Text(snapshot.profileName)
                         .font(.system(size: 15, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
@@ -595,7 +619,7 @@ private struct WidgetCardView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
 
-                Text("active connections")
+                Text(snapshot.summaryText)
                     .font(.system(size: 10, weight: .semibold, design: .default))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
@@ -611,6 +635,17 @@ private struct WidgetCardView: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+            }
+
+            if snapshot.state == .connecting {
+                ProgressView(value: snapshot.progressFraction ?? 0)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.7, anchor: .center)
+
+                Text(snapshot.remainingText ?? "Working")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.78))
             }
 
             HStack(spacing: 8) {
@@ -743,6 +778,143 @@ private struct PingCompactView: View {
     }
 }
 
+@available(iOS 16.1, *)
+private struct VBridgeLiveActivityWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: VBridgeVPNLiveActivityAttributes.self) { context in
+            liveActivityLockScreenView(state: context.state)
+                .activityBackgroundTint(Color.black.opacity(0.92))
+                .activitySystemActionForegroundColor(.white)
+                .padding(.vertical, 4)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    liveActivityHeader(state: context.state)
+                }
+
+                DynamicIslandExpandedRegion(.trailing) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(context.state.phase.displayTitle)
+                            .font(.system(size: 12, weight: .semibold, design: .default))
+                            .foregroundStyle(.white.opacity(0.86))
+
+                        Text(context.state.remainingText ?? context.state.progressText ?? "VPN")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                DynamicIslandExpandedRegion(.bottom) {
+                    liveActivityExpandedBottomView(state: context.state)
+                }
+            } compactLeading: {
+                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(liveActivityTint(for: context.state.phase))
+            } compactTrailing: {
+                Text(context.state.remainingText ?? context.state.progressText ?? context.state.phase.displayTitle)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+            } minimal: {
+                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(liveActivityTint(for: context.state.phase))
+            }
+            .keylineTint(liveActivityTint(for: context.state.phase))
+        }
+    }
+
+    private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            liveActivityHeader(state: state)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(state.progressText ?? "0/0")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.phase.displayTitle)
+                        .font(.system(size: 12, weight: .semibold, design: .default))
+                        .foregroundStyle(.white.opacity(0.82))
+
+                    Text(state.remainingText ?? state.relayText)
+                        .font(.system(size: 12, weight: .semibold, design: .default))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+            }
+
+            ProgressView(value: state.progressFraction ?? 0)
+                .tint(liveActivityTint(for: state.phase))
+                .progressViewStyle(.linear)
+
+            HStack(spacing: 6) {
+                Image(systemName: "network")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(state.relayText)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private func liveActivityHeader(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(liveActivityTint(for: state.phase))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("VBridge")
+                    .font(.system(size: 13, weight: .bold, design: .default))
+                    .foregroundStyle(.white)
+                Text(state.phase.displayTitle)
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+        }
+    }
+
+    private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView(value: state.progressFraction ?? 0)
+                .tint(liveActivityTint(for: state.phase))
+                .progressViewStyle(.linear)
+
+            HStack(alignment: .center, spacing: 10) {
+                Text(state.progressText ?? "0/0")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+
+                Spacer(minLength: 0)
+
+                Text(state.remainingText ?? state.phase.displayTitle)
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func liveActivityTint(for phase: VBridgeLiveActivityPhase) -> Color {
+        switch phase {
+        case .connected:
+            return .green
+        case .connecting, .disconnecting:
+            return .orange
+        case .disconnected:
+            return .red
+        case .unknown:
+            return .white.opacity(0.75)
+        }
+    }
+}
+
 private struct VBridgeWidget: Widget {
     let kind = "VBridgeWidget"
 
@@ -762,6 +934,9 @@ private struct VBridgeWidget: Widget {
 struct VBridgeWidgetBundle: WidgetBundle {
     var body: some Widget {
         VBridgeWidget()
+        if #available(iOS 16.1, *) {
+            VBridgeLiveActivityWidget()
+        }
         if #available(iOS 18.0, *) {
             VBridgeConnectControlWidget()
         }

@@ -13,6 +13,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Manual Captcha Mode:** Optional mode to disable automatic captcha solving and force manual flow.
 * **Amnezia 2.0 Config Support:** Import and use Amnezia 2.0 `.conf` profiles directly.
 * **Widget Support:** Small and medium widgets with live connection state, relay IP, and ping dots for Cloudflare / Google / Yandex.
+* **Live Activities / Dynamic Island:** Shows VPN connection progress, compact status, relay IP, and ETA while the app is in the background.
 * **Shortcut Support:** Connect, disconnect, or toggle the VPN from Shortcuts.
 * **Theme Control:** User-selectable app theme (System / Light / Dark).
 * **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.

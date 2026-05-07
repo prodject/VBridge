@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var isUserInitiatedDisconnect = false
     @State private var hasLoadedInitialStatus = false
     @State private var connectionProgressText: String?
+    @State private var connectionStartedAt: Date?
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var pendingShortcutActionTask: Task<Void, Never>?
@@ -275,6 +276,7 @@ struct ContentView: View {
                     SharedLogger.info("VPN status: \(statusName)")
                     withAnimation { self.vpnStatus = newStatus }
                     refreshConnectionProgress()
+                    syncLiveActivityState(for: newStatus)
                     refreshWidgetTimelines()
                     if newStatus == .connected {
                         isUserInitiatedDisconnect = false
@@ -282,6 +284,7 @@ struct ContentView: View {
                     } else if newStatus == .disconnected, isUserInitiatedDisconnect {
                         isUserInitiatedDisconnect = false
                         UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+                        endLiveActivity(immediate: true)
                     }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
@@ -472,6 +475,14 @@ struct ContentView: View {
             isUserInitiatedDisconnect = true
             cancelConnectWatchdog()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+            let currentProgress = latestConnectionProgressFromLogs()
+            syncLiveActivityState(
+                profileName: store.selectedProfile?.name ?? "VBridge",
+                phase: .disconnecting,
+                activeConnections: currentProgress?.active,
+                totalConnections: currentProgress?.total,
+                relayIP: latestRelayIPFromLogs()
+            )
             app.turnOffTunnel()
             vpnStatus = .disconnecting
         } else {
@@ -487,7 +498,9 @@ struct ContentView: View {
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             let configuredThreadCount = max(profile.nValue, 1)
             vpnStatus = .connecting
+            connectionStartedAt = Date()
             refreshConnectionProgress()
+            beginLiveActivity(for: profile, targetWorkers: configuredThreadCount)
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
             SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
@@ -505,6 +518,7 @@ struct ContentView: View {
                     cancelConnectWatchdog()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
+                    endLiveActivity(immediate: true, profileName: profile.name)
                     presentConnectionIssue(
                         title: "Connection Failed",
                         message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
@@ -517,27 +531,21 @@ struct ContentView: View {
     }
 
     private func checkInitialStatus() {
-        NETunnelProviderManager.loadAllFromPreferences { managers, error in
-            let currentStatus = managers?.first?.connection.status ?? .disconnected
-            let statusName: String = {
-                switch currentStatus {
-                case .connected:     return "Connected"
-                case .connecting:    return "Connecting"
-                case .disconnected:  return "Disconnected"
-                case .disconnecting: return "Disconnecting"
-                case .reasserting:   return "Reasserting"
-                case .invalid:       return "Invalid"
-                @unknown default:    return "Unknown"
-                }
-            }()
-
-            self.vpnStatus = currentStatus
-            SharedLogger.updateWidgetLiveState(status: statusName)
-            self.hasLoadedInitialStatus = true
-            self.refreshConnectionProgress()
-            self.refreshWidgetTimelines()
-            self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
-            self.schedulePendingShortcutActionConsumption()
+        NETunnelProviderManager.loadAllFromPreferences { managers, _ in
+            DispatchQueue.main.async {
+                let currentStatus = managers?.first?.connection.status ?? .disconnected
+                let selectedProfileName = self.store.selectedProfile?.name ?? "VBridge"
+                self.vpnStatus = currentStatus
+                self.syncLiveActivityState(
+                    profileName: selectedProfileName,
+                    phase: self.liveActivityPhase(for: currentStatus)
+                )
+                self.hasLoadedInitialStatus = true
+                self.refreshConnectionProgress()
+                self.refreshWidgetTimelines()
+                self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
+                self.schedulePendingShortcutActionConsumption()
+            }
         }
     }
 
@@ -570,19 +578,49 @@ struct ContentView: View {
     private func refreshConnectionProgress() {
         guard vpnStatus == .connecting || vpnStatus == .connected || vpnStatus == .reasserting else {
             connectionProgressText = nil
+            let profileName = store.selectedProfile?.name ?? "VBridge"
+            syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
             return
         }
+
+        let profile = store.selectedProfile
+        let profileName = profile?.name ?? "VBridge"
 
         if let progress = latestConnectionProgressFromLogs() {
-            connectionProgressText = progress
+            let progressText = "\(progress.active)/\(progress.total)"
+            connectionProgressText = progressText
+            let estimatedRemainingSeconds = estimatedRemainingSeconds(
+                activeConnections: progress.active,
+                totalConnections: progress.total
+            )
+            syncLiveActivityState(
+                profileName: profileName,
+                phase: liveActivityPhase(for: vpnStatus),
+                activeConnections: progress.active,
+                totalConnections: progress.total,
+                relayIP: latestRelayIPFromLogs(),
+                estimatedRemainingSeconds: estimatedRemainingSeconds
+            )
             return
         }
 
-        guard let profile = store.selectedProfile else {
+        guard let profile else {
             connectionProgressText = nil
+            syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
             return
         }
-        connectionProgressText = "0/\(effectiveConnectionTarget(for: profile))"
+
+        let target = effectiveConnectionTarget(for: profile)
+        let fallbackProgress = vpnStatus == .connected ? target : 0
+        connectionProgressText = "\(fallbackProgress)/\(target)"
+        syncLiveActivityState(
+            profileName: profileName,
+            phase: liveActivityPhase(for: vpnStatus),
+            activeConnections: fallbackProgress,
+            totalConnections: target,
+            relayIP: latestRelayIPFromLogs(),
+            estimatedRemainingSeconds: estimatedRemainingSeconds(activeConnections: fallbackProgress, totalConnections: target)
+        )
     }
 
     private func handleWidgetURL(_ url: URL) -> Bool {
@@ -614,29 +652,19 @@ struct ContentView: View {
     }
 
     private func widgetRefreshSignature() -> String {
-        var status = ""
-        var workers = ""
-        var relay = ""
-
-        for line in SharedLogger.readLogs().reversed() {
-            if status.isEmpty, line.contains("VPN status:") {
-                status = line
-            }
-
-            if workers.isEmpty, line.contains("Connected workers ") {
-                workers = line
-            }
-
-            if relay.isEmpty, line.contains("relayed-address=") {
-                relay = line
-            }
-
-            if !status.isEmpty, !workers.isEmpty, !relay.isEmpty {
-                break
-            }
+        guard let snapshot = VBridgeLiveActivityStore.load() else {
+            return ""
         }
 
-        return [status, workers, relay].joined(separator: "|")
+        let content = snapshot.content
+        return [
+            snapshot.profileName,
+            content.phase.rawValue,
+            content.progressText ?? "",
+            content.relayIP ?? "",
+            content.estimatedRemainingSeconds.map(String.init) ?? "",
+            ISO8601DateFormatter().string(from: content.updatedAt)
+        ].joined(separator: "|")
     }
 
     private func schedulePendingShortcutActionConsumption() {
@@ -676,16 +704,132 @@ struct ContentView: View {
         return true
     }
 
-    private func latestConnectionProgressFromLogs() -> String? {
+    private func latestConnectionProgressFromLogs() -> (active: Int, total: Int)? {
         for line in SharedLogger.readLogs().reversed() {
             guard let range = line.range(of: "Connected workers ") else { continue }
             let suffix = line[range.upperBound...]
             let value = suffix.split(separator: " ").first.map(String.init) ?? String(suffix)
             let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-            guard parts.count == 2, Int(parts[0]) != nil, Int(parts[1]) != nil else { continue }
-            return "\(parts[0])/\(parts[1])"
+            guard parts.count == 2, let active = Int(parts[0]), let total = Int(parts[1]) else { continue }
+            return (active, total)
         }
         return nil
+    }
+
+    private func latestRelayIPFromLogs() -> String? {
+        for line in SharedLogger.readLogs().reversed() {
+            guard let range = line.range(of: "relayed-address=") else { continue }
+            let suffix = line[range.upperBound...]
+            let value = String(suffix).split(separator: " ").first.map(String.init) ?? String(suffix)
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private func estimatedRemainingSeconds(
+        activeConnections: Int,
+        totalConnections: Int,
+    ) -> Int? {
+        guard let connectionStartedAt else { return nil }
+        guard totalConnections > 0 else { return nil }
+        guard activeConnections >= 0 else { return nil }
+
+        let fraction = Double(activeConnections) / Double(totalConnections)
+        guard fraction > 0, fraction < 1 else { return nil }
+
+        let elapsed = Date().timeIntervalSince(connectionStartedAt)
+        guard elapsed > 0 else { return nil }
+
+        let estimatedTotal = elapsed / fraction
+        let remaining = max(Int((estimatedTotal - elapsed).rounded(.up)), 0)
+        return remaining
+    }
+
+    private func liveActivityPhase(for status: NEVPNStatus) -> VBridgeLiveActivityPhase {
+        switch status {
+        case .connected:
+            return .connected
+        case .connecting, .reasserting:
+            return .connecting
+        case .disconnecting:
+            return .disconnecting
+        case .disconnected, .invalid:
+            return .disconnected
+        @unknown default:
+            return .unknown
+        }
+    }
+
+    private func beginLiveActivity(for profile: VPNProfile, targetWorkers: Int) {
+        guard #available(iOS 16.1, *) else { return }
+        Task { @MainActor in
+            VBridgeLiveActivityCoordinator.shared.sync(
+                profileName: profile.name,
+                phase: .connecting,
+                activeConnections: 0,
+                totalConnections: targetWorkers,
+                relayIP: nil,
+                estimatedRemainingSeconds: nil
+            )
+        }
+    }
+
+    private func syncLiveActivityState(
+        profileName: String,
+        phase: VBridgeLiveActivityPhase,
+        activeConnections: Int? = nil,
+        totalConnections: Int? = nil,
+        relayIP: String? = nil,
+        estimatedRemainingSeconds: Int? = nil
+    ) {
+        guard #available(iOS 16.1, *) else { return }
+        Task { @MainActor in
+            VBridgeLiveActivityCoordinator.shared.sync(
+                profileName: profileName,
+                phase: phase,
+                activeConnections: activeConnections,
+                totalConnections: totalConnections,
+                relayIP: relayIP,
+                estimatedRemainingSeconds: estimatedRemainingSeconds
+            )
+        }
+    }
+
+    private func syncLiveActivityState(for status: NEVPNStatus) {
+        let profileName = store.selectedProfile?.name ?? "VBridge"
+        let phase = liveActivityPhase(for: status)
+        let progress = latestConnectionProgressFromLogs()
+
+        if phase == .disconnected {
+            endLiveActivity(profileName: profileName, immediate: true)
+            return
+        }
+
+        syncLiveActivityState(
+            profileName: profileName,
+            phase: phase,
+            activeConnections: progress?.active,
+            totalConnections: progress?.total,
+            relayIP: latestRelayIPFromLogs(),
+            estimatedRemainingSeconds: progress.map {
+                estimatedRemainingSeconds(activeConnections: $0.active, totalConnections: $0.total)
+            }
+        )
+    }
+
+    private func endLiveActivity(profileName: String? = nil, immediate: Bool) {
+        guard #available(iOS 16.1, *) else { return }
+        let resolvedProfileName = profileName ?? store.selectedProfile?.name ?? "VBridge"
+        Task { @MainActor in
+            VBridgeLiveActivityCoordinator.shared.end(
+                profileName: resolvedProfileName,
+                finalPhase: .disconnected,
+                immediate: immediate
+            )
+        }
     }
 
     private func effectiveConnectionTarget(for profile: VPNProfile) -> Int {
