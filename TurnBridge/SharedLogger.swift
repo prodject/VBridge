@@ -253,13 +253,30 @@ public struct SharedLogger {
         return trimmed
     }
 
+    private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double)? {
+        let lowered = message.lowercased()
+        guard lowered.contains("download="), lowered.contains("upload=") else { return nil }
+
+        func value(after marker: String) -> Double? {
+            guard let range = lowered.range(of: marker) else { return nil }
+            let suffix = message[range.upperBound...]
+            let token = suffix.split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "," || $0 == ";" }).first.map(String.init) ?? String(suffix)
+            let numeric = token.trimmingCharacters(in: CharacterSet(charactersIn: "mbpsMBPS"))
+            return Double(numeric)
+        }
+
+        return (downloadMbps: value(after: "download="), uploadMbps: value(after: "upload="))
+    }
+
     public static func updateWidgetLiveState(
         status rawStatus: String? = nil,
         activeConnections: Int? = nil,
         totalConnections: Int? = nil,
         relayIP: String? = nil,
         profileName: String? = nil,
-        estimatedRemainingSeconds: Int? = nil
+        estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil
     ) {
         let phase = rawStatus.flatMap(normalizedWidgetState(from:))
         VBridgeLiveActivityStore.update(
@@ -268,7 +285,9 @@ public struct SharedLogger {
             activeConnections: activeConnections,
             totalConnections: totalConnections,
             relayIP: relayIP,
-            estimatedRemainingSeconds: estimatedRemainingSeconds
+            estimatedRemainingSeconds: estimatedRemainingSeconds,
+            downloadSpeedMbps: downloadSpeedMbps,
+            uploadSpeedMbps: uploadSpeedMbps
         )
         reloadWidgetTimelinesIfAvailable()
     }
@@ -292,12 +311,21 @@ public struct SharedLogger {
             parsedRelayIP = relayIP
         }
 
-        if phase != nil || parsedActiveConnections != nil || parsedTotalConnections != nil || parsedRelayIP != nil {
+        var parsedDownloadSpeedMbps: Double?
+        var parsedUploadSpeedMbps: Double?
+        if let telemetry = parseSpeedTelemetry(from: message) {
+            parsedDownloadSpeedMbps = telemetry.downloadMbps
+            parsedUploadSpeedMbps = telemetry.uploadMbps
+        }
+
+        if phase != nil || parsedActiveConnections != nil || parsedTotalConnections != nil || parsedRelayIP != nil || parsedDownloadSpeedMbps != nil || parsedUploadSpeedMbps != nil {
             VBridgeLiveActivityStore.update(
                 phase: phase,
                 activeConnections: parsedActiveConnections,
                 totalConnections: parsedTotalConnections,
-                relayIP: parsedRelayIP
+                relayIP: parsedRelayIP,
+                downloadSpeedMbps: parsedDownloadSpeedMbps,
+                uploadSpeedMbps: parsedUploadSpeedMbps
             )
             reloadWidgetTimelinesIfAvailable()
         }

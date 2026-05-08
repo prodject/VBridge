@@ -11,6 +11,106 @@ struct SettingsSheet: Identifiable {
     let isNew: Bool
 }
 
+private struct ConnectionPingSample: Equatable {
+    let name: String
+    let latencyMs: Int?
+
+    var dotColor: Color {
+        guard let latencyMs else { return .gray.opacity(0.45) }
+        switch latencyMs {
+        case ..<30:
+            return .green
+        case ..<60:
+            return .mint
+        case ..<100:
+            return .yellow
+        case ..<150:
+            return .orange
+        default:
+            return .red
+        }
+    }
+
+    var dotCount: Int {
+        guard let latencyMs else { return 0 }
+        switch latencyMs {
+        case ..<30:
+            return 5
+        case ..<60:
+            return 4
+        case ..<100:
+            return 3
+        case ..<150:
+            return 2
+        default:
+            return 1
+        }
+    }
+
+    var compactLatencyText: String {
+        guard let latencyMs else { return "--" }
+        return "\(latencyMs)ms"
+    }
+
+    var badgeText: String {
+        switch name {
+        case "Cloudflare":
+            return "CF"
+        case "Google":
+            return "GO"
+        case "Yandex":
+            return "YN"
+        default:
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+
+    static let targets: [(String, URL)] = [
+        ("Cloudflare", URL(string: "https://www.cloudflare.com/cdn-cgi/trace")!),
+        ("Google", URL(string: "https://www.google.com/generate_204")!),
+        ("Yandex", URL(string: "https://ya.ru")!)
+    ]
+
+    static let placeholderSamples: [ConnectionPingSample] = [
+        ConnectionPingSample(name: "Cloudflare", latencyMs: 24),
+        ConnectionPingSample(name: "Google", latencyMs: 41),
+        ConnectionPingSample(name: "Yandex", latencyMs: 69)
+    ]
+
+    static func loadAll() async -> [ConnectionPingSample] {
+        async let cloudflare = pingLatency(for: targets[0].1)
+        async let google = pingLatency(for: targets[1].1)
+        async let yandex = pingLatency(for: targets[2].1)
+
+        return [
+            ConnectionPingSample(name: targets[0].0, latencyMs: await cloudflare),
+            ConnectionPingSample(name: targets[1].0, latencyMs: await google),
+            ConnectionPingSample(name: targets[2].0, latencyMs: await yandex)
+        ]
+    }
+
+    private static func pingLatency(for url: URL) async -> Int? {
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = 3
+        config.timeoutIntervalForResource = 3
+        let session = URLSession(configuration: config)
+
+        let start = DispatchTime.now()
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else {
+                return nil
+            }
+            let elapsed = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
+            return Int(elapsed / 1_000_000)
+        } catch {
+            return nil
+        }
+    }
+}
+
 struct ContentView: View {
     var app: VBridge
 
@@ -36,11 +136,14 @@ struct ContentView: View {
     @State private var isUserInitiatedDisconnect = false
     @State private var hasLoadedInitialStatus = false
     @State private var connectionProgressText: String?
+    @State private var downloadSpeedMbps: Double?
+    @State private var uploadSpeedMbps: Double?
     @State private var connectionStartedAt: Date?
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var speedTestTask: Task<Void, Never>?
-    @State private var didRunSpeedTestForCurrentConnection = false
+    @State private var lastSpeedMeasurementActiveConnections: Int?
+    @State private var currentConnectivityPings: [ConnectionPingSample] = ConnectionPingSample.placeholderSamples
     @State private var pendingShortcutActionTask: Task<Void, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
@@ -90,6 +193,31 @@ struct ContentView: View {
                             Text(connectionProgressText)
                                 .font(.system(size: 13, weight: .semibold, design: .default))
                                 .foregroundColor(.secondary)
+                        }
+
+                        if vpnStatus == .connected || vpnStatus == .connecting || downloadSpeedMbps != nil || uploadSpeedMbps != nil {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    telemetryBadge(
+                                        title: "Download",
+                                        value: formattedSpeed(downloadSpeedMbps),
+                                        systemImage: "arrow.down.circle.fill"
+                                    )
+
+                                    telemetryBadge(
+                                        title: "Upload",
+                                        value: formattedSpeed(uploadSpeedMbps),
+                                        systemImage: "arrow.up.circle.fill"
+                                    )
+                                }
+
+                                HStack(spacing: 8) {
+                                    ForEach(currentConnectivityPings, id: \.name) { sample in
+                                        pingBadge(sample)
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -476,7 +604,7 @@ struct ContentView: View {
             SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
             isUserInitiatedDisconnect = true
             cancelConnectWatchdog()
-            cancelSpeedTest()
+            resetSpeedTelemetry()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             let currentProgress = latestConnectionProgressFromLogs()
             syncLiveActivityState(
@@ -499,6 +627,7 @@ struct ContentView: View {
             SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
             isUserInitiatedDisconnect = false
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+            resetSpeedTelemetry()
             let configuredThreadCount = max(profile.nValue, 1)
             vpnStatus = .connecting
             connectionStartedAt = Date()
@@ -519,7 +648,7 @@ struct ContentView: View {
             ) { isSuccess in
                 if !isSuccess {
                     cancelConnectWatchdog()
-                    cancelSpeedTest()
+                    resetSpeedTelemetry()
                     vpnStatus = .disconnected
                     SharedLogger.error("Tunnel start failed")
                     endLiveActivity(profileName: profile.name, immediate: true)
@@ -540,15 +669,16 @@ struct ContentView: View {
                 let currentStatus = managers?.first?.connection.status ?? .disconnected
                 let selectedProfileName = self.store.selectedProfile?.name ?? "VBridge"
                 self.vpnStatus = currentStatus
+                if currentStatus == .connected, let snapshot = VBridgeLiveActivityStore.load() {
+                    self.downloadSpeedMbps = snapshot.content.downloadSpeedMbps
+                    self.uploadSpeedMbps = snapshot.content.uploadSpeedMbps
+                }
                 self.syncLiveActivityState(
                     profileName: selectedProfileName,
                     phase: self.liveActivityPhase(for: currentStatus)
                 )
                 self.hasLoadedInitialStatus = true
                 self.refreshConnectionProgress()
-                if currentStatus == .connected {
-                    self.startSpeedTestIfNeeded(profileName: selectedProfileName)
-                }
                 self.refreshWidgetTimelines()
                 self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
                 self.schedulePendingShortcutActionConsumption()
@@ -626,7 +756,10 @@ struct ContentView: View {
         }
 
         if vpnStatus == .connected {
-            startSpeedTestIfNeeded(profileName: profileName)
+            let currentActiveConnections = progress?.active ?? 0
+            if lastSpeedMeasurementActiveConnections == nil || currentActiveConnections > (lastSpeedMeasurementActiveConnections ?? -1) {
+                requestSpeedMeasurement(profileName: profileName, activeConnections: progress?.active)
+            }
         } else {
             cancelSpeedTest()
         }
@@ -786,6 +919,63 @@ struct ContentView: View {
         }
     }
 
+    private func resetSpeedTelemetry() {
+        speedTestTask?.cancel()
+        speedTestTask = nil
+        downloadSpeedMbps = nil
+        uploadSpeedMbps = nil
+        lastSpeedMeasurementActiveConnections = nil
+        currentConnectivityPings = ConnectionPingSample.placeholderSamples
+    }
+
+    private func requestSpeedMeasurement(profileName: String, activeConnections: Int? = nil) {
+        guard #available(iOS 16.1, *) else { return }
+        guard vpnStatus == .connected else { return }
+
+        if let activeConnections {
+            lastSpeedMeasurementActiveConnections = activeConnections
+        } else if lastSpeedMeasurementActiveConnections == nil {
+            lastSpeedMeasurementActiveConnections = latestConnectionProgressFromLogs()?.active ?? 0
+        }
+
+        speedTestTask?.cancel()
+        speedTestTask = Task(priority: .utility) { [profileName] in
+            async let pingSamples = ConnectionPingSample.loadAll()
+            let result = await runSpeedTest()
+            let resolvedPingSamples = await pingSamples
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self.speedTestTask = nil
+                guard self.vpnStatus == .connected else { return }
+                self.downloadSpeedMbps = result.downloadMbps
+                self.uploadSpeedMbps = result.uploadMbps
+                self.currentConnectivityPings = resolvedPingSamples
+
+                let progress = self.latestConnectionProgressFromLogs()
+                self.syncLiveActivityState(
+                    profileName: profileName,
+                    phase: .connected,
+                    activeConnections: progress?.active,
+                    totalConnections: progress?.total,
+                    relayIP: self.latestRelayIPFromLogs(),
+                    estimatedRemainingSeconds: nil,
+                    downloadSpeedMbps: result.downloadMbps,
+                    uploadSpeedMbps: result.uploadMbps
+                )
+                self.refreshWidgetTimelines()
+
+                SharedLogger.info(
+                    String(
+                        format: "Speed telemetry: download=%@ upload=%@",
+                        self.formattedSpeed(result.downloadMbps),
+                        self.formattedSpeed(result.uploadMbps)
+                    )
+                )
+            }
+        }
+    }
+
     private func syncLiveActivityState(
         profileName: String,
         phase: VBridgeLiveActivityPhase,
@@ -818,6 +1008,7 @@ struct ContentView: View {
 
         if phase == .disconnected {
             cancelSpeedTest()
+            resetSpeedTelemetry()
             endLiveActivity(profileName: profileName, immediate: true)
             return
         }
@@ -833,18 +1024,16 @@ struct ContentView: View {
             }
         )
 
-        if phase == .connected {
-            startSpeedTestIfNeeded(profileName: profileName)
-        } else {
+        if phase != .connected {
             cancelSpeedTest()
-            didRunSpeedTestForCurrentConnection = false
+            resetSpeedTelemetry()
         }
     }
 
     private func endLiveActivity(profileName: String? = nil, immediate: Bool) {
         guard #available(iOS 16.1, *) else { return }
         let resolvedProfileName = profileName ?? store.selectedProfile?.name ?? "VBridge"
-        cancelSpeedTest()
+        resetSpeedTelemetry()
         Task { @MainActor in
             VBridgeLiveActivityCoordinator.shared.end(
                 profileName: resolvedProfileName,
@@ -859,44 +1048,13 @@ struct ContentView: View {
         speedTestTask = nil
     }
 
-    private func startSpeedTestIfNeeded(profileName: String) {
-        guard #available(iOS 16.1, *) else { return }
-        guard speedTestTask == nil else { return }
-        guard !didRunSpeedTestForCurrentConnection else { return }
-        guard vpnStatus == .connected else { return }
-
-        didRunSpeedTestForCurrentConnection = true
-        speedTestTask = Task(priority: .utility) { [profileName] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-
-            let result = await runSpeedTest()
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                self.speedTestTask = nil
-                guard self.vpnStatus == .connected else { return }
-                self.syncLiveActivityState(
-                    profileName: profileName,
-                    phase: .connected,
-                    activeConnections: self.latestConnectionProgressFromLogs()?.active,
-                    totalConnections: self.latestConnectionProgressFromLogs()?.total,
-                    relayIP: self.latestRelayIPFromLogs(),
-                    estimatedRemainingSeconds: nil,
-                    downloadSpeedMbps: result.downloadMbps,
-                    uploadSpeedMbps: result.uploadMbps
-                )
-            }
-        }
-    }
-
     private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
         guard let firstSample = await sampleRuntimeTransferBytes() else {
             return (nil, nil)
         }
 
         let start = Date()
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
         guard !Task.isCancelled else { return (nil, nil) }
 
         guard let secondSample = await sampleRuntimeTransferBytes() else {
@@ -914,6 +1072,64 @@ struct ContentView: View {
         let downloadMbps = Double(downloadDelta) * 8.0 / elapsed / 1_000_000.0
         let uploadMbps = Double(uploadDelta) * 8.0 / elapsed / 1_000_000.0
         return (downloadMbps, uploadMbps)
+    }
+
+    private func telemetryBadge(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.86))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                Text(value)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func pingBadge(_ sample: ConnectionPingSample) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Text(verbatim: sample.badgeText)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Circle()
+                    .fill(sample.dotColor)
+                    .frame(width: 5, height: 5)
+                Spacer(minLength: 0)
+                Text(verbatim: sample.compactLatencyText)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+
+            HStack(spacing: 2) {
+                ForEach(0..<5, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(sample.dotCount > index ? sample.dotColor : .white.opacity(0.16))
+                        .frame(width: 8, height: 3)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func sampleRuntimeTransferBytes() async -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
@@ -1003,6 +1219,11 @@ struct ContentView: View {
         }
 
         return sawPeer ? (totalDownloadBytes, totalUploadBytes) : nil
+    }
+
+    private func formattedSpeed(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "--" }
+        return String(format: "%.1f Mbps", max(value, 0))
     }
 
     private func effectiveConnectionTarget(for profile: VPNProfile) -> Int {

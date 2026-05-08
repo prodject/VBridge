@@ -214,6 +214,28 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             #endif
         }
     }
+
+    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
+        guard let completionHandler = completionHandler else { return }
+
+        sharedLogger.log("handleAppMessage: received \(messageData.count) bytes")
+        if messageData.count == 1, messageData[0] == 0 {
+            sharedLogger.log("handleAppMessage: runtime configuration requested")
+            adapter.getRuntimeConfiguration { settings in
+                var data: Data?
+                if let settings = settings {
+                    data = settings.data(using: .utf8)
+                } else {
+                    sharedLogger.log("handleAppMessage: runtime configuration unavailable")
+                }
+                completionHandler(data)
+            }
+        } else {
+            sharedLogger.log("handleAppMessage: unsupported message payload")
+            completionHandler(nil)
+        }
+    }
+
     override func sleep(completionHandler: @escaping () -> Void) {
         // Add code here to get ready to sleep.
         completionHandler()

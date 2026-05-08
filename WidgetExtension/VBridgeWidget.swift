@@ -20,6 +20,11 @@ private enum WidgetActionStore {
         defaults?.set("connect", forKey: key)
         defaults?.synchronize()
     }
+
+    static func storeDisconnectAction() {
+        defaults?.set("disconnect", forKey: key)
+        defaults?.synchronize()
+    }
 }
 
 @available(iOS 17.0, *)
@@ -48,6 +53,19 @@ private struct ConnectVBridgeWidgetIntent: AppIntent {
     }
 }
 
+@available(iOS 17.0, *)
+private struct DisconnectVBridgeWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Disconnect VBridge VPN"
+    static var description = IntentDescription("Opens VBridge and disconnects the tunnel.")
+    static var openAppWhenRun = true
+    static var isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        WidgetActionStore.storeDisconnectAction()
+        return .result()
+    }
+}
+
 private struct WidgetSnapshot: Equatable {
     enum State: String {
         case connected
@@ -62,6 +80,8 @@ private struct WidgetSnapshot: Equatable {
     let totalConnections: Int?
     let relayIP: String?
     let estimatedRemainingSeconds: Int?
+    let downloadSpeedMbps: Double?
+    let uploadSpeedMbps: Double?
     let pings: [PingSample]
     let lastUpdated: Date
 
@@ -136,6 +156,18 @@ private struct WidgetSnapshot: Equatable {
         return formatter.string(from: TimeInterval(clampedSeconds))
     }
 
+    var downloadSpeedText: String {
+        speedText(downloadSpeedMbps, fallback: "DL --")
+    }
+
+    var uploadSpeedText: String {
+        speedText(uploadSpeedMbps, fallback: "UL --")
+    }
+
+    var speedSummaryText: String {
+        "\(downloadSpeedText)  •  \(uploadSpeedText)"
+    }
+
     var summaryText: String {
         switch state {
         case .connected:
@@ -159,6 +191,8 @@ private struct WidgetSnapshot: Equatable {
         totalConnections: Int?,
         relayIP: String?,
         estimatedRemainingSeconds: Int?,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil,
         pings: [PingSample],
         lastUpdated: Date
     ) {
@@ -168,6 +202,8 @@ private struct WidgetSnapshot: Equatable {
         self.totalConnections = totalConnections
         self.relayIP = relayIP
         self.estimatedRemainingSeconds = estimatedRemainingSeconds
+        self.downloadSpeedMbps = downloadSpeedMbps
+        self.uploadSpeedMbps = uploadSpeedMbps
         self.pings = pings
         self.lastUpdated = lastUpdated
     }
@@ -179,6 +215,8 @@ private struct WidgetSnapshot: Equatable {
         totalConnections: 10,
         relayIP: "193.203.43.9",
         estimatedRemainingSeconds: 32,
+        downloadSpeedMbps: 18.4,
+        uploadSpeedMbps: 5.7,
         pings: PingSample.placeholderSamples,
         lastUpdated: .now
     )
@@ -199,6 +237,8 @@ private struct WidgetSnapshot: Equatable {
             totalConnections: nil,
             relayIP: nil,
             estimatedRemainingSeconds: nil,
+            downloadSpeedMbps: nil,
+            uploadSpeedMbps: nil,
             pings: PingSample.placeholderSamples,
             lastUpdated: .now
         )
@@ -266,6 +306,8 @@ private struct WidgetSnapshot: Equatable {
             totalConnections: totalConnections,
             relayIP: relayIP,
             estimatedRemainingSeconds: nil,
+            downloadSpeedMbps: nil,
+            uploadSpeedMbps: nil,
             pings: pings,
             lastUpdated: .now
         )
@@ -283,8 +325,15 @@ private struct WidgetSnapshot: Equatable {
         self.totalConnections = liveSnapshot.content.totalConnections ?? fallback?.totalConnections
         self.relayIP = liveSnapshot.content.relayIP ?? fallback?.relayIP
         self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds ?? fallback?.estimatedRemainingSeconds
+        self.downloadSpeedMbps = liveSnapshot.content.downloadSpeedMbps ?? fallback?.downloadSpeedMbps
+        self.uploadSpeedMbps = liveSnapshot.content.uploadSpeedMbps ?? fallback?.uploadSpeedMbps
         self.pings = state == .connected ? PingSample.loadAll() : (fallback?.pings ?? PingSample.placeholderSamples)
         self.lastUpdated = liveSnapshot.content.updatedAt
+    }
+
+    private func speedText(_ value: Double?, fallback: String) -> String {
+        guard let value, value.isFinite else { return fallback }
+        return String(format: "%.1f Mbps", max(value, 0))
     }
 
     private static func logURL() -> URL? {
@@ -447,39 +496,48 @@ private struct WidgetCardView: View {
     var body: some View {
         let snapshot = entry.snapshot
         ZStack {
-            Rectangle()
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(.ultraThinMaterial)
 
-            LinearGradient(
-                colors: [
-                    Color(red: 0.07, green: 0.76, blue: 0.91).opacity(0.98),
-                    Color(red: 0.77, green: 0.44, blue: 0.93).opacity(0.98),
-                    Color(red: 0.96, green: 0.31, blue: 0.35).opacity(0.98)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.20),
+                            Color(red: 0.62, green: 0.48, blue: 0.98).opacity(0.16),
+                            Color(red: 0.08, green: 0.78, blue: 0.92).opacity(0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
             Circle()
-                .fill(Color(red: 0.95, green: 0.95, blue: 0.97).opacity(0.28))
-                .frame(width: family == .systemSmall ? 124 : 160, height: family == .systemSmall ? 124 : 160)
-                .blur(radius: 36)
-                .offset(x: family == .systemSmall ? -60 : -82, y: family == .systemSmall ? -50 : -66)
+                .fill(Color.white.opacity(0.22))
+                .frame(width: family == .systemSmall ? 116 : 156, height: family == .systemSmall ? 116 : 156)
+                .blur(radius: 34)
+                .offset(x: family == .systemSmall ? -58 : -82, y: family == .systemSmall ? -46 : -66)
 
             Circle()
-                .fill(Color(red: 0.48, green: 0.31, blue: 0.98).opacity(0.34))
-                .frame(width: family == .systemSmall ? 132 : 168, height: family == .systemSmall ? 132 : 168)
-                .blur(radius: 30)
-                .offset(x: family == .systemSmall ? 58 : 82, y: family == .systemSmall ? 52 : 72)
+                .fill(Color(red: 0.45, green: 0.26, blue: 0.98).opacity(0.30))
+                .frame(width: family == .systemSmall ? 132 : 172, height: family == .systemSmall ? 132 : 172)
+                .blur(radius: 32)
+                .offset(x: family == .systemSmall ? 62 : 84, y: family == .systemSmall ? 56 : 74)
 
             Circle()
                 .fill(Color(red: 0.38, green: 0.50, blue: 0.98).opacity(0.18))
-                .frame(width: family == .systemSmall ? 96 : 126, height: family == .systemSmall ? 96 : 126)
-                .blur(radius: 24)
-                .offset(x: family == .systemSmall ? 18 : 28, y: family == .systemSmall ? 18 : 24)
+                .frame(width: family == .systemSmall ? 92 : 124, height: family == .systemSmall ? 92 : 124)
+                .blur(radius: 22)
+                .offset(x: family == .systemSmall ? 16 : 26, y: family == .systemSmall ? 20 : 26)
 
             content(snapshot: snapshot)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.24), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 18, x: 0, y: 8)
     }
 
     @ViewBuilder
@@ -499,10 +557,10 @@ private struct WidgetCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.profileName)
-                        .font(.system(size: 14, weight: .bold, design: .default))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
@@ -515,12 +573,12 @@ private struct WidgetCardView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .bold, design: .default))
+                    .font(.system(size: 23, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
                 Text(snapshot.summaryText)
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -544,6 +602,8 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.6)
             }
 
+            metricsSection(snapshot: snapshot, compactPings: true)
+
             Spacer(minLength: 0)
 
             refreshRow()
@@ -557,10 +617,10 @@ private struct WidgetCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.profileName)
-                        .font(.system(size: 15, weight: .bold, design: .default))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
@@ -573,17 +633,19 @@ private struct WidgetCardView: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .bold, design: .default))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
 
                 Text(snapshot.summaryText)
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
+
+            metricsSection(snapshot: snapshot, compactPings: false)
 
             HStack(spacing: 5) {
                 Image(systemName: "network")
@@ -603,23 +665,11 @@ private struct WidgetCardView: View {
                     .scaleEffect(x: 1, y: 0.7, anchor: .center)
 
                 Text(snapshot.remainingText ?? "Working")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
             }
 
             refreshRow()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Ping")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
-                    .foregroundStyle(.white.opacity(0.75))
-
-                HStack(alignment: .top, spacing: 6) {
-                    ForEach(snapshot.pings, id: \.name) { ping in
-                        PingCompactView(sample: ping)
-                    }
-                }
-            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
@@ -630,10 +680,10 @@ private struct WidgetCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.profileName)
-                        .font(.system(size: 15, weight: .bold, design: .default))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
@@ -646,13 +696,13 @@ private struct WidgetCardView: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .bold, design: .default))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
 
                 Text(snapshot.summaryText)
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -676,7 +726,7 @@ private struct WidgetCardView: View {
                     .scaleEffect(x: 1, y: 0.7, anchor: .center)
 
                 Text(snapshot.remainingText ?? "Working")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
             }
 
@@ -697,20 +747,88 @@ private struct WidgetCardView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Ping")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
-                    .foregroundStyle(.white.opacity(0.75))
+            metricsSection(snapshot: snapshot, compactPings: false)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+    }
 
-                HStack(alignment: .top, spacing: 6) {
+    private func metricsSection(snapshot: WidgetSnapshot, compactPings: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                metricChip(title: "Download", value: snapshot.downloadSpeedText, systemImage: "arrow.down.circle.fill")
+                metricChip(title: "Upload", value: snapshot.uploadSpeedText, systemImage: "arrow.up.circle.fill")
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                if compactPings {
+                    ForEach(snapshot.pings, id: \.name) { ping in
+                        miniPingBadge(sample: ping)
+                    }
+                } else {
                     ForEach(snapshot.pings, id: \.name) { ping in
                         PingCompactView(sample: ping)
                     }
                 }
             }
         }
-        .padding(.vertical, 10)
+    }
+
+    private func metricChip(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.86))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.70))
+                Text(value)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 7)
         .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+    }
+
+    private func miniPingBadge(sample: PingSample) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(verbatim: sample.badgeText)
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Circle()
+                    .fill(sample.dotColor)
+                    .frame(width: 4, height: 4)
+                Text(verbatim: sample.compactLatencyText)
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+
+            HStack(spacing: 1.5) {
+                ForEach(0..<5, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(sample.dotCount > index ? sample.dotColor : .white.opacity(0.14))
+                        .frame(width: 6, height: 2.5)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     @ViewBuilder
@@ -719,7 +837,7 @@ private struct WidgetCardView: View {
             Button(intent: RefreshVBridgeWidgetIntent()) {
                 HStack {
                     Text("Tap to refresh")
-                        .font(.system(size: 10, weight: .semibold, design: .default))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.84))
 
                     Spacer(minLength: 0)
@@ -733,7 +851,7 @@ private struct WidgetCardView: View {
         } else {
             HStack {
                 Text("Open app to refresh")
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.84))
 
                 Spacer(minLength: 0)
@@ -748,7 +866,7 @@ private struct WidgetCardView: View {
     private func actionButtonLabel(title: String, systemImage: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .default))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.84))
 
             Spacer(minLength: 0)
@@ -775,7 +893,7 @@ private struct PingCompactView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Text(verbatim: badgeText)
-                    .font(.system(size: 9, weight: .bold, design: .default))
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Circle()
                     .fill(dotColor)
@@ -829,7 +947,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(context.state.phase.displayTitle)
-                            .font(.system(size: 12, weight: .semibold, design: .default))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white.opacity(0.86))
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -865,24 +983,24 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             liveActivityHeader(state: state)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(state.progressText ?? "0/0")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.8)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(state.phase.displayTitle)
-                        .font(.system(size: 12, weight: .semibold, design: .default))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
 
                     Text(state.remainingText ?? state.relayText)
-                        .font(.system(size: 12, weight: .semibold, design: .default))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(1)
                 }
@@ -908,8 +1026,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .minimumScaleFactor(0.75)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     private func liveActivityHeader(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
@@ -920,10 +1038,10 @@ private struct VBridgeLiveActivityWidget: Widget {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("VBridge")
-                    .font(.system(size: 13, weight: .bold, design: .default))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Text(state.phase.displayTitle)
-                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
             }
         }
@@ -940,6 +1058,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                 speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
             }
 
+            disconnectControlRow(state: state)
+
             HStack(alignment: .center, spacing: 10) {
                 Text(state.progressText ?? "0/0")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -950,7 +1070,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                 Spacer(minLength: 0)
 
                 Text(state.speedSummaryText)
-                    .font(.system(size: 11, weight: .semibold, design: .default))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -958,6 +1078,47 @@ private struct VBridgeLiveActivityWidget: Widget {
         }
         .padding(.top, 4)
         .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func disconnectControlRow(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        if state.phase == .connected || state.phase == .connecting || state.phase == .disconnecting {
+            if #available(iOS 17.0, *) {
+                Button(intent: DisconnectVBridgeWidgetIntent()) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "power.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text("Disconnect")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            } else {
+                HStack {
+                    Image(systemName: "power.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("Disconnect")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
     }
 
     private func liveActivityTint(for phase: VBridgeLiveActivityPhase) -> Color {
@@ -976,7 +1137,7 @@ private struct VBridgeLiveActivityWidget: Widget {
     private func speedChip(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 9, weight: .semibold, design: .default))
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.66))
                 .lineLimit(1)
 

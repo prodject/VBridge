@@ -1,5 +1,8 @@
 import ActivityKit
 import Foundation
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 @available(iOS 16.1, *)
 enum VBridgeLiveActivityPhase: String, Codable, Hashable {
@@ -139,6 +142,7 @@ enum VBridgeLiveActivityStore {
         guard let data = try? encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
         defaults.synchronize()
+        reloadWidgetTimelinesIfAvailable()
     }
 
     static func update(
@@ -211,6 +215,12 @@ enum VBridgeLiveActivityStore {
 
     static func clear() {
         defaults?.removeObject(forKey: snapshotKey)
+    }
+
+    private static func reloadWidgetTimelinesIfAvailable() {
+#if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+#endif
     }
 }
 
