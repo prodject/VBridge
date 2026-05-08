@@ -1108,10 +1108,10 @@ private struct VBridgeLiveActivityWidget: Widget {
         VStack(alignment: .leading, spacing: 6) {
             liveActivityHeader(
                 profileName: "VBridge",
-                state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
-                statusLabel: context.state.phase.displayTitle,
-                statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
-                statusAccent: liveActivityStatusAccent(phase: context.state.phase)
+                state: WidgetSnapshot.State(rawValue: state.phase.rawValue) ?? .unknown,
+                statusLabel: state.phase.displayTitle,
+                statusSymbol: liveActivityStatusSymbol(phase: state.phase),
+                statusAccent: liveActivityStatusAccent(phase: state.phase)
             )
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1189,7 +1189,7 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityStatusSymbol(
-        phase: VBridgeVPNLiveActivityAttributes.Phase
+        phase: VBridgeLiveActivityPhase
     ) -> String {
         switch phase {
         case .connected:
@@ -1206,7 +1206,7 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityStatusAccent(
-        phase: VBridgeVPNLiveActivityAttributes.Phase
+        phase: VBridgeLiveActivityPhase
     ) -> Color {
         switch phase {
         case .connected:
