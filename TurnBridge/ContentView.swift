@@ -1054,20 +1054,25 @@ struct ContentView: View {
     }
 
     private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
+        SharedLogger.info("Speed test started")
+
         let downloadMbps = await measureCloudflareDownloadSpeed()
         if Task.isCancelled {
             return (nil, nil)
         }
+        SharedLogger.info("Speed test download result: \(formattedSpeed(downloadMbps))")
 
         let uploadMbps = await measureCloudflareUploadSpeed()
         if Task.isCancelled {
             return (nil, nil)
         }
+        SharedLogger.info("Speed test upload result: \(formattedSpeed(uploadMbps))")
 
         if downloadMbps != nil || uploadMbps != nil {
             return (downloadMbps, uploadMbps)
         }
 
+        SharedLogger.warning("Cloudflare speed test returned no usable result, falling back to runtime byte sampling")
         return await measureRuntimeSpeedFallback()
     }
 
@@ -1076,11 +1081,22 @@ struct ContentView: View {
         var lastMbps: Double?
         for size in candidateSizes {
             guard !Task.isCancelled else { return nil }
+            SharedLogger.info("Speed test download attempt bytes=\(size)")
             if let sample = await measureCloudflareDownloadSample(byteCount: size) {
                 lastMbps = sample.mbps
+                SharedLogger.info(
+                    String(
+                        format: "Speed test download sample bytes=%d elapsed=%.3fs rate=%@",
+                        size,
+                        sample.elapsed,
+                        formattedSpeed(sample.mbps)
+                    )
+                )
                 if sample.elapsed >= 1.25 {
                     return sample.mbps
                 }
+            } else {
+                SharedLogger.warning("Speed test download sample failed for bytes=\(size)")
             }
         }
         return lastMbps
@@ -1091,11 +1107,22 @@ struct ContentView: View {
         var lastMbps: Double?
         for size in candidateSizes {
             guard !Task.isCancelled else { return nil }
+            SharedLogger.info("Speed test upload attempt bytes=\(size)")
             if let sample = await measureCloudflareUploadSample(byteCount: size) {
                 lastMbps = sample.mbps
+                SharedLogger.info(
+                    String(
+                        format: "Speed test upload sample bytes=%d elapsed=%.3fs rate=%@",
+                        size,
+                        sample.elapsed,
+                        formattedSpeed(sample.mbps)
+                    )
+                )
                 if sample.elapsed >= 1.25 {
                     return sample.mbps
                 }
+            } else {
+                SharedLogger.warning("Speed test upload sample failed for bytes=\(size)")
             }
         }
         return lastMbps
@@ -1114,13 +1141,20 @@ struct ContentView: View {
 
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.httpMethod = "GET"
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
 
         let start = Date()
         do {
             let (data, response) = try await session.data(for: request)
             guard !Task.isCancelled else { return nil }
             guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else {
+                if let http = response as? HTTPURLResponse {
+                    SharedLogger.warning("Speed test download HTTP status=\(http.statusCode) bytes=\(byteCount)")
+                } else {
+                    SharedLogger.warning("Speed test download returned non-HTTP response for bytes=\(byteCount)")
+                }
                 return nil
             }
             let elapsed = max(Date().timeIntervalSince(start), 0.001)
@@ -1128,6 +1162,7 @@ struct ContentView: View {
             let mbps = Double(effectiveBytes) * 8.0 / elapsed / 1_000_000.0
             return (mbps, elapsed)
         } catch {
+            SharedLogger.warning("Speed test download request failed for bytes=\(byteCount): \(error.localizedDescription)")
             return nil
         }
     }
@@ -1146,7 +1181,9 @@ struct ContentView: View {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
         request.httpBody = Data(repeating: 0, count: byteCount)
 
         let start = Date()
@@ -1154,18 +1191,26 @@ struct ContentView: View {
             let (_, response) = try await session.data(for: request)
             guard !Task.isCancelled else { return nil }
             guard let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) else {
+                if let http = response as? HTTPURLResponse {
+                    SharedLogger.warning("Speed test upload HTTP status=\(http.statusCode) bytes=\(byteCount)")
+                } else {
+                    SharedLogger.warning("Speed test upload returned non-HTTP response for bytes=\(byteCount)")
+                }
                 return nil
             }
             let elapsed = max(Date().timeIntervalSince(start), 0.001)
             let mbps = Double(byteCount) * 8.0 / elapsed / 1_000_000.0
             return (mbps, elapsed)
         } catch {
+            SharedLogger.warning("Speed test upload request failed for bytes=\(byteCount): \(error.localizedDescription)")
             return nil
         }
     }
 
     private func measureRuntimeSpeedFallback() async -> (downloadMbps: Double?, uploadMbps: Double?) {
+        SharedLogger.info("Speed test runtime fallback started")
         guard let firstSample = await sampleRuntimeTransferBytes() else {
+            SharedLogger.warning("Speed test runtime fallback failed: could not read first runtime sample")
             return (nil, nil)
         }
 
@@ -1174,6 +1219,7 @@ struct ContentView: View {
         guard !Task.isCancelled else { return (nil, nil) }
 
         guard let secondSample = await sampleRuntimeTransferBytes() else {
+            SharedLogger.warning("Speed test runtime fallback failed: could not read second runtime sample")
             return (nil, nil)
         }
 
@@ -1187,6 +1233,13 @@ struct ContentView: View {
 
         let downloadMbps = Double(downloadDelta) * 8.0 / elapsed / 1_000_000.0
         let uploadMbps = Double(uploadDelta) * 8.0 / elapsed / 1_000_000.0
+        SharedLogger.info(
+            String(
+                format: "Speed test runtime fallback result: download=%@ upload=%@",
+                formattedSpeed(downloadMbps),
+                formattedSpeed(uploadMbps)
+            )
+        )
         return (downloadMbps, uploadMbps)
     }
 
