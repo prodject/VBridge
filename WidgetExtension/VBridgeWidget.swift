@@ -978,8 +978,6 @@ private struct PingCompactView: View {
 private struct VBridgeLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VBridgeVPNLiveActivityAttributes.self) { context in
-            let state = WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown
-
             VStack(alignment: .leading, spacing: 8) {
                 liveActivityHeader(
                     profileName: context.attributes.profileName,
@@ -1027,10 +1025,8 @@ private struct VBridgeLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    liveActivityHeader(
-                        profileName: context.attributes.profileName,
-                        state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
-                        statusLabel: context.state.phase.displayTitle,
+                    liveActivityStatusBadge(
+                        phase: context.state.phase,
                         statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
                         statusAccent: liveActivityStatusAccent(phase: context.state.phase)
                     )
@@ -1068,19 +1064,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .padding(.horizontal, 2)
                 }
 
-                DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(context.state.phase.displayTitle)
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-
-                        Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(context.state.phase == .connected ? .green : .orange)
-                    }
-                }
+                DynamicIslandExpandedRegion(.trailing) { EmptyView() }
 
                 DynamicIslandExpandedRegion(.bottom) {
                     liveActivityExpandedBottomView(state: context.state)
@@ -1248,6 +1232,24 @@ private struct VBridgeLiveActivityWidget: Widget {
             }
 
             Spacer(minLength: 0)
+        }
+    }
+
+    private func liveActivityStatusBadge(
+        phase: VBridgeLiveActivityPhase,
+        statusSymbol: String,
+        statusAccent: Color
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: statusSymbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(statusAccent)
+
+            Text(phase.displayTitle)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
 
