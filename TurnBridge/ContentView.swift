@@ -756,9 +756,9 @@ struct ContentView: View {
         }
 
         if vpnStatus == .connected {
-            let currentActiveConnections = progress?.active ?? 0
+            let currentActiveConnections = latestConnectionProgressFromLogs()?.active ?? 0
             if lastSpeedMeasurementActiveConnections == nil || currentActiveConnections > (lastSpeedMeasurementActiveConnections ?? -1) {
-                requestSpeedMeasurement(profileName: profileName, activeConnections: progress?.active)
+                requestSpeedMeasurement(profileName: profileName, activeConnections: currentActiveConnections)
             }
         } else {
             cancelSpeedTest()
