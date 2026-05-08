@@ -59,6 +59,14 @@ var proxyRuntimeMu sync.Mutex
 var proxyRuntime *proxyRuntimeState
 
 const relayPacketBufferSize = 64 * 1024
+const (
+	// Pace worker launches to avoid bursty credential/ TURN allocation spikes.
+	workerSpawnBaseDelay     = 350 * time.Millisecond
+	workerSpawnDelayJitter   = 250 * time.Millisecond
+	workerSpawnBatchSize     = 4
+	workerSpawnBatchCooldown = 2 * time.Second
+	quotaRetryCooldown       = 5 * time.Second
+)
 
 type proxyRuntimeState struct {
     ctx            context.Context
@@ -157,7 +165,38 @@ func spawnProxyWorkerPair(rt *proxyRuntimeState, signalReady bool) {
     rt.wg.Go(func() {
         oneTurnConnectionLoop(rt.ctx, rt.params, rt.peer, rt.connchan, rt.tick)
     })
-    rt.workerCount.Add(1)
+	rt.workerCount.Add(1)
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(delay)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func workerSpawnDelay(spawned int) time.Duration {
+	delay := workerSpawnBaseDelay + time.Duration(mathrand.Int63n(int64(workerSpawnDelayJitter/time.Millisecond+1)))*time.Millisecond
+	if spawned > 0 && spawned%workerSpawnBatchSize == 0 {
+		delay += workerSpawnBatchCooldown
+	}
+	return delay
 }
 
 func setProxyRuntime(rt *proxyRuntimeState) {
@@ -1077,20 +1116,29 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
         quotaRetryAckTimeout    = 120 * time.Second
     )
 
-    successCount := 0
-    for i := 0; i < delta; i++ {
-        ackCh := make(chan error, 1)
-        rt.setIncreaseAck(ackCh)
-        spawnProxyWorkerPair(rt, false)
+	successCount := 0
+	for i := 0; i < delta; i++ {
+		if i > 0 {
+			if !sleepWithContext(rt.ctx, workerSpawnDelay(int(rt.workerCount.Load()))) {
+				return C.int(successCount)
+			}
+		}
+
+		ackCh := make(chan error, 1)
+		rt.setIncreaseAck(ackCh)
+		spawnProxyWorkerPair(rt, false)
 
         select {
         case err := <-ackCh:
-            if err != nil {
-                if isAllocationQuotaError(err) {
-                    log.Printf("[Proxy] Increase rejected: TURN allocation quota reached, refreshing credentials")
-                    if rt.params != nil && rt.params.resetCreds != nil {
-                        rt.params.resetCreds()
-                    }
+			if err != nil {
+				if isAllocationQuotaError(err) {
+					log.Printf("[Proxy] Increase rejected: TURN allocation quota reached, cooling down and refreshing credentials")
+					if !sleepWithContext(rt.ctx, quotaRetryCooldown) {
+						return C.int(successCount)
+					}
+					if rt.params != nil && rt.params.resetCreds != nil {
+						rt.params.resetCreds()
+					}
 
                     retryAckCh := make(chan error, 1)
                     rt.setIncreaseAck(retryAckCh)
@@ -1241,6 +1289,9 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
 	}
 
     for i := 0; i < n-1; i++ {
+        if !sleepWithContext(ctx, workerSpawnDelay(int(rt.workerCount.Load()))) {
+            return
+        }
         spawnProxyWorkerPair(rt, false)
     }
 
