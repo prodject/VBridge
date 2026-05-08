@@ -156,6 +156,7 @@ struct ContentView: View {
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var speedTestTask: Task<Void, Never>?
+    @State private var speedTestDebounceTask: Task<Void, Never>?
     @State private var lastSpeedMeasurementActiveConnections: Int?
     @State private var speedTestNeedsRerun = false
     @State private var speedTestRerunProfileName: String?
@@ -926,6 +927,8 @@ struct ContentView: View {
     private func resetSpeedTelemetry() {
         speedTestTask?.cancel()
         speedTestTask = nil
+        speedTestDebounceTask?.cancel()
+        speedTestDebounceTask = nil
         downloadSpeedMbps = nil
         uploadSpeedMbps = nil
         lastSpeedMeasurementActiveConnections = nil
@@ -942,6 +945,14 @@ struct ContentView: View {
             lastSpeedMeasurementActiveConnections = activeConnections
         } else if lastSpeedMeasurementActiveConnections == nil {
             lastSpeedMeasurementActiveConnections = latestConnectionProgressFromLogs()?.active ?? 0
+        }
+
+        let currentProgress = latestConnectionProgressFromLogs()
+        if let active = currentProgress?.active,
+           let total = currentProgress?.total,
+           active < total {
+            scheduleSpeedMeasurementWhenSettled(profileName: profileName, activeConnections: active)
+            return
         }
 
         if speedTestTask != nil {
@@ -999,6 +1010,25 @@ struct ContentView: View {
                         activeConnections: self.lastSpeedMeasurementActiveConnections
                     )
                 }
+            }
+        }
+    }
+
+    private func scheduleSpeedMeasurementWhenSettled(profileName: String, activeConnections: Int) {
+        speedTestDebounceTask?.cancel()
+        SharedLogger.info("Speed test waiting for connection settle: active=\(activeConnections)")
+
+        speedTestDebounceTask = Task(priority: .utility) { [profileName] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard self.vpnStatus == .connected else { return }
+                self.speedTestDebounceTask = nil
+                self.requestSpeedMeasurement(
+                    profileName: profileName,
+                    activeConnections: self.lastSpeedMeasurementActiveConnections
+                )
             }
         }
     }
