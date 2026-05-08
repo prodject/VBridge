@@ -13,9 +13,9 @@ struct SpeedcheckerMeasurementResult {
 }
 
 final class SpeedcheckerSpeedTestService: NSObject {
-    #if canImport(SpeedcheckerSDK)
+#if canImport(SpeedcheckerSDK)
     private var runner: Runner?
-    #endif
+#endif
 
     func runFreeTest() async -> SpeedcheckerMeasurementResult? {
 #if canImport(SpeedcheckerSDK)
@@ -52,8 +52,13 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
 
         let test = InternetSpeedTest(delegate: self)
         self.test = test
-        SharedLogger.info("Speedchecker SDK free test starting")
-        test.startFreeTest { error in
+
+        SharedLogger.info("Speedchecker SDK test starting")
+
+        // Compatible with speedchecker-sdk-ios 1.8.x and newer 2.x APIs.
+        // 1.8.x has start(...) / startTest(...)
+        // 2.x has start(...) / startFreeTest(...)
+        test.start { error in
             switch error {
             case .ok:
                 break
@@ -76,6 +81,7 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
             ispName: result.ispName,
             ipAddress: result.ipAddress
         )
+
         SharedLogger.info(
             String(
                 format: "Speedchecker SDK finished: download=%@ upload=%@ isp=%@ ip=%@",
@@ -85,6 +91,7 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
                 mapped.ipAddress ?? "unknown"
             )
         )
+
         finish(mapped)
     }
 
@@ -99,6 +106,7 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     func internetTestDownloadStart() { }
     func internetTestDownloadFinish() { }
     func internetTestDownload(progress: Double, speed: SpeedTestSpeed) { }
+
     func internetTestUploadStart() { }
     func internetTestUploadFinish() { }
     func internetTestUpload(progress: Double, speed: SpeedTestSpeed) { }
@@ -109,10 +117,13 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
 
     private func finish(_ result: SpeedcheckerMeasurementResult?) {
         guard !finished else { return }
+
         finished = true
+
         let continuation = self.continuation
         self.continuation = nil
         self.test = nil
+
         continuation?.resume(returning: result)
     }
 }
