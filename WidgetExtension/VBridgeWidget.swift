@@ -204,6 +204,7 @@ private struct WidgetSnapshot: Equatable {
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
         ispName: String? = nil,
+        ipAddress: String? = nil,
         pings: [PingSample],
         lastUpdated: Date
     ) {
@@ -216,6 +217,7 @@ private struct WidgetSnapshot: Equatable {
         self.downloadSpeedMbps = downloadSpeedMbps
         self.uploadSpeedMbps = uploadSpeedMbps
         self.ispName = ispName
+        self.ipAddress = ipAddress
         self.pings = pings
         self.lastUpdated = lastUpdated
     }

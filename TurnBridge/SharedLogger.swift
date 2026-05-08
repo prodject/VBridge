@@ -254,28 +254,61 @@ public struct SharedLogger {
     }
 
     private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double?, ispName: String?, ipAddress: String?)? {
-        let lowered = message.lowercased()
-        guard lowered.contains("download="), lowered.contains("upload=") else { return nil }
-
-        func value(after marker: String) -> Double? {
-            guard let range = lowered.range(of: marker) else { return nil }
-            let suffix = message[range.upperBound...]
-            let token = suffix.split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "," || $0 == ";" }).first.map(String.init) ?? String(suffix)
-            let numeric = token.trimmingCharacters(in: CharacterSet(charactersIn: "mbpsMBPS"))
-            return Double(numeric)
+        guard message.range(of: "download=", options: [.caseInsensitive]) != nil,
+              message.range(of: "upload=", options: [.caseInsensitive]) != nil else {
+            return nil
         }
 
-        func textValue(after marker: String) -> String? {
-            guard let range = lowered.range(of: marker) else { return nil }
+        func token(after marker: String) -> String? {
+            guard let range = message.range(of: marker, options: [.caseInsensitive]) else {
+                return nil
+            }
+
             let suffix = message[range.upperBound...]
-            let token = suffix.split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "," || $0 == ";" }).first.map(String.init) ?? String(suffix)
-            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = suffix
+                .split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "," || $0 == ";" })
+                .first
+                .map(String.init) ?? String(suffix)
+
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
 
+        func numericValue(after marker: String) -> Double? {
+            guard let raw = token(after: marker) else {
+                return nil
+            }
+
+            let normalized = raw
+                .replacingOccurrences(of: "Mbps", with: "", options: [.caseInsensitive])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard normalized != "--",
+                  normalized.lowercased() != "unknown" else {
+                return nil
+            }
+
+            return Double(normalized)
+        }
+
+        func textValue(after marker: String) -> String? {
+            guard let raw = token(after: marker) else {
+                return nil
+            }
+
+            let lowered = raw.lowercased()
+            guard lowered != "--",
+                  lowered != "unknown",
+                  lowered != "nil" else {
+                return nil
+            }
+
+            return raw
+        }
+
         return (
-            downloadMbps: value(after: "download="),
-            uploadMbps: value(after: "upload="),
+            downloadMbps: numericValue(after: "download="),
+            uploadMbps: numericValue(after: "upload="),
             ispName: textValue(after: "isp="),
             ipAddress: textValue(after: "ip=")
         )
