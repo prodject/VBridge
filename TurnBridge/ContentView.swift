@@ -1141,6 +1141,7 @@ struct ContentView: View {
         )
     }
 
+    @ViewBuilder
     private func connectionTelemetrySection() -> some View {
         let statusLabel: String = {
             switch vpnStatus {
