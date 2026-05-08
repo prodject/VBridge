@@ -125,6 +125,13 @@ private struct ConnectionPingSample: Equatable {
     }
 }
 
+private struct SpeedMeasurementResult {
+    var downloadMbps: Double?
+    var uploadMbps: Double?
+    var ispName: String?
+    var ipAddress: String?
+}
+
 struct ContentView: View {
     var app: VBridge
 
@@ -152,6 +159,8 @@ struct ContentView: View {
     @State private var connectionProgressText: String?
     @State private var downloadSpeedMbps: Double?
     @State private var uploadSpeedMbps: Double?
+    @State private var speedTestISPName: String?
+    @State private var speedTestIPAddress: String?
     @State private var connectionStartedAt: Date?
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
@@ -931,6 +940,8 @@ struct ContentView: View {
         speedTestDebounceTask = nil
         downloadSpeedMbps = nil
         uploadSpeedMbps = nil
+        speedTestISPName = nil
+        speedTestIPAddress = nil
         lastSpeedMeasurementActiveConnections = nil
         speedTestNeedsRerun = false
         speedTestRerunProfileName = nil
@@ -945,14 +956,6 @@ struct ContentView: View {
             lastSpeedMeasurementActiveConnections = activeConnections
         } else if lastSpeedMeasurementActiveConnections == nil {
             lastSpeedMeasurementActiveConnections = latestConnectionProgressFromLogs()?.active ?? 0
-        }
-
-        let currentProgress = latestConnectionProgressFromLogs()
-        if let active = currentProgress?.active,
-           let total = currentProgress?.total,
-           active < total {
-            scheduleSpeedMeasurementWhenSettled(profileName: profileName, activeConnections: active)
-            return
         }
 
         if speedTestTask != nil {
@@ -975,6 +978,8 @@ struct ContentView: View {
                 guard self.vpnStatus == .connected else { return }
                 self.downloadSpeedMbps = result.downloadMbps
                 self.uploadSpeedMbps = result.uploadMbps
+                self.speedTestISPName = result.ispName
+                self.speedTestIPAddress = result.ipAddress
                 self.currentConnectivityPings = resolvedPingSamples
 
                 let progress = self.latestConnectionProgressFromLogs()
@@ -987,15 +992,18 @@ struct ContentView: View {
                     estimatedRemainingSeconds: nil,
                     downloadSpeedMbps: result.downloadMbps,
                     uploadSpeedMbps: result.uploadMbps,
+                    ispName: result.ispName,
+                    ipAddress: result.ipAddress,
                     pingSamples: resolvedPingSamples.map(\.sharedRepresentation)
                 )
                 self.refreshWidgetTimelines()
 
                 SharedLogger.info(
                     String(
-                        format: "Speed telemetry: download=%@ upload=%@",
+                        format: "Speed telemetry: download=%@ upload=%@ isp=%@",
                         self.formattedSpeed(result.downloadMbps),
-                        self.formattedSpeed(result.uploadMbps)
+                        self.formattedSpeed(result.uploadMbps),
+                        result.ispName ?? "unknown"
                     )
                 )
 
@@ -1005,30 +1013,12 @@ struct ContentView: View {
                 self.speedTestRerunProfileName = nil
 
                 if shouldRerun {
+                    let rerunActiveConnections = self.latestConnectionProgressFromLogs()?.active
                     self.requestSpeedMeasurement(
                         profileName: rerunProfileName,
-                        activeConnections: self.lastSpeedMeasurementActiveConnections
+                        activeConnections: rerunActiveConnections
                     )
                 }
-            }
-        }
-    }
-
-    private func scheduleSpeedMeasurementWhenSettled(profileName: String, activeConnections: Int) {
-        speedTestDebounceTask?.cancel()
-        SharedLogger.info("Speed test waiting for connection settle: active=\(activeConnections)")
-
-        speedTestDebounceTask = Task(priority: .utility) { [profileName] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard self.vpnStatus == .connected else { return }
-                self.speedTestDebounceTask = nil
-                self.requestSpeedMeasurement(
-                    profileName: profileName,
-                    activeConnections: self.lastSpeedMeasurementActiveConnections
-                )
             }
         }
     }
@@ -1042,6 +1032,8 @@ struct ContentView: View {
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil
     ) {
         guard #available(iOS 16.1, *) else { return }
@@ -1055,6 +1047,8 @@ struct ContentView: View {
                 estimatedRemainingSeconds: estimatedRemainingSeconds,
                 downloadSpeedMbps: downloadSpeedMbps,
                 uploadSpeedMbps: uploadSpeedMbps,
+                ispName: ispName,
+                ipAddress: ipAddress,
                 pingSamples: pingSamples
             )
         }
@@ -1107,27 +1101,52 @@ struct ContentView: View {
         speedTestTask = nil
     }
 
-    private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
+    private func runSpeedTest() async -> SpeedMeasurementResult {
         SharedLogger.info("Speed test started")
+
+        if let speedcheckerResult = await measureSpeedcheckerSpeedTest() {
+            return speedcheckerResult
+        }
+
+        SharedLogger.warning("Speedchecker SDK returned no usable result, falling back to Cloudflare speed test")
 
         let downloadMbps = await measureCloudflareDownloadSpeed()
         if Task.isCancelled {
-            return (nil, nil)
+            return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
         }
         SharedLogger.info("Speed test download result: \(formattedSpeed(downloadMbps))")
 
         let uploadMbps = await measureCloudflareUploadSpeed()
         if Task.isCancelled {
-            return (nil, nil)
+            return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
         }
         SharedLogger.info("Speed test upload result: \(formattedSpeed(uploadMbps))")
 
         if downloadMbps != nil || uploadMbps != nil {
-            return (downloadMbps, uploadMbps)
+            return SpeedMeasurementResult(
+                downloadMbps: downloadMbps,
+                uploadMbps: uploadMbps,
+                ispName: nil,
+                ipAddress: nil
+            )
         }
 
         SharedLogger.warning("Cloudflare speed test returned no usable result, falling back to runtime byte sampling")
         return await measureRuntimeSpeedFallback()
+    }
+
+    private func measureSpeedcheckerSpeedTest() async -> SpeedMeasurementResult? {
+        let service = SpeedcheckerSpeedTestService()
+        guard let result = await service.runFreeTest() else {
+            return nil
+        }
+
+        return SpeedMeasurementResult(
+            downloadMbps: result.downloadMbps,
+            uploadMbps: result.uploadMbps,
+            ispName: result.ispName,
+            ipAddress: result.ipAddress
+        )
     }
 
     private func measureCloudflareDownloadSpeed() async -> Double? {
@@ -1261,20 +1280,22 @@ struct ContentView: View {
         }
     }
 
-    private func measureRuntimeSpeedFallback() async -> (downloadMbps: Double?, uploadMbps: Double?) {
+    private func measureRuntimeSpeedFallback() async -> SpeedMeasurementResult {
         SharedLogger.info("Speed test runtime fallback started")
         guard let firstSample = await sampleRuntimeTransferBytes() else {
             SharedLogger.warning("Speed test runtime fallback failed: could not read first runtime sample")
-            return (nil, nil)
+            return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
         }
 
         let start = Date()
         try? await Task.sleep(nanoseconds: 1_000_000_000)
-        guard !Task.isCancelled else { return (nil, nil) }
+        guard !Task.isCancelled else {
+            return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
+        }
 
         guard let secondSample = await sampleRuntimeTransferBytes() else {
             SharedLogger.warning("Speed test runtime fallback failed: could not read second runtime sample")
-            return (nil, nil)
+            return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
         }
 
         let elapsed = max(Date().timeIntervalSince(start), 0.001)
@@ -1294,7 +1315,12 @@ struct ContentView: View {
                 formattedSpeed(uploadMbps)
             )
         )
-        return (downloadMbps, uploadMbps)
+        return SpeedMeasurementResult(
+            downloadMbps: downloadMbps,
+            uploadMbps: uploadMbps,
+            ispName: nil,
+            ipAddress: nil
+        )
     }
 
     private func telemetryBadge(title: String, value: String, systemImage: String) -> some View {
@@ -1398,6 +1424,12 @@ struct ContentView: View {
                     systemImage: "arrow.up.circle.fill"
                 )
             }
+
+            telemetryBadge(
+                title: "ISP",
+                value: speedTestISPName ?? "--",
+                systemImage: "network"
+            )
 
             HStack(spacing: 8) {
                 ForEach(currentConnectivityPings, id: \.name) { sample in

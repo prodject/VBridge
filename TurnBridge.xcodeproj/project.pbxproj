@@ -218,6 +218,7 @@
 			);
 			name = VBridge;
 			packageProductDependencies = (
+				D2F0A0022F606C0003CA7F3 /* SpeedcheckerSDK */,
 			);
 			productName = VBridge;
 			productReference = A7EBA62C2F606924003CA7F3 /* VBridge.app */;
@@ -305,6 +306,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */,
+				D2F0A0012F606C0003CA7F3 /* XCRemoteSwiftPackageReference "speedchecker-sdk-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A7EBA62D2F606924003CA7F3 /* Products */;
@@ -530,6 +532,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is used to scan WireGuard QR configuration.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
@@ -588,6 +592,8 @@
 				);
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is used to scan WireGuard QR configuration.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
@@ -823,6 +829,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		D2F0A0012F606C0003CA7F3 /* XCRemoteSwiftPackageReference "speedchecker-sdk-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/speedchecker/speedchecker-sdk-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.61;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -833,6 +850,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */;
 			productName = WireGuardKitGo;
+		};
+		D2F0A0022F606C0003CA7F3 /* SpeedcheckerSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D2F0A0012F606C0003CA7F3 /* XCRemoteSwiftPackageReference "speedchecker-sdk-ios" */;
+			productName = SpeedcheckerSDK;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -82,6 +82,7 @@ private struct WidgetSnapshot: Equatable {
     let estimatedRemainingSeconds: Int?
     let downloadSpeedMbps: Double?
     let uploadSpeedMbps: Double?
+    let ispName: String?
     let pings: [PingSample]
     let lastUpdated: Date
 
@@ -168,6 +169,10 @@ private struct WidgetSnapshot: Equatable {
         "\(downloadSpeedText)  •  \(uploadSpeedText)"
     }
 
+    var ispText: String {
+        ispName ?? "ISP --"
+    }
+
     var summaryText: String {
         switch state {
         case .connected:
@@ -193,6 +198,7 @@ private struct WidgetSnapshot: Equatable {
         estimatedRemainingSeconds: Int?,
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
         pings: [PingSample],
         lastUpdated: Date
     ) {
@@ -204,6 +210,7 @@ private struct WidgetSnapshot: Equatable {
         self.estimatedRemainingSeconds = estimatedRemainingSeconds
         self.downloadSpeedMbps = downloadSpeedMbps
         self.uploadSpeedMbps = uploadSpeedMbps
+        self.ispName = ispName
         self.pings = pings
         self.lastUpdated = lastUpdated
     }
@@ -217,6 +224,7 @@ private struct WidgetSnapshot: Equatable {
         estimatedRemainingSeconds: 32,
         downloadSpeedMbps: 18.4,
         uploadSpeedMbps: 5.7,
+        ispName: "Fiber ISP",
         pings: PingSample.placeholderSamples,
         lastUpdated: .now
     )
@@ -239,6 +247,7 @@ private struct WidgetSnapshot: Equatable {
             estimatedRemainingSeconds: nil,
             downloadSpeedMbps: nil,
             uploadSpeedMbps: nil,
+            ispName: nil,
             pings: PingSample.placeholderSamples,
             lastUpdated: .now
         )
@@ -308,6 +317,7 @@ private struct WidgetSnapshot: Equatable {
             estimatedRemainingSeconds: nil,
             downloadSpeedMbps: nil,
             uploadSpeedMbps: nil,
+            ispName: nil,
             pings: pings,
             lastUpdated: .now
         )
@@ -327,6 +337,7 @@ private struct WidgetSnapshot: Equatable {
         self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds ?? fallback?.estimatedRemainingSeconds
         self.downloadSpeedMbps = liveSnapshot.content.downloadSpeedMbps ?? fallback?.downloadSpeedMbps
         self.uploadSpeedMbps = liveSnapshot.content.uploadSpeedMbps ?? fallback?.uploadSpeedMbps
+        self.ispName = liveSnapshot.content.ispName ?? fallback?.ispName
         if let livePingSamples = liveSnapshot.content.pingSamples {
             self.pings = livePingSamples.map(PingSample.init(shared:))
         } else if state == .connected {
@@ -622,7 +633,7 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.6)
             }
 
-            metricsSection(snapshot: snapshot, compactPings: true)
+            metricsSection(snapshot: snapshot, compactPings: true, showISP: false)
 
             Spacer(minLength: 0)
 
@@ -665,7 +676,7 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.78)
             }
 
-            metricsSection(snapshot: snapshot, compactPings: true)
+            metricsSection(snapshot: snapshot, compactPings: true, showISP: true)
 
             HStack(spacing: 5) {
                 Image(systemName: "network")
@@ -765,17 +776,20 @@ private struct WidgetCardView: View {
                 }
             }
 
-            metricsSection(snapshot: snapshot, compactPings: false)
+            metricsSection(snapshot: snapshot, compactPings: false, showISP: true)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
     }
 
-    private func metricsSection(snapshot: WidgetSnapshot, compactPings: Bool) -> some View {
+    private func metricsSection(snapshot: WidgetSnapshot, compactPings: Bool, showISP: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 metricChip(title: "Download", value: snapshot.downloadSpeedText, systemImage: "arrow.down.circle.fill")
                 metricChip(title: "Upload", value: snapshot.uploadSpeedText, systemImage: "arrow.up.circle.fill")
+                if showISP {
+                    metricChip(title: "ISP", value: snapshot.ispText, systemImage: "network")
+                }
             }
 
             HStack(alignment: .top, spacing: 6) {
@@ -1037,6 +1051,21 @@ private struct VBridgeLiveActivityWidget: Widget {
                 Image(systemName: "network")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
+                Text("ISP")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.68))
+                Text(state.ispText)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "network")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
                 Text(state.relayText)
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
@@ -1074,6 +1103,21 @@ private struct VBridgeLiveActivityWidget: Widget {
             HStack(spacing: 6) {
                 speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
                 speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "network")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("ISP")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.68))
+                Text(state.ispText)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 0)
             }
 
             disconnectControlRow(state: state)

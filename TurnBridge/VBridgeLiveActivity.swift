@@ -71,6 +71,8 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         var estimatedRemainingSeconds: Int?
         var downloadSpeedMbps: Double?
         var uploadSpeedMbps: Double?
+        var ispName: String?
+        var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
         var updatedAt: Date
 
@@ -118,6 +120,14 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
             let download = downloadSpeedText ?? "DL --"
             let upload = uploadSpeedText ?? "UL --"
             return "\(download)  •  \(upload)"
+        }
+
+        var ispText: String {
+            ispName ?? "ISP --"
+        }
+
+        var ipAddressText: String {
+            ipAddress ?? "IP --"
         }
 
         private func speedText(_ value: Double?, fallback: String) -> String? {
@@ -179,6 +189,8 @@ enum VBridgeLiveActivityStore {
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil,
         updatedAt: Date = .now
     ) {
@@ -192,6 +204,8 @@ enum VBridgeLiveActivityStore {
                 estimatedRemainingSeconds: nil,
                 downloadSpeedMbps: nil,
                 uploadSpeedMbps: nil,
+                ispName: nil,
+                ipAddress: nil,
                 pingSamples: nil,
                 updatedAt: updatedAt
             )
@@ -209,6 +223,8 @@ enum VBridgeLiveActivityStore {
                 snapshot.content.estimatedRemainingSeconds = nil
                 snapshot.content.downloadSpeedMbps = nil
                 snapshot.content.uploadSpeedMbps = nil
+                snapshot.content.ispName = nil
+                snapshot.content.ipAddress = nil
                 snapshot.content.pingSamples = nil
             } else if phase == .disconnected || phase == .unknown {
                 snapshot.content.activeConnections = nil
@@ -217,6 +233,8 @@ enum VBridgeLiveActivityStore {
                 snapshot.content.estimatedRemainingSeconds = nil
                 snapshot.content.downloadSpeedMbps = nil
                 snapshot.content.uploadSpeedMbps = nil
+                snapshot.content.ispName = nil
+                snapshot.content.ipAddress = nil
                 snapshot.content.pingSamples = nil
             }
         }
@@ -237,6 +255,12 @@ enum VBridgeLiveActivityStore {
         }
         if let uploadSpeedMbps {
             snapshot.content.uploadSpeedMbps = uploadSpeedMbps
+        }
+        if let ispName {
+            snapshot.content.ispName = ispName
+        }
+        if let ipAddress {
+            snapshot.content.ipAddress = ipAddress
         }
         if let pingSamples {
             snapshot.content.pingSamples = pingSamples
@@ -276,6 +300,8 @@ final class VBridgeLiveActivityCoordinator {
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil
     ) {
         let updatedAt = Date()
@@ -288,6 +314,8 @@ final class VBridgeLiveActivityCoordinator {
             estimatedRemainingSeconds: estimatedRemainingSeconds,
             downloadSpeedMbps: downloadSpeedMbps,
             uploadSpeedMbps: uploadSpeedMbps,
+            ispName: ispName,
+            ipAddress: ipAddress,
             pingSamples: pingSamples,
             updatedAt: updatedAt
         )
@@ -318,6 +346,8 @@ final class VBridgeLiveActivityCoordinator {
                 estimatedRemainingSeconds: nil,
                 downloadSpeedMbps: nil,
                 uploadSpeedMbps: nil,
+                ispName: nil,
+                ipAddress: nil,
                 pingSamples: nil,
                 updatedAt: updatedAt
             )
