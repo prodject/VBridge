@@ -20,7 +20,10 @@ final class SpeedcheckerSpeedTestService: NSObject {
     func runFreeTest() async -> SpeedcheckerMeasurementResult? {
 #if canImport(SpeedcheckerSDK)
         return await withCheckedContinuation { continuation in
-            let runner = Runner(continuation: continuation)
+            let runner = Runner(continuation: continuation) { [weak self] in
+                self?.runner = nil
+            }
+
             self.runner = runner
             runner.start()
         }
@@ -36,19 +39,79 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     private var test: InternetSpeedTest?
     private var continuation: CheckedContinuation<SpeedcheckerMeasurementResult?, Never>?
     private var finished = false
-    private let locationManager = CLLocationManager()
+    private var didStartSpeedTest = false
 
-    init(continuation: CheckedContinuation<SpeedcheckerMeasurementResult?, Never>) {
+    private let locationManager = CLLocationManager()
+    private let publicIPInfoService = PublicIPInfoService()
+    private let onFinish: () -> Void
+
+    init(
+        continuation: CheckedContinuation<SpeedcheckerMeasurementResult?, Never>,
+        onFinish: @escaping () -> Void
+    ) {
         self.continuation = continuation
+        self.onFinish = onFinish
     }
 
     func start() {
-        if CLLocationManager.locationServicesEnabled() {
-            DispatchQueue.main.async {
-                self.locationManager.delegate = self
-                self.locationManager.requestWhenInUseAuthorization()
-            }
+        DispatchQueue.main.async {
+            self.prepareLocationAndStartTest()
         }
+    }
+
+    private func prepareLocationAndStartTest() {
+        locationManager.delegate = self
+
+        guard CLLocationManager.locationServicesEnabled() else {
+            SharedLogger.warning("Location services are disabled; starting Speedchecker without location")
+            startSpeedTestIfNeeded()
+            return
+        }
+
+        let status = authorizationStatus()
+
+        switch status {
+        case .notDetermined:
+            SharedLogger.info("Requesting location authorization before Speedchecker test")
+            locationManager.requestWhenInUseAuthorization()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self else { return }
+
+                if !self.didStartSpeedTest {
+                    SharedLogger.warning("Location authorization timeout; starting Speedchecker anyway")
+                    self.startSpeedTestIfNeeded()
+                }
+            }
+
+        case .authorizedAlways, .authorizedWhenInUse:
+            SharedLogger.info("Location authorization available; starting Speedchecker test")
+            startSpeedTestIfNeeded()
+
+        case .denied, .restricted:
+            SharedLogger.warning("Location authorization denied/restricted; starting Speedchecker without location")
+            startSpeedTestIfNeeded()
+
+        @unknown default:
+            SharedLogger.warning("Unknown location authorization status; starting Speedchecker anyway")
+            startSpeedTestIfNeeded()
+        }
+    }
+
+    private func authorizationStatus() -> CLAuthorizationStatus {
+        if #available(iOS 14.0, *) {
+            return locationManager.authorizationStatus
+        } else {
+            return CLLocationManager.authorizationStatus()
+        }
+    }
+
+    private func startSpeedTestIfNeeded() {
+        guard !didStartSpeedTest else {
+            return
+        }
+
+        didStartSpeedTest = true
 
         let test = InternetSpeedTest(delegate: self)
         self.test = test
@@ -62,6 +125,7 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
             switch error {
             case .ok:
                 break
+
             default:
                 SharedLogger.warning("Speedchecker SDK start failed: \(String(describing: error))")
                 self.finish(nil)
@@ -75,24 +139,46 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     }
 
     func internetTestFinish(result: SpeedTestResult) {
-        let mapped = SpeedcheckerMeasurementResult(
-            downloadMbps: result.downloadSpeed.mbps,
-            uploadMbps: result.uploadSpeed.mbps,
-            ispName: result.ispName,
-            ipAddress: result.ipAddress
-        )
+        let downloadMbps = result.downloadSpeed.mbps
+        let uploadMbps = result.uploadSpeed.mbps
 
-        SharedLogger.info(
-            String(
-                format: "Speedchecker SDK finished: download=%@ upload=%@ isp=%@ ip=%@",
-                mapped.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
-                mapped.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
-                mapped.ispName ?? "unknown",
-                mapped.ipAddress ?? "unknown"
+        let sdkISPName = clean(result.ispName)
+        let sdkIPAddress = clean(result.ipAddress)
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            var finalISPName = sdkISPName
+            var finalIPAddress = sdkIPAddress
+
+            if finalISPName == nil || finalIPAddress == nil {
+                SharedLogger.info("Speedchecker SDK returned empty ISP/IP; trying public IP fallback")
+
+                if let fallback = await self.publicIPInfoService.fetch() {
+                    finalISPName = finalISPName ?? fallback.ispName
+                    finalIPAddress = finalIPAddress ?? fallback.ipAddress
+                }
+            }
+
+            let mapped = SpeedcheckerMeasurementResult(
+                downloadMbps: downloadMbps,
+                uploadMbps: uploadMbps,
+                ispName: finalISPName,
+                ipAddress: finalIPAddress
             )
-        )
 
-        finish(mapped)
+            SharedLogger.info(
+                String(
+                    format: "Speedchecker SDK finished: download=%@ upload=%@ isp=%@ ip=%@",
+                    mapped.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    mapped.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    mapped.ispName ?? "unknown",
+                    mapped.ipAddress ?? "unknown"
+                )
+            )
+
+            self.finish(mapped)
+        }
     }
 
     func internetTestReceived(servers: [SpeedTestServer]) {
@@ -112,19 +198,65 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     func internetTestUpload(progress: Double, speed: SpeedTestSpeed) { }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        SharedLogger.info("Speedchecker location authorization changed: \(manager.authorizationStatus.rawValue)")
+        let status: CLAuthorizationStatus
+
+        if #available(iOS 14.0, *) {
+            status = manager.authorizationStatus
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+
+        SharedLogger.info("Speedchecker location authorization changed: \(status.rawValue)")
+
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse, .denied, .restricted:
+            startSpeedTestIfNeeded()
+
+        case .notDetermined:
+            break
+
+        @unknown default:
+            startSpeedTestIfNeeded()
+        }
     }
 
     private func finish(_ result: SpeedcheckerMeasurementResult?) {
-        guard !finished else { return }
+        guard !finished else {
+            return
+        }
 
         finished = true
 
         let continuation = self.continuation
         self.continuation = nil
         self.test = nil
+        self.locationManager.delegate = nil
 
         continuation?.resume(returning: result)
+        onFinish()
+    }
+
+    private func clean(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let lowered = trimmed.lowercased()
+
+        guard lowered != "unknown",
+              lowered != "nil",
+              lowered != "null",
+              lowered != "--" else {
+            return nil
+        }
+
+        return trimmed
     }
 }
 #endif
