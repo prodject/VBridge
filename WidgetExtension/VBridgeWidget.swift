@@ -633,49 +633,49 @@ private struct WidgetCardView: View {
     }
 
     private func mediumLayout(snapshot: WidgetSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snapshot.profileName)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                     Text(snapshot.statusLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Spacer(minLength: 0)
 
                 Image(systemName: snapshot.statusSymbol)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(snapshot.statusAccent)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(snapshot.connectionsText)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.68)
+                    .minimumScaleFactor(0.7)
 
                 Text(snapshot.summaryText)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.78)
             }
 
-            metricsSection(snapshot: snapshot, compactPings: false)
+            metricsSection(snapshot: snapshot, compactPings: true)
 
             HStack(spacing: 5) {
                 Image(systemName: "network")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.68))
                 Text(snapshot.relayText)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(0.65)
             }
 
             if snapshot.state == .connecting {
@@ -685,13 +685,11 @@ private struct WidgetCardView: View {
                     .scaleEffect(x: 1, y: 0.7, anchor: .center)
 
                 Text(snapshot.remainingText ?? "Working")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
             }
-
-            refreshRow()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .padding(.horizontal, 8)
     }
 

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
+import LCLSpeedtest
 
 struct SettingsSheet: Identifiable {
     let id = UUID()
@@ -943,7 +944,7 @@ struct ContentView: View {
         speedTestTask?.cancel()
         speedTestTask = Task(priority: .utility) { [profileName] in
             async let pingSamples = ConnectionPingSample.loadAll()
-            let result = await runSpeedTest()
+            let result = await runSpeedTest(profileName: profileName)
             let resolvedPingSamples = await pingSamples
             guard !Task.isCancelled else { return }
 
@@ -1053,30 +1054,37 @@ struct ContentView: View {
         speedTestTask = nil
     }
 
-    private func runSpeedTest() async -> (downloadMbps: Double?, uploadMbps: Double?) {
-        guard let firstSample = await sampleRuntimeTransferBytes() else {
-            return (nil, nil)
+    private func runSpeedTest(profileName: String) async -> (downloadMbps: Double?, uploadMbps: Double?) {
+        var testClient = SpeedTestClient()
+        var latestDownloadMbps: Double?
+        var latestUploadMbps: Double?
+
+        testClient.onDownloadProgress = { measurement in
+            let currentMbps = speedMbps(from: measurement)
+            latestDownloadMbps = currentMbps
+        }
+        testClient.onUploadProgress = { measurement in
+            let currentMbps = speedMbps(from: measurement)
+            latestUploadMbps = currentMbps
         }
 
-        let start = Date()
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        guard !Task.isCancelled else { return (nil, nil) }
-
-        guard let secondSample = await sampleRuntimeTransferBytes() else {
-            return (nil, nil)
+        do {
+            try await withTaskCancellationHandler {
+                try await testClient.start(with: .downloadAndUpload, deviceName: profileName)
+            } onCancel: {
+                try? testClient.cancel()
+            }
+        } catch {
+            SharedLogger.warning("Speed test failed: \(error.localizedDescription)")
         }
 
-        let elapsed = max(Date().timeIntervalSince(start), 0.001)
-        let downloadDelta = secondSample.downloadBytes >= firstSample.downloadBytes
-            ? secondSample.downloadBytes - firstSample.downloadBytes
-            : 0
-        let uploadDelta = secondSample.uploadBytes >= firstSample.uploadBytes
-            ? secondSample.uploadBytes - firstSample.uploadBytes
-            : 0
+        return (latestDownloadMbps, latestUploadMbps)
+    }
 
-        let downloadMbps = Double(downloadDelta) * 8.0 / elapsed / 1_000_000.0
-        let uploadMbps = Double(uploadDelta) * 8.0 / elapsed / 1_000_000.0
-        return (downloadMbps, uploadMbps)
+    private func speedMbps(from measurement: MeasurementProgress) -> Double {
+        let elapsedMicroseconds = max(Double(measurement.appInfo.elapsedTime), 1)
+        let bitsTransferred = Double(measurement.appInfo.numBytes) * 8.0
+        return bitsTransferred / elapsedMicroseconds
     }
 
     private func telemetryBadge(title: String, value: String, systemImage: String) -> some View {
@@ -1188,95 +1196,6 @@ struct ContentView: View {
             }
         }
         .padding(.top, 4)
-    }
-
-    private func sampleRuntimeTransferBytes() async -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
-        return await withCheckedContinuation { continuation in
-            NETunnelProviderManager.loadAllFromPreferences { managers, error in
-                guard error == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                guard let manager = managers?.first,
-                      let session = manager.connection as? NETunnelProviderSession,
-                      session.status == .connected else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                guard (try? session.sendProviderMessage(Data([0]), responseHandler: { response in
-                    guard let response,
-                          let settings = String(data: response, encoding: .utf8),
-                          let totals = runtimeTransferBytes(from: settings) else {
-                        continuation.resume(returning: nil)
-                        return
-                    }
-                    continuation.resume(returning: totals)
-                })) != nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-            }
-        }
-    }
-
-    private func runtimeTransferBytes(from settings: String) -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
-        var totalDownloadBytes: UInt64 = 0
-        var totalUploadBytes: UInt64 = 0
-        var currentDownloadBytes: UInt64?
-        var currentUploadBytes: UInt64?
-        var inPeerSection = false
-        var sawPeer = false
-        var currentPeerStarted = false
-
-        func finalizePeer() {
-            guard currentPeerStarted else { return }
-            sawPeer = true
-            totalDownloadBytes &+= currentDownloadBytes ?? 0
-            totalUploadBytes &+= currentUploadBytes ?? 0
-            currentDownloadBytes = nil
-            currentUploadBytes = nil
-            currentPeerStarted = false
-        }
-
-        for rawLine in settings.split(omittingEmptySubsequences: false) { $0.isNewline } {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty {
-                if inPeerSection {
-                    finalizePeer()
-                }
-                inPeerSection = false
-                continue
-            }
-
-            guard let equalsIndex = line.firstIndex(of: "=") else { continue }
-            let key = line[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = line[line.index(after: equalsIndex)...].trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if key == "public_key" {
-                if inPeerSection {
-                    finalizePeer()
-                }
-                inPeerSection = true
-                currentPeerStarted = true
-                continue
-            }
-
-            guard inPeerSection else { continue }
-
-            if key == "rx_bytes" {
-                currentDownloadBytes = UInt64(value)
-            } else if key == "tx_bytes" {
-                currentUploadBytes = UInt64(value)
-            }
-        }
-
-        if inPeerSection {
-            finalizePeer()
-        }
-
-        return sawPeer ? (totalDownloadBytes, totalUploadBytes) : nil
     }
 
     private func formattedSpeed(_ value: Double?) -> String {
