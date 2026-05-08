@@ -978,11 +978,52 @@ private struct PingCompactView: View {
 private struct VBridgeLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VBridgeVPNLiveActivityAttributes.self) { context in
-            liveActivityLockScreenView(state: context.state)
-                .activityBackgroundTint(Color.black.opacity(0.92))
-                .activitySystemActionForegroundColor(.white)
-                .padding(.horizontal, 2)
-                .padding(.vertical, 6)
+            let state = WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown
+
+            VStack(alignment: .leading, spacing: 8) {
+                liveActivityHeader(
+                    profileName: context.attributes.profileName,
+                    state: state,
+                    statusLabel: context.state.phase.displayTitle,
+                    statusSymbol: state == .connected ? "lock.shield.fill" : "wifi",
+                    statusAccent: state == .connected ? .green : .orange
+                )
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(context.state.progressText ?? "0/0")
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Text(context.state.relayText)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.52)
+
+                    Spacer(minLength: 0)
+                }
+
+                ProgressView(value: context.state.progressFraction ?? 1)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.75, anchor: .center)
+
+                liveActivitySpeedRow(
+                    download: context.state.downloadSpeedText ?? "DL --",
+                    upload: context.state.uploadSpeedText ?? "UL --"
+                )
+
+                liveActivityCompactNetworkRow(
+                    isp: context.state.ispText,
+                    ip: context.state.ipAddressText
+                )
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .activityBackgroundTint(Color.black.opacity(0.82))
+            .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -990,19 +1031,48 @@ private struct VBridgeLiveActivityWidget: Widget {
                         .padding(.leading, 2)
                 }
 
+                DynamicIslandExpandedRegion(.center) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(context.state.progressText ?? "0/0")
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+
+                            Text(context.state.relayText)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+
+                            Spacer(minLength: 0)
+                        }
+
+                        ProgressView(value: context.state.progressFraction ?? 1)
+                            .tint(.white)
+                            .progressViewStyle(.linear)
+                            .scaleEffect(x: 1, y: 0.72, anchor: .center)
+
+                        liveActivitySpeedRow(
+                            download: context.state.downloadSpeedText ?? "DL --",
+                            upload: context.state.uploadSpeedText ?? "UL --"
+                        )
+                    }
+                    .padding(.horizontal, 2)
+                }
+
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 2) {
+                    VStack(alignment: .trailing, spacing: 3) {
                         Text(context.state.phase.displayTitle)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.86))
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
 
-                        Text(context.state.speedSummaryText)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
+                        Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(context.state.phase == .connected ? .green : .orange)
                     }
                 }
 
@@ -1106,84 +1176,143 @@ private struct VBridgeLiveActivityWidget: Widget {
         .padding(.vertical, 6)
     }
 
-    private func liveActivityHeader(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Image(systemName: state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
+    private func liveActivityHeader(
+        profileName: String,
+        state: WidgetSnapshot.State,
+        statusLabel: String,
+        statusSymbol: String,
+        statusAccent: Color
+    ) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: statusSymbol)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(liveActivityTint(for: state.phase))
+                .foregroundStyle(statusAccent)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("VBridge")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(profileName)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                Text(state.phase.displayTitle)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Text(statusLabel)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func liveActivityCompactNetworkRow(
+        isp: String,
+        ip: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: "network")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+
+                Text(isp)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+            }
+
+            HStack(spacing: 5) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+
+                Text(ip)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.52)
             }
         }
     }
 
+    private func liveActivitySpeedRow(
+        download: String,
+        upload: String
+    ) -> some View {
+        HStack(spacing: 6) {
+            liveActivitySpeedChip(
+                title: "DL",
+                value: download,
+                systemImage: "arrow.down.circle.fill"
+            )
+
+            liveActivitySpeedChip(
+                title: "UL",
+                value: upload,
+                systemImage: "arrow.up.circle.fill"
+            )
+        }
+    }
+
+    private func liveActivitySpeedChip(
+        title: String,
+        value: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.68))
+
+            Text(value)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
     private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: state.progressFraction ?? 0)
-                .tint(liveActivityTint(for: state.phase))
-                .progressViewStyle(.linear)
-
-            HStack(spacing: 6) {
-                speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
-                speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
-            }
-
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Image(systemName: "network")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
-                Text("ISP")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.68))
+
                 Text(state.ispText)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.6)
+
                 Spacer(minLength: 0)
             }
 
             HStack(spacing: 6) {
                 Image(systemName: "location.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
-                Text("IP")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.68))
+
                 Text(state.ipAddressText)
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Spacer(minLength: 0)
-            }
-
-            disconnectControlRow(state: state)
-
-            HStack(alignment: .center, spacing: 10) {
-                Text(state.progressText ?? "0/0")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.55)
 
                 Spacer(minLength: 0)
-
-                Text(state.speedSummaryText)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
             }
         }
-        .padding(.top, 2)
-        .padding(.horizontal, 2)
     }
 
     @ViewBuilder
