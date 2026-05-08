@@ -81,10 +81,9 @@ private final class Runner: NSObject, InternetSpeedTestDelegate {
 
         SharedLogger.info("Speedchecker SDK test starting")
 
-        // Compatible with speedchecker-sdk-ios 1.8.x and newer 2.x APIs.
-        // 1.8.x exposes start(...) and startTest(...).
-        // 2.x exposes start(...) and startFreeTest(...).
-        test.start { [weak self] error in
+        // Free mode uses `startFreeTest`; paid mode uses `start`.
+        // This app initializes the SDK without a license key.
+        test.startFreeTest { [weak self] error in
             guard let self else {
                 return
             }
@@ -94,11 +93,11 @@ private final class Runner: NSObject, InternetSpeedTestDelegate {
                 break
 
             default:
-                SharedLogger.warning("Speedchecker SDK start failed: \(Self.describe(error))")
+                SharedLogger.warning("Speedchecker SDK free test failed: \(Self.describe(error))")
                 self.finishWithFallback(
                     downloadMbps: nil,
                     uploadMbps: nil,
-                    reason: "start failed"
+                    reason: "free test failed"
                 )
             }
         }
