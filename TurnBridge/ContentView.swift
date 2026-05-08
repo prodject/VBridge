@@ -1000,10 +1000,11 @@ struct ContentView: View {
 
                 SharedLogger.info(
                     String(
-                        format: "Speed telemetry: download=%@ upload=%@ isp=%@",
+                        format: "Speed telemetry: download=%@ upload=%@ isp=%@ ip=%@",
                         self.formattedSpeed(result.downloadMbps),
                         self.formattedSpeed(result.uploadMbps),
-                        result.ispName ?? "unknown"
+                        result.ispName ?? "unknown",
+                        result.ipAddress ?? "unknown"
                     )
                 )
 
@@ -1429,6 +1430,12 @@ struct ContentView: View {
                 title: "ISP",
                 value: speedTestISPName ?? "--",
                 systemImage: "network"
+            )
+
+            telemetryBadge(
+                title: "IP",
+                value: speedTestIPAddress ?? "--",
+                systemImage: "location.fill"
             )
 
             HStack(spacing: 8) {

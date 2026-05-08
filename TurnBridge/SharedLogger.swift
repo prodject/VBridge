@@ -253,7 +253,7 @@ public struct SharedLogger {
         return trimmed
     }
 
-    private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double?)? {
+    private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double?, ispName: String?, ipAddress: String?)? {
         let lowered = message.lowercased()
         guard lowered.contains("download="), lowered.contains("upload=") else { return nil }
 
@@ -265,7 +265,20 @@ public struct SharedLogger {
             return Double(numeric)
         }
 
-        return (downloadMbps: value(after: "download="), uploadMbps: value(after: "upload="))
+        func textValue(after marker: String) -> String? {
+            guard let range = lowered.range(of: marker) else { return nil }
+            let suffix = message[range.upperBound...]
+            let token = suffix.split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "," || $0 == ";" }).first.map(String.init) ?? String(suffix)
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        return (
+            downloadMbps: value(after: "download="),
+            uploadMbps: value(after: "upload="),
+            ispName: textValue(after: "isp="),
+            ipAddress: textValue(after: "ip=")
+        )
     }
 
     public static func updateWidgetLiveState(
@@ -276,7 +289,9 @@ public struct SharedLogger {
         profileName: String? = nil,
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
-        uploadSpeedMbps: Double? = nil
+        uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil
     ) {
         let phase = rawStatus.flatMap(normalizedWidgetState(from:))
         VBridgeLiveActivityStore.update(
@@ -287,7 +302,9 @@ public struct SharedLogger {
             relayIP: relayIP,
             estimatedRemainingSeconds: estimatedRemainingSeconds,
             downloadSpeedMbps: downloadSpeedMbps,
-            uploadSpeedMbps: uploadSpeedMbps
+            uploadSpeedMbps: uploadSpeedMbps,
+            ispName: ispName,
+            ipAddress: ipAddress
         )
         reloadWidgetTimelinesIfAvailable()
     }
@@ -313,19 +330,25 @@ public struct SharedLogger {
 
         var parsedDownloadSpeedMbps: Double?
         var parsedUploadSpeedMbps: Double?
+        var parsedISPName: String?
+        var parsedIPAddress: String?
         if let telemetry = parseSpeedTelemetry(from: message) {
             parsedDownloadSpeedMbps = telemetry.downloadMbps
             parsedUploadSpeedMbps = telemetry.uploadMbps
+            parsedISPName = telemetry.ispName
+            parsedIPAddress = telemetry.ipAddress
         }
 
-        if phase != nil || parsedActiveConnections != nil || parsedTotalConnections != nil || parsedRelayIP != nil || parsedDownloadSpeedMbps != nil || parsedUploadSpeedMbps != nil {
+        if phase != nil || parsedActiveConnections != nil || parsedTotalConnections != nil || parsedRelayIP != nil || parsedDownloadSpeedMbps != nil || parsedUploadSpeedMbps != nil || parsedISPName != nil || parsedIPAddress != nil {
             VBridgeLiveActivityStore.update(
                 phase: phase,
                 activeConnections: parsedActiveConnections,
                 totalConnections: parsedTotalConnections,
                 relayIP: parsedRelayIP,
                 downloadSpeedMbps: parsedDownloadSpeedMbps,
-                uploadSpeedMbps: parsedUploadSpeedMbps
+                uploadSpeedMbps: parsedUploadSpeedMbps,
+                ispName: parsedISPName,
+                ipAddress: parsedIPAddress
             )
             reloadWidgetTimelinesIfAvailable()
         }

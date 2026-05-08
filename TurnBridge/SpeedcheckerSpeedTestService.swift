@@ -78,10 +78,11 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         )
         SharedLogger.info(
             String(
-                format: "Speedchecker SDK finished: download=%@ upload=%@ isp=%@",
+                format: "Speedchecker SDK finished: download=%@ upload=%@ isp=%@ ip=%@",
                 mapped.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
                 mapped.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
-                mapped.ispName ?? "unknown"
+                mapped.ispName ?? "unknown",
+                mapped.ipAddress ?? "unknown"
             )
         )
         finish(mapped)

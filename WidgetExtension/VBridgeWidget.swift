@@ -83,6 +83,7 @@ private struct WidgetSnapshot: Equatable {
     let downloadSpeedMbps: Double?
     let uploadSpeedMbps: Double?
     let ispName: String?
+    let ipAddress: String?
     let pings: [PingSample]
     let lastUpdated: Date
 
@@ -173,6 +174,10 @@ private struct WidgetSnapshot: Equatable {
         ispName ?? "ISP --"
     }
 
+    var ipText: String {
+        ipAddress ?? "IP --"
+    }
+
     var summaryText: String {
         switch state {
         case .connected:
@@ -225,6 +230,7 @@ private struct WidgetSnapshot: Equatable {
         downloadSpeedMbps: 18.4,
         uploadSpeedMbps: 5.7,
         ispName: "Fiber ISP",
+        ipAddress: "203.0.113.24",
         pings: PingSample.placeholderSamples,
         lastUpdated: .now
     )
@@ -248,6 +254,7 @@ private struct WidgetSnapshot: Equatable {
             downloadSpeedMbps: nil,
             uploadSpeedMbps: nil,
             ispName: nil,
+            ipAddress: nil,
             pings: PingSample.placeholderSamples,
             lastUpdated: .now
         )
@@ -318,6 +325,7 @@ private struct WidgetSnapshot: Equatable {
             downloadSpeedMbps: nil,
             uploadSpeedMbps: nil,
             ispName: nil,
+            ipAddress: nil,
             pings: pings,
             lastUpdated: .now
         )
@@ -338,6 +346,7 @@ private struct WidgetSnapshot: Equatable {
         self.downloadSpeedMbps = liveSnapshot.content.downloadSpeedMbps ?? fallback?.downloadSpeedMbps
         self.uploadSpeedMbps = liveSnapshot.content.uploadSpeedMbps ?? fallback?.uploadSpeedMbps
         self.ispName = liveSnapshot.content.ispName ?? fallback?.ispName
+        self.ipAddress = liveSnapshot.content.ipAddress ?? fallback?.ipAddress
         if let livePingSamples = liveSnapshot.content.pingSamples {
             self.pings = livePingSamples.map(PingSample.init(shared:))
         } else if state == .connected {
@@ -633,7 +642,7 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.6)
             }
 
-            metricsSection(snapshot: snapshot, compactPings: true, showISP: false)
+            metricsSection(snapshot: snapshot, compactPings: true, showISP: false, showIP: false)
 
             Spacer(minLength: 0)
 
@@ -676,7 +685,7 @@ private struct WidgetCardView: View {
                     .minimumScaleFactor(0.78)
             }
 
-            metricsSection(snapshot: snapshot, compactPings: true, showISP: true)
+            metricsSection(snapshot: snapshot, compactPings: true, showISP: true, showIP: true)
 
             HStack(spacing: 5) {
                 Image(systemName: "network")
@@ -776,19 +785,22 @@ private struct WidgetCardView: View {
                 }
             }
 
-            metricsSection(snapshot: snapshot, compactPings: false, showISP: true)
+            metricsSection(snapshot: snapshot, compactPings: false, showISP: true, showIP: true)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
     }
 
-    private func metricsSection(snapshot: WidgetSnapshot, compactPings: Bool, showISP: Bool) -> some View {
+    private func metricsSection(snapshot: WidgetSnapshot, compactPings: Bool, showISP: Bool, showIP: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 metricChip(title: "Download", value: snapshot.downloadSpeedText, systemImage: "arrow.down.circle.fill")
                 metricChip(title: "Upload", value: snapshot.uploadSpeedText, systemImage: "arrow.up.circle.fill")
                 if showISP {
                     metricChip(title: "ISP", value: snapshot.ispText, systemImage: "network")
+                }
+                if showIP {
+                    metricChip(title: "IP", value: snapshot.ipText, systemImage: "location.fill")
                 }
             }
 
@@ -1063,6 +1075,21 @@ private struct VBridgeLiveActivityWidget: Widget {
             }
 
             HStack(spacing: 6) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("IP")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.68))
+                Text(state.ipAddressText)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
                 Image(systemName: "network")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
@@ -1114,6 +1141,21 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .foregroundStyle(.white.opacity(0.68))
                 Text(state.ispText)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("IP")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.68))
+                Text(state.ipAddressText)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
