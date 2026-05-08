@@ -253,7 +253,7 @@ public struct SharedLogger {
         return trimmed
     }
 
-    private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double)? {
+    private static func parseSpeedTelemetry(from message: String) -> (downloadMbps: Double?, uploadMbps: Double?)? {
         let lowered = message.lowercased()
         guard lowered.contains("download="), lowered.contains("upload=") else { return nil }
 
