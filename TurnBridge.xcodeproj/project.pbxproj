@@ -218,7 +218,6 @@
 			);
 			name = VBridge;
 			packageProductDependencies = (
-				A7EBA6622F606BB7003CA7F3 /* LCLSpeedtest */,
 			);
 			productName = VBridge;
 			productReference = A7EBA62C2F606924003CA7F3 /* VBridge.app */;
@@ -306,7 +305,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */,
-				A7EBA6612F606BB7003CA7F3 /* XCRemoteSwiftPackageReference "lcl-speedtest" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A7EBA62D2F606924003CA7F3 /* Products */;
@@ -823,14 +821,6 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "wireguard-apple";
 		};
-		A7EBA6612F606BB7003CA7F3 /* XCRemoteSwiftPackageReference "lcl-speedtest" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Local-Connectivity-Lab/lcl-speedtest.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.7;
-			};
-		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -843,11 +833,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A7EBA6592F606BB7003CA7F3 /* XCLocalSwiftPackageReference "wireguard-apple" */;
 			productName = WireGuardKitGo;
-		};
-		A7EBA6622F606BB7003CA7F3 /* LCLSpeedtest */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A7EBA6612F606BB7003CA7F3 /* XCRemoteSwiftPackageReference "lcl-speedtest" */;
-			productName = LCLSpeedtest;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
