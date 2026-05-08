@@ -157,6 +157,8 @@ struct ContentView: View {
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var speedTestTask: Task<Void, Never>?
     @State private var lastSpeedMeasurementActiveConnections: Int?
+    @State private var speedTestNeedsRerun = false
+    @State private var speedTestRerunProfileName: String?
     @State private var currentConnectivityPings: [ConnectionPingSample] = ConnectionPingSample.placeholderSamples
     @State private var pendingShortcutActionTask: Task<Void, Never>?
 
@@ -927,6 +929,8 @@ struct ContentView: View {
         downloadSpeedMbps = nil
         uploadSpeedMbps = nil
         lastSpeedMeasurementActiveConnections = nil
+        speedTestNeedsRerun = false
+        speedTestRerunProfileName = nil
         currentConnectivityPings = ConnectionPingSample.placeholderSamples
     }
 
@@ -940,7 +944,15 @@ struct ContentView: View {
             lastSpeedMeasurementActiveConnections = latestConnectionProgressFromLogs()?.active ?? 0
         }
 
-        speedTestTask?.cancel()
+        if speedTestTask != nil {
+            speedTestNeedsRerun = true
+            speedTestRerunProfileName = profileName
+            SharedLogger.info("Speed test already running; queued rerun")
+            return
+        }
+
+        speedTestNeedsRerun = false
+        speedTestRerunProfileName = nil
         speedTestTask = Task(priority: .utility) { [profileName] in
             async let pingSamples = ConnectionPingSample.loadAll()
             let result = await runSpeedTest()
@@ -975,6 +987,18 @@ struct ContentView: View {
                         self.formattedSpeed(result.uploadMbps)
                     )
                 )
+
+                let shouldRerun = self.speedTestNeedsRerun && self.vpnStatus == .connected
+                let rerunProfileName = self.speedTestRerunProfileName ?? profileName
+                self.speedTestNeedsRerun = false
+                self.speedTestRerunProfileName = nil
+
+                if shouldRerun {
+                    self.requestSpeedMeasurement(
+                        profileName: rerunProfileName,
+                        activeConnections: self.lastSpeedMeasurementActiveConnections
+                    )
+                }
             }
         }
     }
