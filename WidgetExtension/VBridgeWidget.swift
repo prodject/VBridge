@@ -983,10 +983,10 @@ private struct VBridgeLiveActivityWidget: Widget {
             VStack(alignment: .leading, spacing: 8) {
                 liveActivityHeader(
                     profileName: context.attributes.profileName,
-                    state: state,
+                    state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
                     statusLabel: context.state.phase.displayTitle,
-                    statusSymbol: state == .connected ? "lock.shield.fill" : "wifi",
-                    statusAccent: state == .connected ? .green : .orange
+                    statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
+                    statusAccent: liveActivityStatusAccent(phase: context.state.phase)
                 )
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1027,7 +1027,13 @@ private struct VBridgeLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    liveActivityHeader(state: context.state)
+                    liveActivityHeader(
+                        profileName: context.attributes.profileName,
+                        state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
+                        statusLabel: context.state.phase.displayTitle,
+                        statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
+                        statusAccent: liveActivityStatusAccent(phase: context.state.phase)
+                    )
                         .padding(.leading, 2)
                 }
 
@@ -1100,7 +1106,13 @@ private struct VBridgeLiveActivityWidget: Widget {
 
     private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            liveActivityHeader(state: state)
+            liveActivityHeader(
+                profileName: "VBridge",
+                state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
+                statusLabel: context.state.phase.displayTitle,
+                statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
+                statusAccent: liveActivityStatusAccent(phase: context.state.phase)
+            )
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(state.progressText ?? "0/0")
@@ -1174,6 +1186,40 @@ private struct VBridgeLiveActivityWidget: Widget {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    private func liveActivityStatusSymbol(
+        phase: VBridgeVPNLiveActivityAttributes.Phase
+    ) -> String {
+        switch phase {
+        case .connected:
+            return "lock.shield.fill"
+        case .connecting:
+            return "wifi"
+        case .disconnecting:
+            return "wifi.slash"
+        case .disconnected:
+            return "lock.shield"
+        case .unknown:
+            return "questionmark.circle"
+        }
+    }
+
+    private func liveActivityStatusAccent(
+        phase: VBridgeVPNLiveActivityAttributes.Phase
+    ) -> Color {
+        switch phase {
+        case .connected:
+            return .green
+        case .connecting:
+            return .orange
+        case .disconnecting:
+            return .orange
+        case .disconnected:
+            return .red
+        case .unknown:
+            return .secondary
+        }
     }
 
     private func liveActivityHeader(
