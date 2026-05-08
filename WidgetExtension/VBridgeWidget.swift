@@ -327,7 +327,13 @@ private struct WidgetSnapshot: Equatable {
         self.estimatedRemainingSeconds = liveSnapshot.content.estimatedRemainingSeconds ?? fallback?.estimatedRemainingSeconds
         self.downloadSpeedMbps = liveSnapshot.content.downloadSpeedMbps ?? fallback?.downloadSpeedMbps
         self.uploadSpeedMbps = liveSnapshot.content.uploadSpeedMbps ?? fallback?.uploadSpeedMbps
-        self.pings = state == .connected ? PingSample.loadAll() : (fallback?.pings ?? PingSample.placeholderSamples)
+        if let livePingSamples = liveSnapshot.content.pingSamples {
+            self.pings = livePingSamples.map(PingSample.init(shared:))
+        } else if state == .connected {
+            self.pings = fallback?.pings ?? PingSample.placeholderSamples
+        } else {
+            self.pings = fallback?.pings ?? PingSample.placeholderSamples
+        }
         self.lastUpdated = liveSnapshot.content.updatedAt
     }
 
@@ -358,6 +364,11 @@ private struct WidgetEntry: TimelineEntry {
 private struct PingSample: Equatable {
     let name: String
     let latencyMs: Int?
+
+    init(shared sample: VBridgePingSample) {
+        self.name = sample.name
+        self.latencyMs = sample.latencyMs
+    }
 
     var dotColor: Color {
         guard let latencyMs else { return .gray.opacity(0.45) }
@@ -412,6 +423,10 @@ private struct PingSample: Equatable {
         default:
             return String(name.prefix(2)).uppercased()
         }
+    }
+
+    var sharedRepresentation: VBridgePingSample {
+        VBridgePingSample(name: name, latencyMs: latencyMs)
     }
 
     static let targets: [(String, URL)] = [
@@ -983,24 +998,24 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             liveActivityHeader(state: state)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(state.progressText ?? "0/0")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.72)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(state.phase.displayTitle)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
 
                     Text(state.remainingText ?? state.relayText)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(1)
                 }
@@ -1010,7 +1025,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                 .tint(liveActivityTint(for: state.phase))
                 .progressViewStyle(.linear)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
                 speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
             }
@@ -1020,40 +1035,40 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
                 Text(state.relayText)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.72)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private func liveActivityHeader(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 6) {
             Image(systemName: state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(liveActivityTint(for: state.phase))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("VBridge")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Text(state.phase.displayTitle)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.72))
             }
         }
     }
 
     private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             ProgressView(value: state.progressFraction ?? 0)
                 .tint(liveActivityTint(for: state.phase))
                 .progressViewStyle(.linear)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 speedChip(title: "Download", value: state.downloadSpeedText ?? "DL --")
                 speedChip(title: "Upload", value: state.uploadSpeedText ?? "UL --")
             }
@@ -1062,61 +1077,62 @@ private struct VBridgeLiveActivityWidget: Widget {
 
             HStack(alignment: .center, spacing: 10) {
                 Text(state.progressText ?? "0/0")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.72)
 
                 Spacer(minLength: 0)
 
                 Text(state.speedSummaryText)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.68)
             }
         }
-        .padding(.top, 4)
-        .padding(.horizontal, 4)
+        .padding(.top, 2)
+        .padding(.horizontal, 2)
     }
 
     @ViewBuilder
     private func disconnectControlRow(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
         if state.phase == .connected || state.phase == .connecting || state.phase == .disconnecting {
-            if #available(iOS 17.0, *) {
-                Button(intent: DisconnectVBridgeWidgetIntent()) {
+            if let disconnectURL = URL(string: "vbridge://disconnect") {
+                Link(destination: disconnectURL) {
                     HStack(spacing: 8) {
                         Image(systemName: "power.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                         Text("Disconnect")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.72))
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
                     .frame(maxWidth: .infinity)
-                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
             } else {
                 HStack {
                     Image(systemName: "power.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
                     Text("Disconnect")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                     Spacer(minLength: 0)
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity)
-                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
     }
@@ -1137,20 +1153,20 @@ private struct VBridgeLiveActivityWidget: Widget {
     private func speedChip(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.66))
                 .lineLimit(1)
 
             Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .minimumScaleFactor(0.78)
+                .minimumScaleFactor(0.72)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

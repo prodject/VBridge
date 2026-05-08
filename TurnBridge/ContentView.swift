@@ -15,6 +15,11 @@ private struct ConnectionPingSample: Equatable {
     let name: String
     let latencyMs: Int?
 
+    init(shared sample: VBridgePingSample) {
+        self.name = sample.name
+        self.latencyMs = sample.latencyMs
+    }
+
     var dotColor: Color {
         guard let latencyMs else { return .gray.opacity(0.45) }
         switch latencyMs {
@@ -63,6 +68,10 @@ private struct ConnectionPingSample: Equatable {
         default:
             return String(name.prefix(2)).uppercased()
         }
+    }
+
+    var sharedRepresentation: VBridgePingSample {
+        VBridgePingSample(name: name, latencyMs: latencyMs)
     }
 
     static let targets: [(String, URL)] = [
@@ -189,38 +198,10 @@ struct ContentView: View {
                             .font(.system(size: 14, weight: .semibold, design: .default))
                             .foregroundColor(.secondary)
 
-                        if let connectionProgressText {
-                            Text(connectionProgressText)
-                                .font(.system(size: 13, weight: .semibold, design: .default))
-                                .foregroundColor(.secondary)
-                        }
-
-                        if vpnStatus == .connected || vpnStatus == .connecting || downloadSpeedMbps != nil || uploadSpeedMbps != nil {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 8) {
-                                    telemetryBadge(
-                                        title: "Download",
-                                        value: formattedSpeed(downloadSpeedMbps),
-                                        systemImage: "arrow.down.circle.fill"
-                                    )
-
-                                    telemetryBadge(
-                                        title: "Upload",
-                                        value: formattedSpeed(uploadSpeedMbps),
-                                        systemImage: "arrow.up.circle.fill"
-                                    )
-                                }
-
-                                HStack(spacing: 8) {
-                                    ForEach(currentConnectivityPings, id: \.name) { sample in
-                                        pingBadge(sample)
-                                    }
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
+                        connectionTelemetrySection
                     }
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 10)
                     .padding(.top, 16)
 
                     if !store.profiles.isEmpty {
@@ -672,6 +653,9 @@ struct ContentView: View {
                 if currentStatus == .connected, let snapshot = VBridgeLiveActivityStore.load() {
                     self.downloadSpeedMbps = snapshot.content.downloadSpeedMbps
                     self.uploadSpeedMbps = snapshot.content.uploadSpeedMbps
+                    if let pingSamples = snapshot.content.pingSamples {
+                        self.currentConnectivityPings = pingSamples.map(ConnectionPingSample.init(shared:))
+                    }
                 }
                 self.syncLiveActivityState(
                     profileName: selectedProfileName,
@@ -713,15 +697,29 @@ struct ContentView: View {
     }
 
     private func refreshConnectionProgress() {
-        guard vpnStatus == .connecting || vpnStatus == .connected || vpnStatus == .reasserting else {
-            connectionProgressText = nil
-            let profileName = store.selectedProfile?.name ?? "VBridge"
-            syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
-            return
-        }
-
         let profile = store.selectedProfile
         let profileName = profile?.name ?? "VBridge"
+        let target = profile.map(effectiveConnectionTarget(for:))
+
+        guard vpnStatus == .connecting || vpnStatus == .connected || vpnStatus == .reasserting else {
+            if let target {
+                let fallbackProgress = vpnStatus == .connected ? target : 0
+                connectionProgressText = "\(fallbackProgress)/\(target)"
+                let remaining = estimatedRemainingSeconds(activeConnections: fallbackProgress, totalConnections: target)
+                syncLiveActivityState(
+                    profileName: profileName,
+                    phase: liveActivityPhase(for: vpnStatus),
+                    activeConnections: fallbackProgress,
+                    totalConnections: target,
+                    relayIP: latestRelayIPFromLogs(),
+                    estimatedRemainingSeconds: remaining
+                )
+            } else {
+                connectionProgressText = "0/0"
+                syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
+            }
+            return
+        }
 
         if let progress = latestConnectionProgressFromLogs() {
             let progressText = "\(progress.active)/\(progress.total)"
@@ -738,8 +736,7 @@ struct ContentView: View {
                 relayIP: latestRelayIPFromLogs(),
                 estimatedRemainingSeconds: estimatedRemainingSeconds
             )
-        } else if let profile {
-            let target = effectiveConnectionTarget(for: profile)
+        } else if let target {
             let fallbackProgress = vpnStatus == .connected ? target : 0
             connectionProgressText = "\(fallbackProgress)/\(target)"
             syncLiveActivityState(
@@ -751,7 +748,7 @@ struct ContentView: View {
                 estimatedRemainingSeconds: estimatedRemainingSeconds(activeConnections: fallbackProgress, totalConnections: target)
             )
         } else {
-            connectionProgressText = nil
+            connectionProgressText = "0/0"
             syncLiveActivityState(profileName: profileName, phase: liveActivityPhase(for: vpnStatus))
         }
 
@@ -961,7 +958,8 @@ struct ContentView: View {
                     relayIP: self.latestRelayIPFromLogs(),
                     estimatedRemainingSeconds: nil,
                     downloadSpeedMbps: result.downloadMbps,
-                    uploadSpeedMbps: result.uploadMbps
+                    uploadSpeedMbps: result.uploadMbps,
+                    pingSamples: resolvedPingSamples.map(\.sharedRepresentation)
                 )
                 self.refreshWidgetTimelines()
 
@@ -984,7 +982,8 @@ struct ContentView: View {
         relayIP: String? = nil,
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
-        uploadSpeedMbps: Double? = nil
+        uploadSpeedMbps: Double? = nil,
+        pingSamples: [VBridgePingSample]? = nil
     ) {
         guard #available(iOS 16.1, *) else { return }
         Task { @MainActor in
@@ -996,7 +995,8 @@ struct ContentView: View {
                 relayIP: relayIP,
                 estimatedRemainingSeconds: estimatedRemainingSeconds,
                 downloadSpeedMbps: downloadSpeedMbps,
-                uploadSpeedMbps: uploadSpeedMbps
+                uploadSpeedMbps: uploadSpeedMbps,
+                pingSamples: pingSamples
             )
         }
     }
@@ -1078,15 +1078,15 @@ struct ContentView: View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.86))
+                .foregroundStyle(.black.opacity(0.72))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(.black.opacity(0.58))
                 Text(value)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
@@ -1096,10 +1096,10 @@ struct ContentView: View {
         .padding(.vertical, 9)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
     }
 
@@ -1108,20 +1108,20 @@ struct ContentView: View {
             HStack(spacing: 5) {
                 Text(verbatim: sample.badgeText)
                     .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                 Circle()
                     .fill(sample.dotColor)
                     .frame(width: 5, height: 5)
                 Spacer(minLength: 0)
                 Text(verbatim: sample.compactLatencyText)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.black.opacity(0.74))
             }
 
             HStack(spacing: 2) {
                 ForEach(0..<5, id: \.self) { index in
                     Capsule(style: .continuous)
-                        .fill(sample.dotCount > index ? sample.dotColor : .white.opacity(0.16))
+                        .fill(sample.dotCount > index ? sample.dotColor : .black.opacity(0.08))
                         .frame(width: 8, height: 3)
                 }
             }
@@ -1129,7 +1129,59 @@ struct ContentView: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var connectionTelemetrySection: some View {
+        let statusLabel: String = {
+            switch vpnStatus {
+            case .connected:
+                return "Connected"
+            case .connecting, .reasserting:
+                return "Connecting"
+            default:
+                return "Offline"
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(connectionProgressText ?? "0/0")
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.black.opacity(0.78))
+
+                Spacer(minLength: 0)
+
+                Text(statusLabel)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.54))
+            }
+
+            HStack(spacing: 8) {
+                telemetryBadge(
+                    title: "Download",
+                    value: formattedSpeed(downloadSpeedMbps),
+                    systemImage: "arrow.down.circle.fill"
+                )
+
+                telemetryBadge(
+                    title: "Upload",
+                    value: formattedSpeed(uploadSpeedMbps),
+                    systemImage: "arrow.up.circle.fill"
+                )
+            }
+
+            HStack(spacing: 8) {
+                ForEach(currentConnectivityPings, id: \.name) { sample in
+                    pingBadge(sample)
+                }
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func sampleRuntimeTransferBytes() async -> (downloadBytes: UInt64, uploadBytes: UInt64)? {

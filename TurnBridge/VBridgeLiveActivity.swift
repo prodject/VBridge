@@ -5,6 +5,30 @@ import WidgetKit
 #endif
 
 @available(iOS 16.1, *)
+struct VBridgePingSample: Codable, Hashable {
+    var name: String
+    var latencyMs: Int?
+
+    var compactLatencyText: String {
+        guard let latencyMs else { return "--" }
+        return "\(latencyMs)ms"
+    }
+
+    var badgeText: String {
+        switch name {
+        case "Cloudflare":
+            return "CF"
+        case "Google":
+            return "GO"
+        case "Yandex":
+            return "YN"
+        default:
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+}
+
+@available(iOS 16.1, *)
 enum VBridgeLiveActivityPhase: String, Codable, Hashable {
     case connecting
     case connected
@@ -47,6 +71,7 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         var estimatedRemainingSeconds: Int?
         var downloadSpeedMbps: Double?
         var uploadSpeedMbps: Double?
+        var pingSamples: [VBridgePingSample]?
         var updatedAt: Date
 
         var progressFraction: Double? {
@@ -154,6 +179,7 @@ enum VBridgeLiveActivityStore {
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
         uploadSpeedMbps: Double? = nil,
+        pingSamples: [VBridgePingSample]? = nil,
         updatedAt: Date = .now
     ) {
         var snapshot = load() ?? VBridgeLiveActivitySnapshot(
@@ -166,6 +192,7 @@ enum VBridgeLiveActivityStore {
                 estimatedRemainingSeconds: nil,
                 downloadSpeedMbps: nil,
                 uploadSpeedMbps: nil,
+                pingSamples: nil,
                 updatedAt: updatedAt
             )
         )
@@ -182,6 +209,7 @@ enum VBridgeLiveActivityStore {
                 snapshot.content.estimatedRemainingSeconds = nil
                 snapshot.content.downloadSpeedMbps = nil
                 snapshot.content.uploadSpeedMbps = nil
+                snapshot.content.pingSamples = nil
             } else if phase == .disconnected || phase == .unknown {
                 snapshot.content.activeConnections = nil
                 snapshot.content.totalConnections = nil
@@ -189,6 +217,7 @@ enum VBridgeLiveActivityStore {
                 snapshot.content.estimatedRemainingSeconds = nil
                 snapshot.content.downloadSpeedMbps = nil
                 snapshot.content.uploadSpeedMbps = nil
+                snapshot.content.pingSamples = nil
             }
         }
         if let activeConnections {
@@ -208,6 +237,9 @@ enum VBridgeLiveActivityStore {
         }
         if let uploadSpeedMbps {
             snapshot.content.uploadSpeedMbps = uploadSpeedMbps
+        }
+        if let pingSamples {
+            snapshot.content.pingSamples = pingSamples
         }
         snapshot.content.updatedAt = updatedAt
         save(snapshot)
@@ -243,7 +275,8 @@ final class VBridgeLiveActivityCoordinator {
         relayIP: String? = nil,
         estimatedRemainingSeconds: Int? = nil,
         downloadSpeedMbps: Double? = nil,
-        uploadSpeedMbps: Double? = nil
+        uploadSpeedMbps: Double? = nil,
+        pingSamples: [VBridgePingSample]? = nil
     ) {
         let updatedAt = Date()
         VBridgeLiveActivityStore.update(
@@ -255,6 +288,7 @@ final class VBridgeLiveActivityCoordinator {
             estimatedRemainingSeconds: estimatedRemainingSeconds,
             downloadSpeedMbps: downloadSpeedMbps,
             uploadSpeedMbps: uploadSpeedMbps,
+            pingSamples: pingSamples,
             updatedAt: updatedAt
         )
         guard let snapshot = VBridgeLiveActivityStore.load() else { return }
@@ -284,6 +318,7 @@ final class VBridgeLiveActivityCoordinator {
                 estimatedRemainingSeconds: nil,
                 downloadSpeedMbps: nil,
                 uploadSpeedMbps: nil,
+                pingSamples: nil,
                 updatedAt: updatedAt
             )
         )
