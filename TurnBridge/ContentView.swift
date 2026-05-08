@@ -1497,7 +1497,7 @@ struct ContentView: View {
             currentPeerStarted = false
         }
 
-        for rawLine in settings.split(omittingEmptySubsequences: false) { $0.isNewline } {
+        for rawLine in settings.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty {
                 if inPeerSection {
