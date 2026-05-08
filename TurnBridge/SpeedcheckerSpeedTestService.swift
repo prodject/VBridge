@@ -81,9 +81,9 @@ private final class Runner: NSObject, InternetSpeedTestDelegate {
 
         SharedLogger.info("Speedchecker SDK test starting")
 
-        // Free mode uses `startFreeTest`; paid mode uses `start`.
+        // Free mode on the pinned 1.8.x SDK uses `startTest`; paid mode uses `start`.
         // This app initializes the SDK without a license key.
-        test.startFreeTest { [weak self] error in
+        test.startTest { [weak self] error in
             guard let self else {
                 return
             }
