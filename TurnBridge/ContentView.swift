@@ -203,7 +203,7 @@ struct ContentView: View {
                             .font(.system(size: 14, weight: .semibold, design: .default))
                             .foregroundColor(.secondary)
 
-                        connectionTelemetrySection
+                        connectionTelemetrySection()
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 10)
@@ -1141,7 +1141,7 @@ struct ContentView: View {
         )
     }
 
-    private var connectionTelemetrySection: some View {
+    private func connectionTelemetrySection() -> some View {
         let statusLabel: String = {
             switch vpnStatus {
             case .connected:
