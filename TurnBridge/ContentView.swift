@@ -15,6 +15,11 @@ private struct ConnectionPingSample: Equatable {
     let name: String
     let latencyMs: Int?
 
+    init(name: String, latencyMs: Int?) {
+        self.name = name
+        self.latencyMs = latencyMs
+    }
+
     init(shared sample: VBridgePingSample) {
         self.name = sample.name
         self.latencyMs = sample.latencyMs
