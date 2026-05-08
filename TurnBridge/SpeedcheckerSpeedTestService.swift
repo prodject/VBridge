@@ -1,5 +1,4 @@
 import Foundation
-import CoreLocation
 
 #if canImport(SpeedcheckerSDK)
 import SpeedcheckerSDK
@@ -29,19 +28,30 @@ final class SpeedcheckerSpeedTestService: NSObject {
         }
 #else
         SharedLogger.warning("Speedchecker SDK is unavailable at build time")
-        return nil
+        return await fallbackOnlyResult()
 #endif
+    }
+
+    private func fallbackOnlyResult() async -> SpeedcheckerMeasurementResult? {
+        guard let fallback = await PublicIPInfoService().fetch() else {
+            return nil
+        }
+
+        return SpeedcheckerMeasurementResult(
+            downloadMbps: nil,
+            uploadMbps: nil,
+            ispName: fallback.ispName,
+            ipAddress: fallback.ipAddress
+        )
     }
 }
 
 #if canImport(SpeedcheckerSDK)
-private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManagerDelegate {
+private final class Runner: NSObject, InternetSpeedTestDelegate {
     private var test: InternetSpeedTest?
     private var continuation: CheckedContinuation<SpeedcheckerMeasurementResult?, Never>?
     private var finished = false
-    private var didStartSpeedTest = false
 
-    private let locationManager = CLLocationManager()
     private let publicIPInfoService = PublicIPInfoService()
     private let onFinish: () -> Void
 
@@ -54,64 +64,17 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     }
 
     func start() {
-        DispatchQueue.main.async {
-            self.prepareLocationAndStartTest()
+        // Give NEPacketTunnel/WireGuard a short moment to settle after VPN status becomes Connected.
+        // Without this, Speedchecker 1.8.x often cancels while routes are still switching.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.startSpeedchecker()
         }
     }
 
-    private func prepareLocationAndStartTest() {
-        locationManager.delegate = self
-
-        guard CLLocationManager.locationServicesEnabled() else {
-            SharedLogger.warning("Location services are disabled; starting Speedchecker without location")
-            startSpeedTestIfNeeded()
+    private func startSpeedchecker() {
+        guard !finished else {
             return
         }
-
-        let status = authorizationStatus()
-
-        switch status {
-        case .notDetermined:
-            SharedLogger.info("Requesting location authorization before Speedchecker test")
-            locationManager.requestWhenInUseAuthorization()
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self else { return }
-
-                if !self.didStartSpeedTest {
-                    SharedLogger.warning("Location authorization timeout; starting Speedchecker anyway")
-                    self.startSpeedTestIfNeeded()
-                }
-            }
-
-        case .authorizedAlways, .authorizedWhenInUse:
-            SharedLogger.info("Location authorization available; starting Speedchecker test")
-            startSpeedTestIfNeeded()
-
-        case .denied, .restricted:
-            SharedLogger.warning("Location authorization denied/restricted; starting Speedchecker without location")
-            startSpeedTestIfNeeded()
-
-        @unknown default:
-            SharedLogger.warning("Unknown location authorization status; starting Speedchecker anyway")
-            startSpeedTestIfNeeded()
-        }
-    }
-
-    private func authorizationStatus() -> CLAuthorizationStatus {
-        if #available(iOS 14.0, *) {
-            return locationManager.authorizationStatus
-        } else {
-            return CLLocationManager.authorizationStatus()
-        }
-    }
-
-    private func startSpeedTestIfNeeded() {
-        guard !didStartSpeedTest else {
-            return
-        }
-
-        didStartSpeedTest = true
 
         let test = InternetSpeedTest(delegate: self)
         self.test = test
@@ -119,23 +82,36 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         SharedLogger.info("Speedchecker SDK test starting")
 
         // Compatible with speedchecker-sdk-ios 1.8.x and newer 2.x APIs.
-        // 1.8.x has start(...) / startTest(...)
-        // 2.x has start(...) / startFreeTest(...)
-        test.start { error in
+        // 1.8.x exposes start(...) and startTest(...).
+        // 2.x exposes start(...) and startFreeTest(...).
+        test.start { [weak self] error in
+            guard let self else {
+                return
+            }
+
             switch error {
             case .ok:
                 break
 
             default:
-                SharedLogger.warning("Speedchecker SDK start failed: \(String(describing: error))")
-                self.finish(nil)
+                SharedLogger.warning("Speedchecker SDK start failed: \(Self.describe(error))")
+                self.finishWithFallback(
+                    downloadMbps: nil,
+                    uploadMbps: nil,
+                    reason: "start failed"
+                )
             }
         }
     }
 
     func internetTestError(error: SpeedTestError) {
-        SharedLogger.warning("Speedchecker SDK error: \(String(describing: error))")
-        finish(nil)
+        SharedLogger.warning("Speedchecker SDK error: \(Self.describe(error))")
+
+        finishWithFallback(
+            downloadMbps: nil,
+            uploadMbps: nil,
+            reason: "SDK error"
+        )
     }
 
     func internetTestFinish(result: SpeedTestResult) {
@@ -146,7 +122,9 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         let sdkIPAddress = clean(result.ipAddress)
 
         Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                return
+            }
 
             var finalISPName = sdkISPName
             var finalIPAddress = sdkIPAddress
@@ -181,6 +159,41 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         }
     }
 
+    private func finishWithFallback(
+        downloadMbps: Double?,
+        uploadMbps: Double?,
+        reason: String
+    ) {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            SharedLogger.warning("Speedchecker SDK returned no usable result, trying IP/ISP fallback: \(reason)")
+
+            let fallback = await self.publicIPInfoService.fetch()
+
+            let mapped = SpeedcheckerMeasurementResult(
+                downloadMbps: downloadMbps,
+                uploadMbps: uploadMbps,
+                ispName: fallback?.ispName,
+                ipAddress: fallback?.ipAddress
+            )
+
+            SharedLogger.info(
+                String(
+                    format: "Speedchecker fallback result: download=%@ upload=%@ isp=%@ ip=%@",
+                    mapped.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    mapped.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    mapped.ispName ?? "unknown",
+                    mapped.ipAddress ?? "unknown"
+                )
+            )
+
+            self.finish(mapped)
+        }
+    }
+
     func internetTestReceived(servers: [SpeedTestServer]) {
         SharedLogger.info("Speedchecker SDK received \(servers.count) servers")
     }
@@ -197,29 +210,6 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
     func internetTestUploadFinish() { }
     func internetTestUpload(progress: Double, speed: SpeedTestSpeed) { }
 
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status: CLAuthorizationStatus
-
-        if #available(iOS 14.0, *) {
-            status = manager.authorizationStatus
-        } else {
-            status = CLLocationManager.authorizationStatus()
-        }
-
-        SharedLogger.info("Speedchecker location authorization changed: \(status.rawValue)")
-
-        switch status {
-        case .authorizedAlways, .authorizedWhenInUse, .denied, .restricted:
-            startSpeedTestIfNeeded()
-
-        case .notDetermined:
-            break
-
-        @unknown default:
-            startSpeedTestIfNeeded()
-        }
-    }
-
     private func finish(_ result: SpeedcheckerMeasurementResult?) {
         guard !finished else {
             return
@@ -230,7 +220,6 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         let continuation = self.continuation
         self.continuation = nil
         self.test = nil
-        self.locationManager.delegate = nil
 
         continuation?.resume(returning: result)
         onFinish()
@@ -257,6 +246,37 @@ private final class Runner: NSObject, InternetSpeedTestDelegate, CLLocationManag
         }
 
         return trimmed
+    }
+
+    private static func describe(_ error: SpeedTestError) -> String {
+        switch error {
+        case .ok:
+            return "ok"
+
+        case .invalidSettings:
+            return "invalidSettings"
+
+        case .invalidServers:
+            return "invalidServers"
+
+        case .inProgress:
+            return "inProgress"
+
+        case .failed:
+            return "failed"
+
+        case .notSaved:
+            return "notSaved"
+
+        case .cancelled:
+            return "cancelled"
+
+        case .locationUndefined:
+            return "locationUndefined"
+
+        @unknown default:
+            return "unknown(rawValue=\(error.rawValue))"
+        }
     }
 }
 #endif

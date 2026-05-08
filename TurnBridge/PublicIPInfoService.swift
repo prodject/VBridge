@@ -24,7 +24,7 @@ final class PublicIPInfoService {
 
         do {
             var request = URLRequest(url: url)
-            request.timeoutInterval = 6
+            request.timeoutInterval = 5
             request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
 
             let (data, response) = try await URLSession.shared.data(for: request)
