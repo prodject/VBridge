@@ -64,6 +64,27 @@ struct AboutView: View {
                     .background(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.1))
                     .cornerRadius(12)
                 }
+
+                Link(destination: URL(string: "https://github.com/WINGS-N")!) {
+                    HStack {
+                        Image(systemName: "person.crop.square")
+                            .font(.system(size: 18, weight: .medium))
+                            .frame(width: 30)
+
+                        Text("WINGS-N")
+                            .font(.system(size: 16, weight: .medium))
+
+                        Spacer()
+
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .foregroundColor(.primary)
+                    .padding()
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(12)
+                }
             }
             .padding(.horizontal, 40)
 
@@ -97,6 +118,24 @@ struct AboutView: View {
                                 .font(.system(size: 18))
                                 .frame(width: 30)
                             Text("samosvalishe / turn-proxy-android")
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+
+                    Link(destination: URL(string: "https://github.com/WINGS-N/WINGSV")!) {
+                        HStack {
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 30)
+                            Text("WINGS-N / WINGSV")
                                 .font(.system(size: 15, weight: .medium))
                             Spacer()
                             Image(systemName: "arrow.up.right")

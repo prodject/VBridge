@@ -9,6 +9,8 @@ struct TurnConfigImport: Codable {
     let peer: String
     let listen: String
     let n: Int
+    let credsGroupSize: Int?
+    let streamsPerCred: Int?
     let wg: String
     let name: String?
     let turnHost: String?

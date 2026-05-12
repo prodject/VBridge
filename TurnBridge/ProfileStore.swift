@@ -76,7 +76,7 @@ class ProfileStore: ObservableObject {
     private func migrateFromLegacy() {
         let defaults = UserDefaults.standard
         let legacyNValue: Int = {
-            guard defaults.object(forKey: "nValue") != nil else { return 16 }
+            guard defaults.object(forKey: "nValue") != nil else { return 10 }
             return max(defaults.integer(forKey: "nValue"), 1)
         }()
         guard let vkLink = defaults.string(forKey: "vkLink"),
@@ -88,6 +88,7 @@ class ProfileStore: ObservableObject {
             peerAddr: defaults.string(forKey: "peerAddr") ?? "",
             listenAddr: defaults.string(forKey: "listenAddr") ?? "127.0.0.1:9000",
             nValue: legacyNValue,
+            credsGroupSize: max(defaults.object(forKey: "credsGroupSize") as? Int ?? 12, 1),
             wgQuickConfig: defaults.string(forKey: "wgQuickConfig") ?? "",
             turnHost: defaults.string(forKey: "turnHost") ?? "",
             turnPort: defaults.string(forKey: "turnPort") ?? "",
@@ -97,7 +98,7 @@ class ProfileStore: ObservableObject {
         selectedProfileID = profile.id
         save()
 
-        for key in ["vkLink", "peerAddr", "listenAddr", "nValue", "wgQuickConfig", "turnHost", "turnPort", "useUdp"] {
+        for key in ["vkLink", "peerAddr", "listenAddr", "nValue", "credsGroupSize", "wgQuickConfig", "turnHost", "turnPort", "useUdp"] {
             defaults.removeObject(forKey: key)
         }
     }

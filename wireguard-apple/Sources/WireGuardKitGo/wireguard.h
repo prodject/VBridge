@@ -38,6 +38,7 @@ extern void StartProxy(
     const char *peerAddrStr,
     const char *localAddrStr,
     int n,
+    int credsGroupSize,
     int manualCaptcha,
     const char *turnHost,
     const char *turnPort,

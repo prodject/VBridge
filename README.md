@@ -154,4 +154,5 @@ This project was made possible thanks to the work of the open-source community. 
 * [Wireguardkit](https://github.com/Shahzainali/Wireguardkit) — Licensed under MIT / GPL.
 * [vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy) — Licensed under the GNU GPL.
 * [Amneziawg-Apple](https://github.com/amnezia-vpn/amneziawg-apple.git) — Licensed under MIT.
+* [WINGSV](https://github.com/WINGS-N/WINGSV) — Android client reference for tunnel orchestration and connection handling.
 * [proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android) — Android implementation references.

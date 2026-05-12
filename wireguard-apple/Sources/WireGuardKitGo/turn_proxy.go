@@ -66,6 +66,7 @@ const (
 	workerSpawnBatchSize     = 4
 	workerSpawnBatchCooldown = 2 * time.Second
 	quotaRetryCooldown       = 5 * time.Second
+	workerReconnectBackoff   = 1500 * time.Millisecond
 )
 
 type proxyRuntimeState struct {
@@ -197,6 +198,13 @@ func workerSpawnDelay(spawned int) time.Duration {
 		delay += workerSpawnBatchCooldown
 	}
 	return delay
+}
+
+func ceilDiv(value, divisor int) int {
+	if divisor <= 0 {
+		return value
+	}
+	return (value + divisor - 1) / divisor
 }
 
 func setProxyRuntime(rt *proxyRuntimeState) {
@@ -1036,10 +1044,34 @@ func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *ne
 		case <-ctx.Done():
 			return
 		case conn2 := <-connchan:
+			select {
+			case <-ctx.Done():
+				return
+			case <-t:
+			}
+
 			c := make(chan error)
 			go oneTurnConnection(ctx, turnParams, peer, conn2, c)
 			if err := <-c; err != nil {
-				log.Printf("%s", err)
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("%s; reconnecting in %s", err, workerReconnectBackoff)
+			} else {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("TURN worker stopped; reconnecting in %s", workerReconnectBackoff)
+			}
+
+			timer := time.NewTimer(workerReconnectBackoff)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
 			}
 		}
 	}
@@ -1179,7 +1211,7 @@ func ProxyIncreaseThreads(cDelta C.int) C.int {
 }
 
 //export StartProxy
-func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, cManualCaptcha C.int, cTurnHost *C.char, cTurnPort *C.char, cUseUdp C.int) {
+func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, cCredsGroupSize C.int, cManualCaptcha C.int, cTurnHost *C.char, cTurnPort *C.char, cUseUdp C.int) {
     select { case <-proxyReady: default: }
     proxyStateMu.Lock()
     proxyDone = make(chan struct{})
@@ -1192,23 +1224,32 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
     turnHost := C.GoString(cTurnHost)
     turnPort := C.GoString(cTurnPort)
 
-    host := turnHost
-    port := turnPort
-    if port == "" {
-        port = "19302"
-    }
-    n := int(cN)
-    if n < 1 {
-        n = 16
-    }
-    udp := cUseUdp != 0
-    manualCaptchaOnly.Store(cManualCaptcha != 0)
-    if manualCaptchaOnly.Load() {
-        log.Printf("Manual captcha mode is enabled (auto-solver disabled)")
-    }
-    if host != "" || turnPort != "" || !udp {
-        log.Printf("TURN override active: host=%q port=%q udp=%v", host, port, udp)
-    }
+	host := turnHost
+	port := turnPort
+	if port == "" {
+		port = "19302"
+	}
+	n := int(cN)
+	if n < 1 {
+		n = 10
+	}
+	credsGroupSize := int(cCredsGroupSize)
+	if credsGroupSize < 1 {
+		credsGroupSize = 12
+	}
+	identityPoolSize := ceilDiv(n, credsGroupSize)
+	if identityPoolSize < 1 {
+		identityPoolSize = 1
+	}
+	udp := cUseUdp != 0
+	manualCaptchaOnly.Store(cManualCaptcha != 0)
+	if manualCaptchaOnly.Load() {
+		log.Printf("Manual captcha mode is enabled (auto-solver disabled)")
+	}
+	log.Printf("TURN identity strategy: %d workers, %d workers per identity, %d cached identities", n, credsGroupSize, identityPoolSize)
+	if host != "" || turnPort != "" || !udp {
+		log.Printf("TURN override active: host=%q port=%q udp=%v", host, port, udp)
+	}
 
     ctx, cancel := context.WithCancel(context.Background())
     proxyCancel = cancel
@@ -1227,7 +1268,7 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
         link = link[:idx]
     }
 
-    pooledCreds, resetCreds := poolCreds(getCreds, n)
+    pooledCreds, resetCreds := poolCreds(getCreds, identityPoolSize)
     params := &turnParams{
         host:       host,
         port:       port,

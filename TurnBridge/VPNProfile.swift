@@ -7,6 +7,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var peerAddr: String
     var listenAddr: String
     var nValue: Int
+    var credsGroupSize: Int
     var wgQuickConfig: String
     var turnHost: String
     var turnPort: String
@@ -19,6 +20,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case peerAddr
         case listenAddr
         case nValue
+        case credsGroupSize
         case wgQuickConfig
         case turnHost
         case turnPort
@@ -31,7 +33,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         vkLink: String = "",
         peerAddr: String = "",
         listenAddr: String = "127.0.0.1:9000",
-        nValue: Int = 16,
+        nValue: Int = 10,
+        credsGroupSize: Int = 12,
         wgQuickConfig: String = "",
         turnHost: String = "",
         turnPort: String = "",
@@ -43,6 +46,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.peerAddr = peerAddr
         self.listenAddr = listenAddr
         self.nValue = nValue
+        self.credsGroupSize = credsGroupSize
         self.wgQuickConfig = wgQuickConfig
         self.turnHost = turnHost
         self.turnPort = turnPort
@@ -56,7 +60,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         vkLink = try container.decodeIfPresent(String.self, forKey: .vkLink) ?? ""
         peerAddr = try container.decodeIfPresent(String.self, forKey: .peerAddr) ?? ""
         listenAddr = try container.decodeIfPresent(String.self, forKey: .listenAddr) ?? "127.0.0.1:9000"
-        nValue = try container.decodeIfPresent(Int.self, forKey: .nValue) ?? 16
+        nValue = try container.decodeIfPresent(Int.self, forKey: .nValue) ?? 10
+        credsGroupSize = max(try container.decodeIfPresent(Int.self, forKey: .credsGroupSize) ?? 12, 1)
         wgQuickConfig = try container.decodeIfPresent(String.self, forKey: .wgQuickConfig) ?? ""
         turnHost = try container.decodeIfPresent(String.self, forKey: .turnHost) ?? ""
         turnPort = try container.decodeIfPresent(String.self, forKey: .turnPort) ?? ""
