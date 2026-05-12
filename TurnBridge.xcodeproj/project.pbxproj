@@ -72,6 +72,7 @@
 		B1A1C0012F0000000000000E /* Exceptions for "VBridge" folder in "VBridgeWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ControlIntents.swift,
 				VBridgeLiveActivity.swift,
 			);
 			target = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;
