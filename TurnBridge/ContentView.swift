@@ -805,6 +805,9 @@ struct ContentView: View {
     private func refreshWidgetTimelines() {
 #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+        if #available(iOS 18.0, *) {
+            ControlCenter.shared.reloadControls(ofKind: VBridgeControlKind.connect)
+        }
 #endif
     }
 
