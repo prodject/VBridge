@@ -12,9 +12,6 @@ struct AboutView: View {
                 .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
                 .padding(.top, 40)
             
-            Text("VBridge")
-                .font(.system(size: 34, weight: .bold, design: .default))
-            
             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                 .foregroundColor(.secondary)
             
@@ -65,26 +62,6 @@ struct AboutView: View {
                     .cornerRadius(12)
                 }
 
-                Link(destination: URL(string: "https://github.com/WINGS-N")!) {
-                    HStack {
-                        Image(systemName: "person.crop.square")
-                            .font(.system(size: 18, weight: .medium))
-                            .frame(width: 30)
-
-                        Text("WINGS-N")
-                            .font(.system(size: 16, weight: .medium))
-
-                        Spacer()
-
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .foregroundColor(.primary)
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(12)
-                }
             }
             .padding(.horizontal, 40)
 

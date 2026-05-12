@@ -179,10 +179,38 @@ struct SettingsView: View {
 
     private func normalizeScannedText(_ input: String) -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let decoded = decodeAmneziaScannedText(trimmed) {
+            return decoded
+        }
         if trimmed.contains("\\n") && !trimmed.contains("\n") {
             return trimmed.replacingOccurrences(of: "\\n", with: "\n")
         }
         return trimmed
+    }
+
+    private func decodeAmneziaScannedText(_ input: String) -> String? {
+        let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        if normalized.contains("[Interface]") || normalized.contains("[Peer]") {
+            return nil
+        }
+
+        guard let data = Data(base64Encoded: normalized, options: [.ignoreUnknownCharacters])
+                ?? Data(base64Encoded: normalized.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/"), options: [.ignoreUnknownCharacters]),
+              let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else {
+            return nil
+        }
+
+        let candidates = [decoded, normalized]
+        for candidate in candidates {
+            if let range = candidate.range(of: "[Interface]") {
+                let config = String(candidate[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if config.contains("[Peer]") {
+                    return config
+                }
+            }
+        }
+        return nil
     }
 
     private func generateQuickImportLink() {
