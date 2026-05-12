@@ -239,6 +239,9 @@ private struct WidgetSnapshot: Equatable {
 
     static func load() -> WidgetSnapshot {
         let logSnapshot = loadFromLogs()
+        if let sharedSnapshot = VBridgeWidgetSnapshotStore.load() {
+            return WidgetSnapshot(sharedSnapshot: sharedSnapshot, fallback: logSnapshot)
+        }
         if let liveState = VBridgeLiveActivityStore.load() {
             return WidgetSnapshot(
                 liveSnapshot: liveState,
@@ -357,6 +360,26 @@ private struct WidgetSnapshot: Equatable {
             self.pings = fallback?.pings ?? PingSample.placeholderSamples
         }
         self.lastUpdated = liveSnapshot.content.updatedAt
+    }
+
+    init(sharedSnapshot: VBridgeWidgetSnapshot, fallback: WidgetSnapshot?) {
+        let state = State(rawValue: sharedSnapshot.phase.rawValue) ?? .unknown
+        self.profileName = sharedSnapshot.profileName
+        self.state = state
+        self.activeConnections = sharedSnapshot.activeConnections ?? fallback?.activeConnections
+        self.totalConnections = sharedSnapshot.totalConnections ?? fallback?.totalConnections
+        self.relayIP = sharedSnapshot.relayIP ?? fallback?.relayIP
+        self.estimatedRemainingSeconds = sharedSnapshot.estimatedRemainingSeconds ?? fallback?.estimatedRemainingSeconds
+        self.downloadSpeedMbps = sharedSnapshot.downloadSpeedMbps ?? fallback?.downloadSpeedMbps
+        self.uploadSpeedMbps = sharedSnapshot.uploadSpeedMbps ?? fallback?.uploadSpeedMbps
+        self.ispName = sharedSnapshot.ispName ?? fallback?.ispName
+        self.ipAddress = sharedSnapshot.ipAddress ?? fallback?.ipAddress
+        if let pingSamples = sharedSnapshot.pingSamples {
+            self.pings = pingSamples.map(PingSample.init(shared:))
+        } else {
+            self.pings = fallback?.pings ?? PingSample.placeholderSamples
+        }
+        self.lastUpdated = sharedSnapshot.updatedAt
     }
 
     private func speedText(_ value: Double?, fallback: String) -> String {

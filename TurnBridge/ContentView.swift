@@ -827,7 +827,11 @@ struct ContentView: View {
     private func schedulePendingShortcutActionConsumption() {
         pendingShortcutActionTask?.cancel()
         pendingShortcutActionTask = Task {
-            for _ in 0..<6 {
+            if await MainActor.run(body: consumePendingShortcutActionIfReady) {
+                return
+            }
+
+            for _ in 0..<40 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard !Task.isCancelled else { return }
                 if await MainActor.run(body: consumePendingShortcutActionIfReady) {

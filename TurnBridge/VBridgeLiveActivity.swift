@@ -147,6 +147,69 @@ struct VBridgeLiveActivitySnapshot: Codable, Hashable {
 }
 
 @available(iOS 16.1, *)
+struct VBridgeWidgetSnapshot: Codable, Hashable {
+    var profileName: String
+    var phase: VBridgeLiveActivityPhase
+    var activeConnections: Int?
+    var totalConnections: Int?
+    var relayIP: String?
+    var estimatedRemainingSeconds: Int?
+    var downloadSpeedMbps: Double?
+    var uploadSpeedMbps: Double?
+    var ispName: String?
+    var ipAddress: String?
+    var pingSamples: [VBridgePingSample]?
+    var updatedAt: Date
+}
+
+@available(iOS 16.1, *)
+enum VBridgeWidgetSnapshotStore {
+    private static let appGroupID = "group.com.prodject.vbridge"
+    private static let snapshotKey = "vbridge.widget.snapshot"
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    private static var defaults: UserDefaults? {
+        UserDefaults(suiteName: appGroupID)
+    }
+
+    static func load() -> VBridgeWidgetSnapshot? {
+        guard let data = defaults?.data(forKey: snapshotKey) else { return nil }
+        return try? decoder.decode(VBridgeWidgetSnapshot.self, from: data)
+    }
+
+    static func save(_ snapshot: VBridgeWidgetSnapshot) {
+        guard let defaults,
+              let data = try? encoder.encode(snapshot) else { return }
+        defaults.set(data, forKey: snapshotKey)
+        defaults.synchronize()
+        reloadWidgetTimelinesIfAvailable()
+    }
+
+    static func clear() {
+        defaults?.removeObject(forKey: snapshotKey)
+        defaults?.synchronize()
+        reloadWidgetTimelinesIfAvailable()
+    }
+
+    private static func reloadWidgetTimelinesIfAvailable() {
+#if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
+#endif
+    }
+}
+
+@available(iOS 16.1, *)
 enum VBridgeLiveActivityStore {
     private static let appGroupID = "group.com.prodject.vbridge"
     private static let snapshotKey = "vbridge.live.activity.snapshot"
@@ -177,6 +240,22 @@ enum VBridgeLiveActivityStore {
         guard let data = try? encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
         defaults.synchronize()
+        VBridgeWidgetSnapshotStore.save(
+            VBridgeWidgetSnapshot(
+                profileName: snapshot.profileName,
+                phase: snapshot.content.phase,
+                activeConnections: snapshot.content.activeConnections,
+                totalConnections: snapshot.content.totalConnections,
+                relayIP: snapshot.content.relayIP,
+                estimatedRemainingSeconds: snapshot.content.estimatedRemainingSeconds,
+                downloadSpeedMbps: snapshot.content.downloadSpeedMbps,
+                uploadSpeedMbps: snapshot.content.uploadSpeedMbps,
+                ispName: snapshot.content.ispName,
+                ipAddress: snapshot.content.ipAddress,
+                pingSamples: snapshot.content.pingSamples,
+                updatedAt: snapshot.content.updatedAt
+            )
+        )
         reloadWidgetTimelinesIfAvailable()
     }
 
@@ -271,6 +350,8 @@ enum VBridgeLiveActivityStore {
 
     static func clear() {
         defaults?.removeObject(forKey: snapshotKey)
+        defaults?.synchronize()
+        VBridgeWidgetSnapshotStore.clear()
     }
 
     private static func reloadWidgetTimelinesIfAvailable() {

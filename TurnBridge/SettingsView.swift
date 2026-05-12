@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Foundation
 
 struct SettingsView: View {
     @ObservedObject var store: ProfileStore
@@ -195,21 +196,75 @@ struct SettingsView: View {
             return nil
         }
 
-        guard let data = Data(base64Encoded: normalized, options: [.ignoreUnknownCharacters])
-                ?? Data(base64Encoded: normalized.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/"), options: [.ignoreUnknownCharacters]),
-              let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else {
-            return nil
-        }
-
-        let candidates = [decoded, normalized]
-        for candidate in candidates {
-            if let range = candidate.range(of: "[Interface]") {
-                let config = String(candidate[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if config.contains("[Peer]") {
-                    return config
-                }
+        for candidate in amneziaBase64Candidates(from: normalized) {
+            guard let data = decodeBase64Payload(candidate) else { continue }
+            if let config = extractWireGuardConfig(from: data) {
+                return config
             }
         }
+        return nil
+    }
+
+    private func amneziaBase64Candidates(from input: String) -> [String] {
+        let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let compact = raw
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: " ", with: "")
+
+        let schemeSplitters = ["://", "wg://", "awg://", "amnezia://", "amneziawg://"]
+        var candidates = [compact]
+
+        for splitter in schemeSplitters {
+            if let range = compact.range(of: splitter) {
+                candidates.append(String(compact[range.upperBound...]))
+            }
+        }
+
+        if let queryIndex = compact.firstIndex(of: "?") {
+            candidates.append(String(compact[..<queryIndex]))
+        }
+
+        var uniqueCandidates: [String] = []
+        for value in candidates {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !uniqueCandidates.contains(trimmed) else { continue }
+            uniqueCandidates.append(trimmed)
+        }
+        return uniqueCandidates
+    }
+
+    private func decodeBase64Payload(_ input: String) -> Data? {
+        let sanitized = input
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        guard !sanitized.isEmpty else { return nil }
+
+        let remainder = sanitized.count % 4
+        let padded = remainder == 0 ? sanitized : sanitized + String(repeating: "=", count: 4 - remainder)
+        return Data(base64Encoded: padded, options: [.ignoreUnknownCharacters])
+    }
+
+    private func extractWireGuardConfig(from data: Data) -> String? {
+        let marker = Data("[Interface]".utf8)
+        let peerMarker = Data("[Peer]".utf8)
+
+        if let interfaceRange = data.range(of: marker) {
+            let sliced = data[interfaceRange.lowerBound...]
+            guard sliced.range(of: peerMarker) != nil,
+                  let decoded = String(data: sliced, encoding: .utf8) ?? String(data: sliced, encoding: .ascii) else {
+                return nil
+            }
+            return decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii),
+           let range = decoded.range(of: "[Interface]") {
+            let config = String(decoded[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return config.contains("[Peer]") ? config : nil
+        }
+
         return nil
     }
 
