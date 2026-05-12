@@ -74,6 +74,7 @@
 			membershipExceptions = (
 				ControlIntents.swift,
 				PendingShortcutActionStore.swift,
+				VBridgeConnectControlWidget.swift,
 				VBridgeLiveActivity.swift,
 			);
 			target = B1A1C0012F00000000000006 /* VBridgeWidgetExtension */;

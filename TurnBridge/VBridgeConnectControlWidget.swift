@@ -13,13 +13,10 @@ struct VBridgeConnectControlWidget: ControlWidget {
                 "VBridge",
                 isOn: isConnected,
                 action: ToggleVPNControlIntent()
-            ) { isOn in
-                Label(
-                    isOn ? "Connected" : "Disconnected",
-                    systemImage: isOn ? "lock.shield.fill" : "lock.shield"
-                )
-                .controlWidgetActionHint(isOn ? "Disconnect the last used profile" : "Connect the last used profile")
-                .controlWidgetStatus(isOn ? "Connected" : "Disconnected")
+            ) {
+                Image(systemName: isConnected ? "wave.3.right.circle.fill" : "wave.3.right.circle")
+                    .controlWidgetActionHint(isConnected ? "Disconnect the last used profile" : "Connect the last used profile")
+                    .controlWidgetStatus(isConnected ? "Connected" : "Disconnected")
             }
             .tint(.blue)
         }

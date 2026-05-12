@@ -30,8 +30,8 @@ struct VBridgeControlValueProvider: ControlValueProvider {
 struct ToggleVPNControlIntent: SetValueIntent {
     static var title: LocalizedStringResource = "VBridge VPN"
     static var description = IntentDescription("Opens VBridge and connects or disconnects the last used profile.")
-    static var openAppWhenRun = true
     static var isDiscoverable = true
+    static var supportedModes: IntentModes { .foreground(.immediate) }
 
     @Parameter(title: "Connected")
     var value: Bool
@@ -40,4 +40,9 @@ struct ToggleVPNControlIntent: SetValueIntent {
         PendingShortcutActionStore.store(value ? .connect : .disconnect)
         return .result()
     }
+}
+
+@available(iOS 18.0, deprecated)
+extension ToggleVPNControlIntent {
+    static var openAppWhenRun: Bool { true }
 }
