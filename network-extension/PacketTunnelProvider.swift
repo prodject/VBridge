@@ -7,10 +7,12 @@ import NetworkExtension
 import WireGuardKit
 import WireGuardKitGo
 import os
+import Network
 
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
 private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
+private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
@@ -56,6 +58,24 @@ enum PacketTunnelProviderError: String, Error {
     case cantParseWgQuickConfig
 }
 
+private enum SplitTunnelMode: String {
+    case direct
+    case tunnel
+}
+
+private struct SplitTunnelConfiguration {
+    let enabled: Bool
+    let mode: SplitTunnelMode
+    let rules: [String]
+}
+
+private struct CompiledSplitTunnelRules {
+    var ipRanges: [IPAddressRange]
+    var exactDomains: [String]
+    var wildcardDomains: [String]
+    var ignoredRules: [String]
+}
+
 private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<CChar>?) -> Void = { context, level, messageCStr in
     guard let cStr = messageCStr else { return }
     let message = String(cString: cStr).trimmingCharacters(in: .newlines)
@@ -98,6 +118,221 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             || interface.specialJunk5 != nil
     }
 
+    private func splitTunnelConfiguration(from providerConfiguration: [String: Any]) -> SplitTunnelConfiguration {
+        let enabled = (providerConfiguration["splitTunnelEnabled"] as? Bool) ?? false
+        let mode = SplitTunnelMode(rawValue: (providerConfiguration["splitTunnelMode"] as? String) ?? "") ?? .direct
+        let rules = (providerConfiguration["splitTunnelRules"] as? [String]) ?? []
+        return SplitTunnelConfiguration(enabled: enabled, mode: mode, rules: rules)
+    }
+
+    private func applySplitTunnelConfiguration(_ splitTunnel: SplitTunnelConfiguration, to tunnelConfiguration: TunnelConfiguration) {
+        guard splitTunnel.enabled, !splitTunnel.rules.isEmpty else { return }
+
+        let compiled = compileSplitTunnelRules(splitTunnel.rules)
+        let resolvedDomainRanges = resolveRanges(forDomains: compiled.exactDomains)
+        let concreteRanges = deduplicatedRanges(compiled.ipRanges + resolvedDomainRanges)
+
+        let runtimeMatchDomains = deduplicatedStrings(
+            compiled.exactDomains + compiled.wildcardDomains.map { String($0.dropFirst(2)) }
+        )
+
+        if splitTunnel.mode == .direct {
+            for index in tunnelConfiguration.peers.indices {
+                tunnelConfiguration.peers[index].excludeIPs = deduplicatedRanges(
+                    tunnelConfiguration.peers[index].excludeIPs + concreteRanges
+                )
+            }
+        } else {
+            let dnsRanges = tunnelConfiguration.interface.dns.compactMap {
+                IPAddressRange(from: $0.stringRepresentation)
+            }
+            let tunnelRanges = deduplicatedRanges(concreteRanges + dnsRanges)
+
+            if !runtimeMatchDomains.isEmpty {
+                let customDomains = runtimeMatchDomains.map { splitTunnelMatchDomainPrefix + $0 }
+                tunnelConfiguration.interface.dnsSearch = deduplicatedStrings(
+                    tunnelConfiguration.interface.dnsSearch + customDomains
+                )
+            }
+
+            if !tunnelRanges.isEmpty {
+                for index in tunnelConfiguration.peers.indices {
+                    tunnelConfiguration.peers[index].allowedIPs = tunnelRanges
+                }
+            }
+        }
+
+        if !compiled.ignoredRules.isEmpty {
+            SharedLogger.warning(
+                "Split tunneling ignored unsupported rules: \(compiled.ignoredRules.joined(separator: ", "))",
+                source: .tunnel
+            )
+        }
+
+        if !compiled.wildcardDomains.isEmpty {
+            SharedLogger.warning(
+                "Wildcard domain rules are best-effort. DNS matching is applied, but IP routes are only created for explicit IP/CIDR and exact domains.",
+                source: .tunnel
+            )
+        }
+
+        SharedLogger.info(
+            "Split tunneling active mode=\(splitTunnel.mode.rawValue) rules=\(splitTunnel.rules.count) concreteRoutes=\(concreteRanges.count) exactDomains=\(compiled.exactDomains.count) wildcardDomains=\(compiled.wildcardDomains.count)",
+            source: .tunnel
+        )
+    }
+
+    private func compileSplitTunnelRules(_ rawRules: [String]) -> CompiledSplitTunnelRules {
+        var ipRanges: [IPAddressRange] = []
+        var exactDomains: [String] = []
+        var wildcardDomains: [String] = []
+        var ignoredRules: [String] = []
+
+        for rawRule in rawRules {
+            let rule = rawRule.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rule.isEmpty else { continue }
+
+            if let range = IPAddressRange(from: rule) {
+                ipRanges.append(range)
+                continue
+            }
+
+            let lowered = rule.lowercased()
+            if lowered.hasPrefix("*.") {
+                let suffix = String(lowered.dropFirst(2))
+                if isValidDomain(suffix) {
+                    wildcardDomains.append("*.\(suffix)")
+                } else {
+                    ignoredRules.append(rule)
+                }
+                continue
+            }
+
+            if isValidDomain(lowered) {
+                exactDomains.append(lowered)
+                continue
+            }
+
+            ignoredRules.append(rule)
+        }
+
+        return CompiledSplitTunnelRules(
+            ipRanges: deduplicatedRanges(ipRanges),
+            exactDomains: deduplicatedStrings(exactDomains),
+            wildcardDomains: deduplicatedStrings(wildcardDomains),
+            ignoredRules: deduplicatedStrings(ignoredRules)
+        )
+    }
+
+    private func resolveRanges(forDomains domains: [String]) -> [IPAddressRange] {
+        guard !domains.isEmpty else { return [] }
+
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 12
+
+        let lock = NSLock()
+        var results: [IPAddressRange] = []
+
+        for domain in domains {
+            queue.addOperation {
+                let resolved = self.resolveDomain(domain)
+                guard !resolved.isEmpty else { return }
+                lock.lock()
+                results.append(contentsOf: resolved)
+                lock.unlock()
+            }
+        }
+
+        queue.waitUntilAllOperationsAreFinished()
+        return deduplicatedRanges(results)
+    }
+
+    private func resolveDomain(_ domain: String) -> [IPAddressRange] {
+        var hints = addrinfo(
+            ai_flags: AI_ADDRCONFIG,
+            ai_family: AF_UNSPEC,
+            ai_socktype: SOCK_STREAM,
+            ai_protocol: IPPROTO_TCP,
+            ai_addrlen: 0,
+            ai_canonname: nil,
+            ai_addr: nil,
+            ai_next: nil
+        )
+
+        var infoPointer: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(domain, nil, &hints, &infoPointer)
+        guard status == 0, let firstInfo = infoPointer else {
+            SharedLogger.warning("Split tunnel DNS resolve failed for \(domain)", source: .tunnel)
+            return []
+        }
+        defer { freeaddrinfo(firstInfo) }
+
+        var ranges: [IPAddressRange] = []
+        var pointer: UnsafeMutablePointer<addrinfo>? = firstInfo
+
+        while let info = pointer {
+            let family = info.pointee.ai_family
+            if family == AF_INET, let sockaddr = info.pointee.ai_addr {
+                var address = sockaddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                if inet_ntop(AF_INET, &address, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil,
+                   let range = IPAddressRange(from: String(cString: buffer)) {
+                    ranges.append(range)
+                }
+            } else if family == AF_INET6, let sockaddr = info.pointee.ai_addr {
+                var address = sockaddr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_addr }
+                var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                if inet_ntop(AF_INET6, &address, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil,
+                   let range = IPAddressRange(from: String(cString: buffer)) {
+                    ranges.append(range)
+                }
+            }
+            pointer = info.pointee.ai_next
+        }
+
+        return deduplicatedRanges(ranges)
+    }
+
+    private func deduplicatedRanges(_ ranges: [IPAddressRange]) -> [IPAddressRange] {
+        var seen = Set<IPAddressRange>()
+        var deduplicated: [IPAddressRange] = []
+        for range in ranges where !seen.contains(range) {
+            seen.insert(range)
+            deduplicated.append(range)
+        }
+        return deduplicated
+    }
+
+    private func deduplicatedStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var deduplicated: [String] = []
+        for value in values where !seen.contains(value) {
+            seen.insert(value)
+            deduplicated.append(value)
+        }
+        return deduplicated
+    }
+
+    private func isValidDomain(_ value: String) -> Bool {
+        guard value.contains("."), !value.hasPrefix("."), !value.hasSuffix(".") else {
+            return false
+        }
+
+        let labels = value.split(separator: ".")
+        guard labels.count >= 2 else { return false }
+
+        for label in labels {
+            guard !label.isEmpty, label.count <= 63 else { return false }
+            guard label.first != "-", label.last != "-" else { return false }
+            let isValid = label.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "-"
+            }
+            guard isValid else { return false }
+        }
+
+        return true
+    }
+
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         sharedLogger.log("=== Starting tunnel ===")
@@ -127,6 +362,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
             return
         }
+
+        let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
+        applySplitTunnelConfiguration(splitTunnel, to: tunnelConfiguration)
 
         guard let vkLink = providerConfiguration["vkLink"] as? String,
               let peerAddr = providerConfiguration["peerAddr"] as? String,

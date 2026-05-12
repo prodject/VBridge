@@ -150,6 +150,7 @@ struct ContentView: View {
     @State private var alertMessage = ""
     @State private var connectWatchdogTask: Task<Void, Never>?
     @State private var settingsSheet: SettingsSheet?
+    @State private var showSplitTunnelSheet = false
     @StateObject private var captchaBridge = CaptchaBridge()
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
@@ -324,6 +325,16 @@ struct ContentView: View {
                             .foregroundColor(vpnStatus == .disconnected && store.selectedProfile != nil ? .primary : .secondary)
                     }
 
+                    Button(action: {
+                        if vpnStatus == .disconnected {
+                            showSplitTunnelSheet = true
+                        }
+                    }) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.title3)
+                            .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+                    }
+
                     NavigationLink(destination: GlobalSettingsView()) {
                         Image(systemName: "gearshape.fill")
                             .font(.title3)
@@ -334,6 +345,11 @@ struct ContentView: View {
             .sheet(item: $settingsSheet) { sheet in
                 NavigationStack {
                     SettingsView(store: store, profileID: sheet.profileID, isNewProfile: sheet.isNew)
+                }
+            }
+            .sheet(isPresented: $showSplitTunnelSheet) {
+                NavigationStack {
+                    SplitTunnelSettingsView(showsDoneButton: true)
                 }
             }
             .sheet(item: $captchaBridge.activeRequest, onDismiss: {

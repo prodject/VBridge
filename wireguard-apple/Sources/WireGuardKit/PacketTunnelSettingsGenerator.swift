@@ -13,6 +13,8 @@ import WireGuardKitC
 typealias EndpointResolutionResult = Result<(Endpoint, Endpoint), DNSResolutionError>
 
 class PacketTunnelSettingsGenerator {
+    static let runtimeMatchDomainPrefix = "__vbridge_match_domain__:"
+
     let tunnelConfiguration: TunnelConfiguration
     let resolvedEndpoints: [Endpoint?]
 
@@ -135,8 +137,15 @@ class PacketTunnelSettingsGenerator {
         if !tunnelConfiguration.interface.dnsSearch.isEmpty || !tunnelConfiguration.interface.dns.isEmpty {
             let dnsServerStrings = tunnelConfiguration.interface.dns.map { $0.stringRepresentation }
             let dnsSettings = NEDNSSettings(servers: dnsServerStrings)
-            dnsSettings.searchDomains = tunnelConfiguration.interface.dnsSearch
-            if !tunnelConfiguration.interface.dns.isEmpty {
+            let runtimeMatchDomains = tunnelConfiguration.interface.dnsSearch.compactMap { value -> String? in
+                guard value.hasPrefix(Self.runtimeMatchDomainPrefix) else { return nil }
+                return String(value.dropFirst(Self.runtimeMatchDomainPrefix.count))
+            }
+            let searchDomains = tunnelConfiguration.interface.dnsSearch.filter { !$0.hasPrefix(Self.runtimeMatchDomainPrefix) }
+            dnsSettings.searchDomains = searchDomains
+            if !runtimeMatchDomains.isEmpty {
+                dnsSettings.matchDomains = runtimeMatchDomains
+            } else if !tunnelConfiguration.interface.dns.isEmpty {
                 dnsSettings.matchDomains = [""] // All DNS queries must first go through the tunnel's DNS
             }
             networkSettings.dnsSettings = dnsSettings
