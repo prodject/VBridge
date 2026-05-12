@@ -138,6 +138,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         let requestedNValue = Int32(nValueInt)
+        let credsGroupSize = Int32(max((providerConfiguration["credsGroupSize"] as? Int) ?? 12, 1))
         let useSingleProxyWorker = usesAmneziaObfuscation(tunnelConfiguration)
         let nValue = useSingleProxyWorker ? Int32(1) : requestedNValue
         let manualCaptcha = (providerConfiguration["manualCaptcha"] as? Bool) ?? false
@@ -151,14 +152,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 source: .tunnel
             )
         }
-        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), ManualCaptcha: \(manualCaptcha), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
+        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), Workers/Identity: \(credsGroupSize), ManualCaptcha: \(manualCaptcha), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
         SharedLogger.info("Starting TURN proxy...", source: .tunnel)
 
         ProxySetLogger(nil, goProxyCLoggerCallback)
         ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
 
         DispatchQueue.global(qos: .userInteractive).async {
-            StartProxy(vkLink, peerAddr, listenAddr, nValue, manualCaptcha ? 1 : 0, turnHost, turnPort, useUdp ? 1 : 0)
+            StartProxy(vkLink, peerAddr, listenAddr, nValue, credsGroupSize, manualCaptcha ? 1 : 0, turnHost, turnPort, useUdp ? 1 : 0)
         }
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in

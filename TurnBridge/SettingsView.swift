@@ -42,7 +42,8 @@ struct SettingsView: View {
                     .disableAutocorrection(true)
 
                 Stepper("Connections (n): \(profile.nValue)", value: binding(\.nValue), in: 1...32)
-                Text("Higher values increase parallel TURN sessions. 16 is a good default for VK; lower values are usually more stable.")
+                Stepper("Workers per TURN identity: \(profile.credsGroupSize)", value: binding(\.credsGroupSize), in: 1...32)
+                Text("`n` controls total parallel TURN sessions. `Workers per TURN identity` controls how many workers share the same VK/TURN credentials. The WINGSV-style stable default is 10 sessions with 12 workers per identity.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -191,6 +192,7 @@ struct SettingsView: View {
             "peer": profile.peerAddr,
             "listen": profile.listenAddr,
             "n": profile.nValue,
+            "credsGroupSize": profile.credsGroupSize,
             "wg": profile.wgQuickConfig,
             "turnHost": profile.turnHost,
             "turnPort": profile.turnPort,
