@@ -38,6 +38,10 @@ enum SplitTunnelStorage {
     static let modeKey = "splitTunnelMode"
     static let rulesKey = "splitTunnelRules"
     static let createListURL = "https://iplist.opencck.org/"
+    static let githubCIDRSourceKey = "splitTunnelSource.githubCIDR"
+    static let githubDomainSourceKey = "splitTunnelSource.githubDomain"
+    static let githubCIDRRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/cidrwhitelist.txt"
+    static let githubDomainRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/whitelist.txt"
 
     static func load() -> SplitTunnelSettings {
         let defaults = preferredDefaults()
@@ -88,6 +92,25 @@ enum SplitTunnelStorage {
     static func merge(_ incomingRules: [String], into settings: inout SplitTunnelSettings) {
         settings.rules = deduplicatedRules(settings.rules + incomingRules)
         save(settings)
+    }
+
+    static func replaceRules(
+        fromSource sourceKey: String,
+        with incomingRules: [String],
+        into settings: inout SplitTunnelSettings
+    ) {
+        let defaultsList = destinationDefaults()
+        let previousRules = preferredDefaults().stringArray(forKey: sourceKey) ?? []
+        let previousRuleSet = Set(deduplicatedRules(previousRules))
+        let filteredExisting = settings.rules.filter { !previousRuleSet.contains($0) }
+        let normalizedIncoming = deduplicatedRules(incomingRules)
+
+        settings.rules = deduplicatedRules(filteredExisting + normalizedIncoming)
+        save(settings)
+
+        for defaults in defaultsList {
+            defaults.set(normalizedIncoming, forKey: sourceKey)
+        }
     }
 
     static func removeRule(at offsets: IndexSet, from settings: inout SplitTunnelSettings) {
@@ -308,6 +331,7 @@ struct SplitTunnelSettingsView: View {
     let showsDoneButton: Bool
 
     @State private var settings = SplitTunnelStorage.load()
+    @State private var isPullingGitHubList = false
     @State private var errorMessage = ""
     @State private var showErrorAlert = false
 
@@ -364,6 +388,46 @@ struct SplitTunnelSettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                Button(action: {
+                    pullGitHubList(
+                        sourceKey: SplitTunnelStorage.githubCIDRSourceKey,
+                        urlString: SplitTunnelStorage.githubCIDRRawURL
+                    )
+                }) {
+                    VStack(alignment: .leading) {
+                        Text("Pull IP/CIDR from github")
+                        Text("github.com/hxehex/russia-mobile-internet-whitelist")
+                            .font(.caption2.monospaced())
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .disabled(isPullingGitHubList)
+
+                Button(action: {
+                    pullGitHubList(
+                        sourceKey: SplitTunnelStorage.githubDomainSourceKey,
+                        urlString: SplitTunnelStorage.githubDomainRawURL
+                    )
+                }) {
+                    VStack(alignment: .leading) {
+                        Text("Pull DOMAIN whitelist from github")
+                        Text("github.com/hxehex/russia-mobile-internet-whitelist")
+                            .font(.caption2.monospaced())
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .disabled(isPullingGitHubList)
+
+                if isPullingGitHubList {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                        Text("Pulling GitHub list...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             Section(header: Text("Formats")) {
@@ -417,6 +481,25 @@ struct SplitTunnelSettingsView: View {
             return
         }
         openURL(url)
+    }
+
+    private func pullGitHubList(sourceKey: String, urlString: String) {
+        isPullingGitHubList = true
+        Task {
+            do {
+                let rules = try await SplitTunnelStorage.rules(fromRemoteURLString: urlString)
+                await MainActor.run {
+                    SplitTunnelStorage.replaceRules(fromSource: sourceKey, with: rules, into: &settings)
+                    isPullingGitHubList = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    showErrorAlert = true
+                    isPullingGitHubList = false
+                }
+            }
+        }
     }
 }
 
