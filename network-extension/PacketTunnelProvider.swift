@@ -12,8 +12,16 @@ import Network
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
 private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
+private let captchaRecoveryStorageKey = "captcha.recovery.request"
+private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.recovery.request.changed" as CFString)
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
+
+private struct CaptchaRecoveryRequest: Codable {
+    let id: String
+    let reason: String
+    let createdAt: TimeInterval
+}
 
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
@@ -54,6 +62,50 @@ private func clearCaptchaRequest() {
     )
 }
 
+private func storeCaptchaRecoveryRequest(reason: String) {
+    guard let groupID = SharedLogger.appGroupID,
+          let defaults = UserDefaults(suiteName: groupID) else {
+        return
+    }
+
+    let request = CaptchaRecoveryRequest(
+        id: UUID().uuidString,
+        reason: reason,
+        createdAt: Date().timeIntervalSince1970
+    )
+    guard let payloadData = try? JSONEncoder().encode(request) else {
+        return
+    }
+
+    defaults.set(payloadData, forKey: captchaRecoveryStorageKey)
+    defaults.synchronize()
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        captchaRecoveryDidChangeNotification,
+        nil,
+        nil,
+        true
+    )
+    sharedLogger.log("[TP]: captcha recovery request published for app UI")
+}
+
+private func clearCaptchaRecoveryRequest() {
+    guard let groupID = SharedLogger.appGroupID,
+          let defaults = UserDefaults(suiteName: groupID) else {
+        return
+    }
+
+    defaults.removeObject(forKey: captchaRecoveryStorageKey)
+    defaults.synchronize()
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        captchaRecoveryDidChangeNotification,
+        nil,
+        nil,
+        true
+    )
+}
+
 enum PacketTunnelProviderError: String, Error {
     case invalidProtocolConfiguration
     case cantParseWgQuickConfig
@@ -80,6 +132,17 @@ private struct CompiledSplitTunnelRules {
 private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<CChar>?) -> Void = { context, level, messageCStr in
     guard let cStr = messageCStr else { return }
     let message = String(cString: cStr).trimmingCharacters(in: .newlines)
+
+    let shouldRequestCaptchaRecovery =
+        message.contains("captcha failed after") ||
+        message.contains("manual captcha proxy solve error") ||
+        message.contains("manual captcha image solve error") ||
+        message.contains("manual captcha timed out") ||
+        message.contains("Fatal manual captcha error")
+
+    if shouldRequestCaptchaRecovery {
+        storeCaptchaRecoveryRequest(reason: message)
+    }
 
     if level == 1 {
         sharedLogger.error("[TP]: \(message, privacy: .public)")
@@ -373,6 +436,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
+        clearCaptchaRecoveryRequest()
 
         guard let protocolConfiguration = self.protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfiguration = protocolConfiguration.providerConfiguration else {
@@ -471,6 +535,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         StopProxy()
         SharedLogger.info("TURN proxy stopped", source: .tunnel)
         clearCaptchaRequest()
+        clearCaptchaRecoveryRequest()
 
         adapter.stop { [weak self] error in
             guard self != nil else { return }

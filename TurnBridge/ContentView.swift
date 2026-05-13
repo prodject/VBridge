@@ -132,6 +132,12 @@ private struct SpeedMeasurementResult {
     var ipAddress: String?
 }
 
+private struct CaptchaRecoveryRequest: Codable, Equatable {
+    let id: String
+    let reason: String
+    let createdAt: TimeInterval
+}
+
 struct ContentView: View {
     var app: VBridge
 
@@ -172,6 +178,8 @@ struct ContentView: View {
     @State private var speedTestRerunProfileName: String?
     @State private var currentConnectivityPings: [ConnectionPingSample] = ConnectionPingSample.placeholderSamples
     @State private var pendingShortcutActionTask: Task<Void, Never>?
+    @State private var captchaRecoveryRestartCount = 0
+    @State private var lastHandledCaptchaRecoveryID: String?
 
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
@@ -183,164 +191,14 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.94, green: 0.93, blue: 0.97).opacity(0.96),
-                        Color(red: 0.86, green: 0.82, blue: 0.96).opacity(0.92),
-                        Color(red: 0.66, green: 0.54, blue: 0.97).opacity(0.86)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-
-                VStack(spacing: 20) {
-                    VStack(spacing: 4) {
-                        Text("VBridge")
-                            .font(.system(size: 44, weight: .bold, design: .default))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.32, green: 0.30, blue: 0.40),
-                                        Color(red: 0.53, green: 0.37, blue: 0.98),
-                                        Color(red: 0.40, green: 0.48, blue: 0.96)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .shadow(color: Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.22), radius: 10, x: 0, y: 5)
-
-                        Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
-                            .font(.system(size: 14, weight: .semibold, design: .default))
-                            .foregroundColor(.secondary)
-
-                        connectionTelemetrySection()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 16)
-
-                    if !store.profiles.isEmpty {
-                        profilePicker
-                            .disabled(vpnStatus != .disconnected)
-                            .padding(16)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16), lineWidth: 1)
-                            )
-                            .padding(.horizontal, 20)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    VStack(spacing: 22) {
-                            Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 112, height: 112)
-                                .foregroundColor(iconColor)
-                            .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
-                            .scaleEffect(vpnStatus == .connecting ? 1.08 : 1.0)
-                            .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
-
-                        Button(action: {
-                            Task { await checkForUpdates(manual: true) }
-                        }) {
-                            HStack(spacing: 8) {
-                                if isCheckingUpdate || isDownloadingUpdate {
-                                    ProgressView()
-                                        .progressViewStyle(.circular)
-                                        .tint(Color(red: 0.53, green: 0.37, blue: 0.98))
-                                        .scaleEffect(0.8)
-                                }
-                                Text(isDownloadingUpdate ? "Downloading update..." : (isCheckingUpdate ? "Checking..." : "Check update"))
-                                    .font(.system(size: 15, weight: .semibold, design: .default))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(updateButtonBackground)
-                            .foregroundColor(updateButtonForeground)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(updateButtonBorder, lineWidth: 1)
-                            )
-                        }
-                        .disabled(isCheckingUpdate || isDownloadingUpdate)
-
-                        Button(action: toggleTunnel) {
-                            Text(buttonText)
-                                .font(.title3.weight(.bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(buttonColor)
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .shadow(color: buttonColor.opacity(0.35), radius: 8, x: 0, y: 5)
-                        }
-                        .disabled(isConnectButtonDisabled)
-
-                    }
-                    .padding(24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 20)
-
-                    Spacer()
-                }
-            }
+            rootContent
             .overlay {
                 if showImportModal {
                     importModalView
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: {
-                    if vpnStatus == .disconnected {
-                        withAnimation { showImportModal = true }
-                    }
-                }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
-                }
-                }
-
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        guard let id = store.selectedProfileID else { return }
-                        if vpnStatus == .disconnected {
-                            settingsSheet = SettingsSheet(profileID: id, isNew: false)
-                        }
-                    }) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.title3)
-                            .foregroundColor(vpnStatus == .disconnected && store.selectedProfile != nil ? .primary : .secondary)
-                    }
-
-                    Button(action: {
-                        if vpnStatus == .disconnected {
-                            showSplitTunnelSheet = true
-                        }
-                    }) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.title3)
-                            .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
-                    }
-
-                    NavigationLink(destination: GlobalSettingsView()) {
-                        Image(systemName: "gearshape.fill")
-                            .font(.title3)
-                            .foregroundColor(.primary)
-                    }
-                }
+                contentToolbar
             }
             .sheet(item: $settingsSheet) { sheet in
                 NavigationStack {
@@ -424,11 +282,17 @@ struct ContentView: View {
                     refreshWidgetTimelines()
                     if newStatus == .connected {
                         isUserInitiatedDisconnect = false
+                        captchaRecoveryRestartCount = 0
+                        clearCaptchaRecoveryRequest()
                         UserNotificationDispatcher.shared.clearConnectionIssueNotification()
                     } else if newStatus == .disconnected, isUserInitiatedDisconnect {
                         isUserInitiatedDisconnect = false
+                        captchaRecoveryRestartCount = 0
+                        clearCaptchaRecoveryRequest()
                         UserNotificationDispatcher.shared.clearConnectionIssueNotification()
                         endLiveActivity(immediate: true)
+                    } else if newStatus == .disconnected {
+                        handleCaptchaRecoveryIfNeeded()
                     }
                     if newStatus != .connecting {
                         cancelConnectWatchdog()
@@ -439,6 +303,204 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(alertMessage)
+            }
+        }
+    }
+
+    private var rootContent: some View {
+        ZStack {
+            backgroundGradient
+
+            VStack(spacing: 20) {
+                headerSection
+                profilePickerSection
+                Spacer(minLength: 0)
+                actionCardSection
+                Spacer()
+            }
+        }
+    }
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.94, green: 0.93, blue: 0.97).opacity(0.96),
+                Color(red: 0.86, green: 0.82, blue: 0.96).opacity(0.92),
+                Color(red: 0.66, green: 0.54, blue: 0.97).opacity(0.86)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    private var headerSection: some View {
+        VStack(spacing: 4) {
+            Text("VBridge")
+                .font(.system(size: 44, weight: .bold, design: .default))
+                .foregroundStyle(titleGradient)
+                .shadow(color: Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.22), radius: 10, x: 0, y: 5)
+
+            Text(appVersionText)
+                .font(.system(size: 14, weight: .semibold, design: .default))
+                .foregroundColor(.secondary)
+
+            connectionTelemetrySection()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 10)
+        .padding(.top, 16)
+    }
+
+    private var titleGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.32, green: 0.30, blue: 0.40),
+                Color(red: 0.53, green: 0.37, blue: 0.98),
+                Color(red: 0.40, green: 0.48, blue: 0.96)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var appVersionText: String {
+        "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")"
+    }
+
+    @ViewBuilder
+    private var profilePickerSection: some View {
+        if !store.profiles.isEmpty {
+            profilePicker
+                .disabled(vpnStatus != .disconnected)
+                .padding(16)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+        }
+    }
+
+    private var actionCardSection: some View {
+        VStack(spacing: 22) {
+            tunnelStatusIcon
+            updateButton
+            connectButton
+        }
+        .padding(24)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    private var tunnelStatusIcon: some View {
+        Image(systemName: vpnStatus == .connected ? "lock.shield.fill" : "lock.shield")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 112, height: 112)
+            .foregroundColor(iconColor)
+            .shadow(color: iconColor.opacity(0.4), radius: vpnStatus == .connected ? 20 : 0)
+            .scaleEffect(vpnStatus == .connecting ? 1.08 : 1.0)
+            .animation(vpnStatus == .connecting ? .easeInOut(duration: 1).repeatForever() : .default, value: vpnStatus)
+    }
+
+    private var updateButton: some View {
+        Button(action: {
+            Task { await checkForUpdates(manual: true) }
+        }) {
+            HStack(spacing: 8) {
+                if isCheckingUpdate || isDownloadingUpdate {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(Color(red: 0.53, green: 0.37, blue: 0.98))
+                        .scaleEffect(0.8)
+                }
+
+                Text(updateButtonText)
+                    .font(.system(size: 15, weight: .semibold, design: .default))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(updateButtonBackground)
+            .foregroundColor(updateButtonForeground)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(updateButtonBorder, lineWidth: 1)
+            )
+        }
+        .disabled(isCheckingUpdate || isDownloadingUpdate)
+    }
+
+    private var updateButtonText: String {
+        if isDownloadingUpdate {
+            return "Downloading update..."
+        }
+        if isCheckingUpdate {
+            return "Checking..."
+        }
+        return "Check update"
+    }
+
+    private var connectButton: some View {
+        Button(action: { toggleTunnel() }) {
+            Text(buttonText)
+                .font(.title3.weight(.bold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(buttonColor)
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: buttonColor.opacity(0.35), radius: 8, x: 0, y: 5)
+        }
+        .disabled(isConnectButtonDisabled)
+    }
+
+    @ToolbarContentBuilder
+    private var contentToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button(action: {
+                if vpnStatus == .disconnected {
+                    withAnimation { showImportModal = true }
+                }
+            }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+            }
+        }
+
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button(action: {
+                guard let id = store.selectedProfileID else { return }
+                if vpnStatus == .disconnected {
+                    settingsSheet = SettingsSheet(profileID: id, isNew: false)
+                }
+            }) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.title3)
+                    .foregroundColor(vpnStatus == .disconnected && store.selectedProfile != nil ? .primary : .secondary)
+            }
+
+            Button(action: {
+                if vpnStatus == .disconnected {
+                    showSplitTunnelSheet = true
+                }
+            }) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.title3)
+                    .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+            }
+
+            NavigationLink(destination: GlobalSettingsView()) {
+                Image(systemName: "gearshape.fill")
+                    .font(.title3)
+                    .foregroundColor(.primary)
             }
         }
     }
@@ -613,7 +675,7 @@ struct ContentView: View {
         return nil
     }
 
-    private func toggleTunnel() {
+    private func toggleTunnel(resetCaptchaRecoveryState: Bool = true) {
         if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
             SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
             isUserInitiatedDisconnect = true
@@ -632,6 +694,10 @@ struct ContentView: View {
             vpnStatus = .disconnecting
         } else {
             guard let profile = store.selectedProfile else { return }
+            if resetCaptchaRecoveryState {
+                captchaRecoveryRestartCount = 0
+                clearCaptchaRecoveryRequest()
+            }
             if let errorMessage = validateConfig(profile) {
                 SharedLogger.warning("Config validation failed: \(errorMessage)")
                 showAlert(title: "Configuration Required", message: errorMessage)
@@ -676,6 +742,46 @@ struct ContentView: View {
             }
             startConnectWatchdog()
         }
+    }
+
+    private func handleCaptchaRecoveryIfNeeded() {
+        guard !isUserInitiatedDisconnect else { return }
+        guard let request = loadCaptchaRecoveryRequest() else { return }
+        guard request.id != lastHandledCaptchaRecoveryID else { return }
+
+        captchaBridge.clear()
+        clearCaptchaRecoveryRequest()
+        lastHandledCaptchaRecoveryID = request.id
+
+        guard captchaRecoveryRestartCount < 1 else {
+            SharedLogger.error("Captcha recovery restart already attempted for current cycle; not retrying automatically")
+            presentConnectionIssue(
+                title: "Captcha Recovery Failed",
+                message: "The tunnel was reset after a captcha failure, but the next start also failed. Try again manually."
+            )
+            return
+        }
+
+        guard store.selectedProfile != nil else {
+            SharedLogger.warning("Captcha recovery requested, but no profile is selected")
+            return
+        }
+
+        captchaRecoveryRestartCount += 1
+        SharedLogger.warning("Captcha session failed; clearing local state and restarting tunnel from scratch")
+        resetSpeedTelemetry()
+        endLiveActivity(immediate: true)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard self.vpnStatus == .disconnected || self.vpnStatus == .invalid else { return }
+            self.restartAfterCaptchaFailure()
+        }
+    }
+
+    private func restartAfterCaptchaFailure() {
+        guard vpnStatus == .disconnected || vpnStatus == .invalid else { return }
+        SharedLogger.info("Restarting tunnel after captcha recovery reset")
+        toggleTunnel(resetCaptchaRecoveryState: false)
     }
 
     private func checkInitialStatus() {
@@ -1200,7 +1306,7 @@ struct ContentView: View {
     }
 
     private func measureCloudflareDownloadSpeed() async -> Double? {
-        let candidateSizes = [1_000_000, 5_000_000, 10_000_000, 25_000_000]
+        let candidateSizes = [250_000, 1_000_000, 5_000_000, 10_000_000]
         var lastMbps: Double?
         for size in candidateSizes {
             guard !Task.isCancelled else { return nil }
@@ -1256,13 +1362,21 @@ struct ContentView: View {
             return nil
         }
 
+        let expectedTransferSeconds = Double(byteCount) * 8.0 / 250_000.0
+        let requestTimeout = min(max(expectedTransferSeconds * 1.5, 20), 90)
+        let resourceTimeout = min(requestTimeout + 15, 120)
+
         let config = URLSessionConfiguration.ephemeral
         config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = resourceTimeout
         let session = URLSession(configuration: config)
 
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: requestTimeout
+        )
         request.httpMethod = "GET"
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
@@ -1285,7 +1399,10 @@ struct ContentView: View {
             let mbps = Double(effectiveBytes) * 8.0 / elapsed / 1_000_000.0
             return (mbps, elapsed)
         } catch {
-            SharedLogger.warning("Speed test download request failed for bytes=\(byteCount): \(error.localizedDescription)")
+            let nsError = error as NSError
+            SharedLogger.warning(
+                "Speed test download request failed for bytes=\(byteCount) code=\(nsError.code): \(error.localizedDescription)"
+            )
             return nil
         }
     }
@@ -1740,6 +1857,23 @@ struct ContentView: View {
         alertTitle = title
         alertMessage = message
         showingAlert = true
+    }
+
+    private func loadCaptchaRecoveryRequest() -> CaptchaRecoveryRequest? {
+        guard let groupID = SharedLogger.appGroupID,
+              let defaults = UserDefaults(suiteName: groupID),
+              let data = defaults.data(forKey: "captcha.recovery.request") else {
+            return nil
+        }
+        return try? JSONDecoder().decode(CaptchaRecoveryRequest.self, from: data)
+    }
+
+    private func clearCaptchaRecoveryRequest() {
+        guard let groupID = SharedLogger.appGroupID,
+              let defaults = UserDefaults(suiteName: groupID) else {
+            return
+        }
+        defaults.removeObject(forKey: "captcha.recovery.request")
     }
 
     private func startConnectWatchdog() {
