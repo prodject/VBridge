@@ -120,6 +120,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func splitTunnelConfiguration(from providerConfiguration: [String: Any]) -> SplitTunnelConfiguration {
+        if let groupID = SharedLogger.appGroupID,
+           let defaults = UserDefaults(suiteName: groupID) {
+            let enabled = defaults.object(forKey: "splitTunnelEnabled") as? Bool ?? false
+            let mode = SplitTunnelMode(rawValue: defaults.string(forKey: "splitTunnelMode") ?? "") ?? .direct
+            let rules = defaults.stringArray(forKey: "splitTunnelRules") ?? []
+            if enabled || !rules.isEmpty || defaults.string(forKey: "splitTunnelMode") != nil {
+                return SplitTunnelConfiguration(enabled: enabled, mode: mode, rules: rules)
+            }
+        }
+
         let enabled = (providerConfiguration["splitTunnelEnabled"] as? Bool) ?? false
         let mode = SplitTunnelMode(rawValue: (providerConfiguration["splitTunnelMode"] as? String) ?? "") ?? .direct
         let rules = (providerConfiguration["splitTunnelRules"] as? [String]) ?? []

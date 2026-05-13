@@ -40,18 +40,33 @@ enum SplitTunnelStorage {
     static let createListURL = "https://iplist.opencck.org/"
 
     static func load() -> SplitTunnelSettings {
-        let defaults = UserDefaults.standard
+        let defaults = preferredDefaults()
         let enabled = defaults.object(forKey: enabledKey) as? Bool ?? false
         let mode = SplitTunnelMode(rawValue: defaults.string(forKey: modeKey) ?? "") ?? .direct
         let rules = defaults.stringArray(forKey: rulesKey) ?? []
-        return SplitTunnelSettings(enabled: enabled, mode: mode, rules: deduplicatedRules(rules))
+        let settings = SplitTunnelSettings(enabled: enabled, mode: mode, rules: deduplicatedRules(rules))
+
+        if defaults !== UserDefaults.standard,
+           settings.rules.isEmpty,
+           defaults.object(forKey: enabledKey) == nil,
+           defaults.string(forKey: modeKey) == nil,
+           let migrated = legacySettingsFromStandardDefaults() {
+            save(migrated)
+            return migrated
+        }
+
+        return settings
     }
 
     static func save(_ settings: SplitTunnelSettings) {
-        let defaults = UserDefaults.standard
-        defaults.set(settings.enabled, forKey: enabledKey)
-        defaults.set(settings.mode.rawValue, forKey: modeKey)
-        defaults.set(deduplicatedRules(settings.rules), forKey: rulesKey)
+        let normalizedRules = deduplicatedRules(settings.rules)
+        let defaultsList = destinationDefaults()
+
+        for defaults in defaultsList {
+            defaults.set(settings.enabled, forKey: enabledKey)
+            defaults.set(settings.mode.rawValue, forKey: modeKey)
+            defaults.set(normalizedRules, forKey: rulesKey)
+        }
     }
 
     static func ruleCountSummary(_ settings: SplitTunnelSettings) -> String {
@@ -230,6 +245,36 @@ enum SplitTunnelStorage {
             result.append(normalized)
         }
         return result
+    }
+
+    private static func preferredDefaults() -> UserDefaults {
+        if let groupID = SharedLogger.appGroupID,
+           let sharedDefaults = UserDefaults(suiteName: groupID) {
+            return sharedDefaults
+        }
+        return UserDefaults.standard
+    }
+
+    private static func destinationDefaults() -> [UserDefaults] {
+        let shared = preferredDefaults()
+        if shared === UserDefaults.standard {
+            return [UserDefaults.standard]
+        }
+        return [shared, UserDefaults.standard]
+    }
+
+    private static func legacySettingsFromStandardDefaults() -> SplitTunnelSettings? {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: enabledKey) != nil
+            || defaults.string(forKey: modeKey) != nil
+            || defaults.stringArray(forKey: rulesKey) != nil else {
+            return nil
+        }
+
+        let enabled = defaults.object(forKey: enabledKey) as? Bool ?? false
+        let mode = SplitTunnelMode(rawValue: defaults.string(forKey: modeKey) ?? "") ?? .direct
+        let rules = deduplicatedRules(defaults.stringArray(forKey: rulesKey) ?? [])
+        return SplitTunnelSettings(enabled: enabled, mode: mode, rules: rules)
     }
 }
 

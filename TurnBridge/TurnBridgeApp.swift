@@ -108,8 +108,6 @@ struct VBridge: App {
             let protocolConfiguration = NETunnelProviderProtocol()
             let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
             protocolConfiguration.providerBundleIdentifier = "\(currentAppBundleId).network-extension"
-            let splitTunnelSettings = SplitTunnelStorage.load()
-
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr
             protocolConfiguration.serverAddress = cleanIP
 
@@ -123,10 +121,7 @@ struct VBridge: App {
                 "manualCaptcha": UserDefaults.standard.bool(forKey: "manualCaptcha"),
                 "turnHost": turnHost,
                 "turnPort": turnPort,
-                "useUdp": useUdp,
-                "splitTunnelEnabled": splitTunnelSettings.enabled,
-                "splitTunnelMode": splitTunnelSettings.mode.rawValue,
-                "splitTunnelRules": splitTunnelSettings.rules
+                "useUdp": useUdp
             ]
 
             let defaults = UserDefaults.standard
