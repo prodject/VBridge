@@ -1129,11 +1129,26 @@ struct ContentView: View {
     private func runSpeedTest() async -> SpeedMeasurementResult {
         SharedLogger.info("Speed test started")
 
-        if let speedcheckerResult = await measureSpeedcheckerSpeedTest() {
+        let speedcheckerResult = await measureSpeedcheckerSpeedTest()
+
+        if let speedcheckerResult, hasMeasuredSpeed(speedcheckerResult) {
             return speedcheckerResult
         }
 
-        SharedLogger.warning("Speedchecker SDK returned no usable result, falling back to Cloudflare speed test")
+        if let speedcheckerResult {
+            SharedLogger.warning("Speedchecker returned ISP/IP only, continuing with Cloudflare speed test")
+            SharedLogger.info(
+                String(
+                    format: "Speedchecker partial result: download=%@ upload=%@ isp=%@ ip=%@",
+                    speedcheckerResult.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    speedcheckerResult.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
+                    speedcheckerResult.ispName ?? "unknown",
+                    speedcheckerResult.ipAddress ?? "unknown"
+                )
+            )
+        } else {
+            SharedLogger.warning("Speedchecker SDK returned no usable result, falling back to Cloudflare speed test")
+        }
 
         let downloadMbps = await measureCloudflareDownloadSpeed()
         if Task.isCancelled {
@@ -1151,13 +1166,23 @@ struct ContentView: View {
             return SpeedMeasurementResult(
                 downloadMbps: downloadMbps,
                 uploadMbps: uploadMbps,
-                ispName: nil,
-                ipAddress: nil
+                ispName: speedcheckerResult?.ispName,
+                ipAddress: speedcheckerResult?.ipAddress
             )
         }
 
         SharedLogger.warning("Cloudflare speed test returned no usable result, falling back to runtime byte sampling")
-        return await measureRuntimeSpeedFallback()
+        let runtimeResult = await measureRuntimeSpeedFallback()
+        return SpeedMeasurementResult(
+            downloadMbps: runtimeResult.downloadMbps,
+            uploadMbps: runtimeResult.uploadMbps,
+            ispName: speedcheckerResult?.ispName ?? runtimeResult.ispName,
+            ipAddress: speedcheckerResult?.ipAddress ?? runtimeResult.ipAddress
+        )
+    }
+
+    private func hasMeasuredSpeed(_ result: SpeedMeasurementResult) -> Bool {
+        result.downloadMbps != nil || result.uploadMbps != nil
     }
 
     private func measureSpeedcheckerSpeedTest() async -> SpeedMeasurementResult? {
