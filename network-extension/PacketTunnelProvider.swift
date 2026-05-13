@@ -13,6 +13,7 @@ let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", c
 private let captchaRequestStorageKey = "captcha.pending.request"
 private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
+private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
 
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
@@ -137,6 +138,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         )
 
         if splitTunnel.mode == .direct {
+            if !runtimeMatchDomains.isEmpty {
+                tunnelConfiguration.interface.dnsSearch = deduplicatedStrings(
+                    tunnelConfiguration.interface.dnsSearch + [splitTunnelDisableGlobalDNSPrefix]
+                )
+            }
             for index in tunnelConfiguration.peers.indices {
                 tunnelConfiguration.peers[index].excludeIPs = deduplicatedRanges(
                     tunnelConfiguration.peers[index].excludeIPs + concreteRanges

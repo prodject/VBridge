@@ -14,6 +14,7 @@ typealias EndpointResolutionResult = Result<(Endpoint, Endpoint), DNSResolutionE
 
 class PacketTunnelSettingsGenerator {
     static let runtimeMatchDomainPrefix = "__vbridge_match_domain__:"
+    static let runtimeDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
 
     let tunnelConfiguration: TunnelConfiguration
     let resolvedEndpoints: [Endpoint?]
@@ -141,11 +142,14 @@ class PacketTunnelSettingsGenerator {
                 guard value.hasPrefix(Self.runtimeMatchDomainPrefix) else { return nil }
                 return String(value.dropFirst(Self.runtimeMatchDomainPrefix.count))
             }
-            let searchDomains = tunnelConfiguration.interface.dnsSearch.filter { !$0.hasPrefix(Self.runtimeMatchDomainPrefix) }
+            let disablesGlobalMatchDomains = tunnelConfiguration.interface.dnsSearch.contains(Self.runtimeDisableGlobalDNSPrefix)
+            let searchDomains = tunnelConfiguration.interface.dnsSearch.filter {
+                !$0.hasPrefix(Self.runtimeMatchDomainPrefix) && $0 != Self.runtimeDisableGlobalDNSPrefix
+            }
             dnsSettings.searchDomains = searchDomains
             if !runtimeMatchDomains.isEmpty {
                 dnsSettings.matchDomains = runtimeMatchDomains
-            } else if !tunnelConfiguration.interface.dns.isEmpty {
+            } else if !disablesGlobalMatchDomains && !tunnelConfiguration.interface.dns.isEmpty {
                 dnsSettings.matchDomains = [""] // All DNS queries must first go through the tunnel's DNS
             }
             networkSettings.dnsSettings = dnsSettings

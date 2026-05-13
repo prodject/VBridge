@@ -37,8 +37,7 @@ enum SplitTunnelStorage {
     static let enabledKey = "splitTunnelEnabled"
     static let modeKey = "splitTunnelMode"
     static let rulesKey = "splitTunnelRules"
-    static let remoteCIDR4AIURL = "https://iplist.opencck.org/?format=text&data=cidr4&group=ai"
-    static let remoteDomainsAIURL = "https://iplist.opencck.org/?format=text&data=domains&group=ai"
+    static let createListURL = "https://iplist.opencck.org/"
 
     static func load() -> SplitTunnelSettings {
         let defaults = UserDefaults.standard
@@ -78,6 +77,11 @@ enum SplitTunnelStorage {
 
     static func removeRule(at offsets: IndexSet, from settings: inout SplitTunnelSettings) {
         settings.rules.remove(atOffsets: offsets)
+        save(settings)
+    }
+
+    static func clearRules(from settings: inout SplitTunnelSettings) {
+        settings.rules.removeAll()
         save(settings)
     }
 
@@ -234,11 +238,11 @@ enum SplitTunnelValidationError: LocalizedError {
 
 struct SplitTunnelSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     let showsDoneButton: Bool
 
     @State private var settings = SplitTunnelStorage.load()
-    @State private var isImportingRemoteList = false
     @State private var errorMessage = ""
     @State private var showErrorAlert = false
 
@@ -286,35 +290,12 @@ struct SplitTunnelSettingsView: View {
 
             Section(header: Text("Create")) {
                 Button(action: {
-                    importRemotePreset(urlString: SplitTunnelStorage.remoteCIDR4AIURL)
+                    openCreateSite()
                 }) {
                     VStack(alignment: .leading) {
-                        Text("Import AI CIDR4 from opencck.org")
-                        Text(SplitTunnelStorage.remoteCIDR4AIURL)
+                        Text("Create new list on opencck.org")
+                        Text(SplitTunnelStorage.createListURL)
                             .font(.caption2.monospaced())
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(isImportingRemoteList)
-
-                Button(action: {
-                    importRemotePreset(urlString: SplitTunnelStorage.remoteDomainsAIURL)
-                }) {
-                    VStack(alignment: .leading) {
-                        Text("Import AI domains from opencck.org")
-                        Text(SplitTunnelStorage.remoteDomainsAIURL)
-                            .font(.caption2.monospaced())
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(isImportingRemoteList)
-
-                if isImportingRemoteList {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                        Text("Importing remote list...")
-                            .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -364,23 +345,13 @@ struct SplitTunnelSettingsView: View {
         )
     }
 
-    private func importRemotePreset(urlString: String) {
-        isImportingRemoteList = true
-        Task {
-            do {
-                let rules = try await SplitTunnelStorage.rules(fromRemoteURLString: urlString)
-                await MainActor.run {
-                    SplitTunnelStorage.merge(rules, into: &settings)
-                    isImportingRemoteList = false
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    showErrorAlert = true
-                    isImportingRemoteList = false
-                }
-            }
+    private func openCreateSite() {
+        guard let url = URL(string: SplitTunnelStorage.createListURL) else {
+            errorMessage = "Unable to open opencck.org."
+            showErrorAlert = true
+            return
         }
+        openURL(url)
     }
 }
 
@@ -395,6 +366,7 @@ private struct SplitTunnelRuleListView: View {
     @State private var isImportingRemoteList = false
     @State private var errorMessage = ""
     @State private var showErrorAlert = false
+    @State private var showClearConfirmation = false
 
     private let importFileTypes: [UTType] = [.plainText, .text]
 
@@ -474,6 +446,14 @@ private struct SplitTunnelRuleListView: View {
                 ShareLink(item: SplitTunnelStorage.exportURL(for: settings)) {
                     Image(systemName: "square.and.arrow.up")
                 }
+
+                if !settings.rules.isEmpty {
+                    Button(role: .destructive, action: {
+                        showClearConfirmation = true
+                    }) {
+                        Image(systemName: "trash")
+                    }
+                }
             }
         }
         .alert("Add Rule", isPresented: $showAddRulePrompt) {
@@ -504,6 +484,14 @@ private struct SplitTunnelRuleListView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
+        }
+        .alert("Clear List?", isPresented: $showClearConfirmation) {
+            Button("Clear", role: .destructive) {
+                SplitTunnelStorage.clearRules(from: &settings)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All split-tunneling rules will be removed.")
         }
         .sheet(isPresented: $showFileImporter) {
             DocumentPicker(

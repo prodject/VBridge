@@ -12,6 +12,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Manual Update Trigger:** Dedicated **Check update** action on the main screen.
 * **Manual Captcha Mode:** Optional mode to disable automatic captcha solving and force manual flow.
 * **Amnezia 2.0 Config Support:** Import and use Amnezia 2.0 `.conf` profiles directly.
+* **Split Tunneling:** App-wide direct / tunnel routing rules for domains, wildcard domains, IPs, and CIDR ranges, with import/export support.
 * **Widget Support:** Small and medium widgets with live connection state, relay IP, and ping dots for Cloudflare / Google / Yandex.
 * **Live Activities / Dynamic Island:** Shows VPN connection progress, compact status, relay IP, and ETA while the app is in the background.
 * **Shortcut Support:** Connect, disconnect, or toggle the VPN from Shortcuts.
@@ -26,6 +27,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
   - Complete WireGuard protocol support with key management, routing, and DNS configuration
   - Full Amnezia WireGuard obfuscation support including jitter parameters (Jc, Jmin, Jmax), packet size obfuscation (S1-S4), and magic headers (H1-H4)
 * **Advanced TURN Controls:** Optional UDP/TCP transport override and TURN host/port override for edge cases and alternate TURN endpoints.
+* **Split-Tunnel Rules:** Choose whether matching traffic bypasses the VPN or whether only matching traffic goes through the VPN. Supports `example.com`, `*.example.com`, `1.2.3.4`, and `1.2.3.0/24`.
 * **Multi-Threaded Proxy:** Default multi-connection mode is tuned for higher throughput, with per-profile control for stability.
 * **1-Click Import:** Quickly import complex configurations via base64-encoded clipboard links (`vbridge://`).
 * **Multi-Profile Management:** Create, edit, and seamlessly switch between multiple VPN configurations using a convenient dropdown picker.
@@ -111,6 +113,24 @@ You can use the included `quick_link.py` script to easily generate valid `vbridg
 4. Open VBridge, tap the `+` icon, select **Paste from Clipboard**, and tap **Connect**.
 
 You can also import an Amnezia WireGuard `.conf` file through **Import from File**. During import, the original `Endpoint` is saved as `Peer Address (IP:Port)`, while the stored WireGuard config is rewritten to use `Endpoint = 127.0.0.1:9000`.
+
+## Split Tunneling
+
+VBridge includes an app-wide **Split-Tunneling** screen available from the main toolbar and from **Settings → Extended Features**.
+
+Supported rules:
+
+* Exact domains: `example.com`
+* Wildcard domains: `*.example.com`
+* Single IP addresses: `1.2.3.4`
+* CIDR ranges: `1.2.3.0/24`
+
+Available modes:
+
+* **Open domains and IPs directly**: matching traffic bypasses the VPN tunnel.
+* **Open domains and IPs through tunnel**: only matching traffic goes through the VPN tunnel.
+
+Lists can be edited manually, imported from local `.txt` files or remote text URLs, and exported as `vbridge-split-data.txt`.
 
 ## Widget and Shortcuts
 
