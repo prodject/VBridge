@@ -47,6 +47,24 @@ type captchaBootstrap struct {
     Settings   *captchaSettingsResponse
 }
 
+type captchaManualRetryRequiredError struct {
+	cause error
+}
+
+func (e *captchaManualRetryRequiredError) Error() string {
+	if e == nil || e.cause == nil {
+		return "manual captcha retry required"
+	}
+	return fmt.Sprintf("manual captcha retry required: %v", e.cause)
+}
+
+func (e *captchaManualRetryRequiredError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 func randomHex(n int) string {
     bytes := make([]byte, n)
     if _, err := rand.Read(bytes); err != nil {
@@ -152,23 +170,11 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError) (string, er
 	successToken, err := callCaptchaNotRobot(ctx, client, profile, sessionToken, hash, initialSettings)
 	if err != nil {
 		log.Printf("[Captcha] Automatic solver failed: %v", err)
-
-		if captchaErr.RedirectUri != "" {
-			log.Printf("[Captcha] Falling back to manual proxy solver...")
-			if token, manualErr := solveCaptchaViaProxy(captchaErr.RedirectUri); manualErr == nil && token != "" {
-				return token, nil
-			} else if manualErr != nil {
-				log.Printf("[Captcha] Manual proxy solver failed: %v", manualErr)
-			}
-		}
-
-		if captchaErr.CaptchaImg != "" {
-			log.Printf("[Captcha] Falling back to manual image solver...")
-			if token, manualErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg); manualErr == nil && token != "" {
-				return token, nil
-			} else if manualErr != nil {
-				log.Printf("[Captcha] Manual image solver failed: %v", manualErr)
-			}
+		if captchaErr.RedirectUri != "" || captchaErr.CaptchaImg != "" {
+			// Do not open manual fallback on the same challenge after synthetic
+			// checkbox/slider attempts. That often yields an already-degraded
+			// session and surfaces "limit attempts exhausted" in the browser.
+			return "", &captchaManualRetryRequiredError{cause: err}
 		}
 
 		return "", fmt.Errorf("captchaNotRobot API failed: %w", err)

@@ -434,6 +434,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
         reqURL := fmt.Sprintf(anonymousURL, creds.ClientID)
 
         token2 = ""
+        preferManualCaptcha := false
         for attempt := 0; attempt <= maxCaptchaAttempts; attempt++ {
             resp, err = doRequest(data, reqURL)
             if err != nil {
@@ -453,9 +454,13 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                     if captchaErr.IsCaptchaError() {
                         log.Printf("[Captcha] Attempt %d/%d: solving...", attempt+1, maxCaptchaAttempts)
 
-                        if manualCaptchaOnly.Load() {
+                        if manualCaptchaOnly.Load() || preferManualCaptcha {
                             if captchaErr.RedirectUri != "" {
-                                log.Printf("[Captcha] Manual captcha mode enabled; using proxy flow...")
+                                if preferManualCaptcha && !manualCaptchaOnly.Load() {
+                                    log.Printf("[Captcha] Auto solver failed on previous challenge; retrying with fresh manual proxy flow...")
+                                } else {
+                                    log.Printf("[Captcha] Manual captcha mode enabled; using proxy flow...")
+                                }
                                 successToken, solveErr := solveCaptchaViaProxy(captchaErr.RedirectUri)
                                 if solveErr != nil {
                                     err = fmt.Errorf("manual captcha proxy solve error: %v", solveErr)
@@ -476,11 +481,16 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                     captchaErr.CaptchaTs,
                                     captchaErr.CaptchaAttempt,
                                 )
+                                preferManualCaptcha = false
                                 continue
                             }
 
                             if captchaErr.CaptchaImg != "" {
-                                log.Printf("[Captcha] Manual captcha mode enabled; using image flow...")
+                                if preferManualCaptcha && !manualCaptchaOnly.Load() {
+                                    log.Printf("[Captcha] Auto solver failed on previous challenge; retrying with fresh manual image flow...")
+                                } else {
+                                    log.Printf("[Captcha] Manual captcha mode enabled; using image flow...")
+                                }
                                 captchaKey, solveErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg)
                                 if solveErr != nil {
                                     err = fmt.Errorf("manual captcha image solve error: %v", solveErr)
@@ -497,6 +507,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                     captchaErr.CaptchaTs,
                                     captchaErr.CaptchaAttempt,
                                 )
+                                preferManualCaptcha = false
                                 continue
                             }
 
@@ -505,6 +516,12 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                         } else {
                             successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
                             if solveErr != nil {
+                                var retryErr *captchaManualRetryRequiredError
+                                if errors.As(solveErr, &retryErr) {
+                                    preferManualCaptcha = true
+                                    log.Printf("[Captcha] Automatic solver degraded the current challenge; requesting a fresh challenge for manual solve...")
+                                    continue
+                                }
                                 err = fmt.Errorf("captcha solve error: %v", solveErr)
                                 break
                             }
