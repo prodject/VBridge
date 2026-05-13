@@ -152,7 +152,7 @@ enum SplitTunnelStorage {
         let lowered = trimmed.lowercased()
         if lowered.hasPrefix("*.") {
             let suffix = String(lowered.dropFirst(2))
-            return isValidDomain(suffix) ? "*.\(suffix)" : nil
+            return isValidWildcardSuffix(suffix) ? "*.\(suffix)" : nil
         }
 
         return isValidDomain(lowered) ? lowered : nil
@@ -188,6 +188,26 @@ enum SplitTunnelStorage {
 
         let labels = value.split(separator: ".")
         guard labels.count >= 2 else { return false }
+
+        for label in labels {
+            guard !label.isEmpty, label.count <= 63 else { return false }
+            guard label.first != "-", label.last != "-" else { return false }
+            let isValid = label.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "-"
+            }
+            guard isValid else { return false }
+        }
+
+        return true
+    }
+
+    private static func isValidWildcardSuffix(_ value: String) -> Bool {
+        guard !value.isEmpty, !value.hasPrefix("."), !value.hasSuffix(".") else {
+            return false
+        }
+
+        let labels = value.split(separator: ".")
+        guard !labels.isEmpty else { return false }
 
         for label in labels {
             guard !label.isEmpty, label.count <= 63 else { return false }
