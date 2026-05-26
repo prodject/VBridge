@@ -15,18 +15,12 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 var vkSemaphore = make(chan struct{}, 2)
-
-var (
-	sharedTransportOnce sync.Once
-	sharedTransport     *http.Transport
-)
 
 type vkBotProfile struct {
 	Profile       Profile
@@ -40,26 +34,6 @@ type vkBotProfile struct {
 	Taps          string
 	Downlink      string
 	DebugInfo     string
-}
-
-func getSharedTransport() *http.Transport {
-	sharedTransportOnce.Do(func() {
-		dialer := &net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
-		sharedTransport = &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           dialer.DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   25,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ExpectContinueTimeout: time.Second,
-		}
-	})
-	return sharedTransport
 }
 
 func getVKTurnCredWithFallback(ctx context.Context, hash string) (*turnCred, error) {
@@ -127,12 +101,22 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 	profile := generateVKBotProfile(hash)
 	log.Printf("[VK Auth] Connecting - Name: %s | UA: %s", profile.Name, profile.Profile.UserAgent)
 
-	client := &http.Client{
-		Timeout:   20 * time.Second,
-		Transport: getSharedTransport(),
-	}
+	doRequest := func(data string, requestURL string) (map[string]interface{}, error) {
+		client := &http.Client{
+			Timeout: 20 * time.Second,
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ExpectContinueTimeout: time.Second,
+			},
+		}
+		defer client.CloseIdleConnections()
 
-	doRequest := func(data string, requestURL string, apiOrigin bool) (map[string]interface{}, error) {
 		req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewBufferString(data))
 		if err != nil {
 			return nil, err
@@ -141,15 +125,9 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 		applyBrowserProfile(req, profile.Profile)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Accept", "*/*")
-		if apiOrigin {
-			req.Header.Set("Origin", "https://vk.ru")
-			req.Header.Set("Referer", "https://vk.ru/")
-			req.Header.Set("Sec-Fetch-Site", "same-site")
-		} else {
-			req.Header.Set("Origin", "https://login.vk.ru")
-			req.Header.Set("Referer", "https://login.vk.ru/")
-			req.Header.Set("Sec-Fetch-Site", "cross-site")
-		}
+		req.Header.Set("Origin", "https://vk.ru")
+		req.Header.Set("Referer", "https://vk.ru/")
+		req.Header.Set("Sec-Fetch-Site", "same-site")
 		req.Header.Set("Sec-Fetch-Mode", "cors")
 		req.Header.Set("Sec-Fetch-Dest", "empty")
 		req.Header.Set("Priority", "u=1, i")
@@ -184,7 +162,7 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 
 	for _, creds := range vkCredentialsList {
 		reqBody := fmt.Sprintf("client_id=%s&token_type=messages&client_secret=%s&version=1&app_id=%s", creds.ClientID, creds.ClientSecret, creds.ClientID)
-		resp, err := doRequest(reqBody, "https://login.vk.ru/?act=get_anonym_token", false)
+		resp, err := doRequest(reqBody, "https://login.vk.ru/?act=get_anonym_token")
 		if err != nil {
 			lastErr = err
 			log.Printf("[VK Auth] client_id=%s token1 failed: %v", creds.ClientID, err)
@@ -206,7 +184,7 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 		vkDelayRandom(100, 180)
 
 		previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", hash, token1)
-		if _, err := doRequest(previewData, fmt.Sprintf(previewURL, creds.ClientID), true); err != nil {
+		if _, err := doRequest(previewData, fmt.Sprintf(previewURL, creds.ClientID)); err != nil {
 			log.Printf("[VK Auth] getCallPreview warning for client_id=%s: %v", creds.ClientID, err)
 		}
 
@@ -218,7 +196,7 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 		preferManualCaptcha := false
 
 		for attempt := 0; attempt < maxCaptchaAttempts; attempt++ {
-			resp, err = doRequest(reqBody, requestURL, true)
+			resp, err = doRequest(reqBody, requestURL)
 			if err != nil {
 				lastErr = err
 				break
@@ -352,7 +330,7 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 	}
 
 	authData := fmt.Sprintf("session_data=%7B%22version%22%3A2%2C%22device_id%22%3A%22%s%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA", newDeviceID())
-	authResp, err := doRequest(authData, "https://calls.okcdn.ru/fb.do", true)
+	authResp, err := doRequest(authData, "https://calls.okcdn.ru/fb.do")
 	if err != nil {
 		return nil, fmt.Errorf("auth.anonymLogin error: %w", err)
 	}
@@ -363,7 +341,7 @@ func getVKCredsOnce(ctx context.Context, hash string) (*turnCred, error) {
 	}
 
 	joinData := fmt.Sprintf("joinLink=%s&isVideo=false&protocolVersion=5&anonymToken=%s&method=vchat.joinConversationByLink&format=JSON&application_key=CGMMEJLGDIHBABABA&session_key=%s", hash, token2, sessionKey)
-	joinResp, err := doRequest(joinData, "https://calls.okcdn.ru/fb.do", true)
+	joinResp, err := doRequest(joinData, "https://calls.okcdn.ru/fb.do")
 	if err != nil {
 		return nil, fmt.Errorf("joinConversationByLink error: %w", err)
 	}
@@ -526,7 +504,7 @@ func generateVKBotProfile(seed string) vkBotProfile {
 }
 
 func newDeviceID() string {
-	return strings.ReplaceAll(uuid.NewString(), "-", "")
+	return uuid.NewString()
 }
 
 func minInt(a int, b int) int {
