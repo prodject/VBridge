@@ -293,7 +293,7 @@ func init() {
     log.SetOutput(ProxyLogger(0))
 }
 
-type getCredsFunc func(string) (string, string, string, error)
+type getCredsFunc func(string) (*turnCred, error)
 
 type VKCredentials struct {
 	ClientID     string
@@ -306,6 +306,39 @@ var vkCredentialsList = []VKCredentials{
 	{ClientID: "52461373", ClientSecret: "o557NLIkAErNhakXrQ7A"},
 	{ClientID: "52649896", ClientSecret: "WStp4ihWG4l3nmXZgIbC"},
 	{ClientID: "51781872", ClientSecret: "IjjCNl4L4Tf5QZEXIHKK"},
+}
+
+var (
+	cachedSuccessToken string
+	cachedTokenUsages  int32
+	cacheMutex         sync.Mutex
+)
+
+func popCachedToken() string {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+	if cachedTokenUsages > 0 && cachedSuccessToken != "" {
+		cachedTokenUsages--
+		return cachedSuccessToken
+	}
+	return ""
+}
+
+func pushCachedToken(token string, usages int32) {
+	if token == "" || usages <= 0 {
+		return
+	}
+	cacheMutex.Lock()
+	cachedSuccessToken = token
+	cachedTokenUsages = usages
+	cacheMutex.Unlock()
+}
+
+func invalidateCachedToken() {
+	cacheMutex.Lock()
+	cachedSuccessToken = ""
+	cachedTokenUsages = 0
+	cacheMutex.Unlock()
 }
 
 func applyBrowserProfile(req *http.Request, profile Profile) {
@@ -325,7 +358,7 @@ func vkDelayRandom(minMs, maxMs int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-func getCreds(link string) (resUser string, resPass string, resTurn string, resErr error) {
+func getCreds(link string) (resCred *turnCred, resErr error) {
     profile := getRandomProfile()
     name := generateName()
 
@@ -435,7 +468,9 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 
         token2 = ""
         preferManualCaptcha := false
+        usedCachedToken := false
         for attempt := 0; attempt <= maxCaptchaAttempts; attempt++ {
+            usedCachedToken = false
             resp, err = doRequest(data, reqURL)
             if err != nil {
                 log.Printf("[VK Auth] client_id=%s request failed: %v", creds.ClientID, err)
@@ -466,6 +501,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                     err = fmt.Errorf("manual captcha proxy solve error: %v", solveErr)
                                     break
                                 }
+                                pushCachedToken(successToken, 4)
 
                                 if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
                                     captchaErr.CaptchaAttempt = "1"
@@ -514,16 +550,24 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                             err = fmt.Errorf("manual captcha mode: no redirect_uri or captcha_img")
                             break
                         } else {
-                            successToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
-                            if solveErr != nil {
-                                var retryErr *captchaManualRetryRequiredError
-                                if errors.As(solveErr, &retryErr) {
-                                    preferManualCaptcha = true
-                                    log.Printf("[Captcha] Automatic solver degraded the current challenge; requesting a fresh challenge for manual solve...")
-                                    continue
+                            successToken := popCachedToken()
+                            usedCachedToken = successToken != ""
+                            if usedCachedToken {
+                                log.Printf("[Captcha] Reusing cached success_token for a fresh VK group")
+                            } else {
+                                solveToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
+                                if solveErr != nil {
+                                    var retryErr *captchaManualRetryRequiredError
+                                    if errors.As(solveErr, &retryErr) {
+                                        preferManualCaptcha = true
+                                        log.Printf("[Captcha] Automatic solver degraded the current challenge; requesting a fresh challenge for manual solve...")
+                                        continue
+                                    }
+                                    err = fmt.Errorf("captcha solve error: %v", solveErr)
+                                    break
                                 }
-                                err = fmt.Errorf("captcha solve error: %v", solveErr)
-                                break
+                                successToken = solveToken
+                                pushCachedToken(successToken, 4)
                             }
 
                             if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
@@ -540,9 +584,16 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
                                 captchaErr.CaptchaTs,
                                 captchaErr.CaptchaAttempt,
                             )
+                            if usedCachedToken {
+                                preferManualCaptcha = false
+                            }
                             continue
                         }
                     }
+                }
+                if errCode == 14 && usedCachedToken {
+                    log.Printf("[Captcha] Cached success_token was rejected by VK; invalidating cache")
+                    invalidateCachedToken()
                 }
                 err = fmt.Errorf("VK API error: %v", errObj)
                 break
@@ -563,7 +614,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
     }
 
     if token2 == "" {
-        return "", "", "", fmt.Errorf("all VK credentials failed: %w", err)
+        return nil, fmt.Errorf("all VK credentials failed: %w", err)
     }
 
 	data = fmt.Sprintf("%s%s%s", "session_data=%7B%22version%22%3A2%2C%22device_id%22%3A%22", uuid.New(), "%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA")
@@ -571,7 +622,7 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 
 	resp, err = doRequest(data, url)
 	if err != nil {
-		return "", "", "", fmt.Errorf("request error:%s", err)
+		return nil, fmt.Errorf("request error:%s", err)
 	}
 
 	token3 := resp["session_key"].(string)
@@ -581,17 +632,51 @@ func getCreds(link string) (resUser string, resPass string, resTurn string, resE
 
 	resp, err = doRequest(data, url)
 	if err != nil {
-		return "", "", "", fmt.Errorf("request error:%s", err)
+		return nil, fmt.Errorf("request error:%s", err)
 	}
 
-	user := resp["turn_server"].(map[string]interface{})["username"].(string)
-	pass := resp["turn_server"].(map[string]interface{})["credential"].(string)
-	turn := resp["turn_server"].(map[string]interface{})["urls"].([]interface{})[0].(string)
+	turnServer, ok := resp["turn_server"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("missing turn_server in response")
+	}
 
-	clean := strings.Split(turn, "?")[0]
-	address := strings.TrimPrefix(strings.TrimPrefix(clean, "turn:"), "turns:")
+	user, _ := turnServer["username"].(string)
+	pass, _ := turnServer["credential"].(string)
+	rawURLs, _ := turnServer["urls"].([]interface{})
+	if user == "" || pass == "" || len(rawURLs) == 0 {
+		return nil, fmt.Errorf("invalid turn_server payload")
+	}
 
-	return user, pass, address, nil
+	var address string
+	for _, rawURL := range rawURLs {
+		turn, ok := rawURL.(string)
+		if !ok || turn == "" {
+			continue
+		}
+		clean := strings.Split(turn, "?")[0]
+		address = strings.TrimPrefix(strings.TrimPrefix(clean, "turn:"), "turns:")
+		if address != "" {
+			break
+		}
+	}
+	if address == "" {
+		return nil, fmt.Errorf("no usable TURN URL in response")
+	}
+
+	lifetimeSeconds := 0
+	if value, ok := turnServer["lifetime"].(float64); ok && value > 0 {
+		lifetimeSeconds = int(value)
+	} else if value, ok := turnServer["ttl"].(float64); ok && value > 0 {
+		lifetimeSeconds = int(value)
+	}
+
+	return &turnCred{
+		user:       user,
+		pass:       pass,
+		addr:       address,
+		lifetime:   time.Duration(lifetimeSeconds) * time.Second,
+		fetchedAt:  time.Now(),
+	}, nil
 }
 
 func dtlsFunc(ctx context.Context, conn net.PacketConn, peer *net.UDPAddr) (net.Conn, error) {
@@ -841,11 +926,14 @@ type turnParams struct {
 func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UDPAddr, conn2 net.PacketConn, c chan<- error) {
 	var err error = nil
 	defer func() { c <- err }()
-	user, pass, url, err1 := turnParams.getCreds(turnParams.link)
+	cred, err1 := turnParams.getCreds(turnParams.link)
 	if err1 != nil {
 		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
 		return
 	}
+	user := cred.user
+	pass := cred.pass
+	url := cred.addr
 	urlhost, urlport, err1 := net.SplitHostPort(url)
 	if err1 != nil {
 		err = fmt.Errorf("failed to parse TURN server address: %s", err1)
@@ -960,7 +1048,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
-	turnctx, turncancel := context.WithCancel(context.Background())
+	turnctx, turncancel := context.WithCancel(ctx)
 	context.AfterFunc(turnctx, func() {
 		if err := relayConn.SetDeadline(time.Now()); err != nil {
 			log.Printf("Failed to set relay deadline: %s", err)
@@ -969,6 +1057,18 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 			log.Printf("Failed to set upstream deadline: %s", err)
 		}
 	})
+	if rotateAfter := credentialRotateAfter(cred); rotateAfter > 0 {
+		timer := time.NewTimer(rotateAfter)
+		go func() {
+			defer timer.Stop()
+			select {
+			case <-turnctx.Done():
+			case <-timer.C:
+				log.Printf("[TURN] Credential lifetime window reached; rotating worker before TURN credentials expire")
+				turncancel()
+			}
+		}()
+	}
 	var addr atomic.Value
 	// Start read-loop on conn2 (output of DTLS)
 	go func() {
@@ -1096,6 +1196,8 @@ func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *ne
 
 type turnCred struct {
 	user, pass, addr string
+	lifetime         time.Duration
+	fetchedAt        time.Time
 }
 
 func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
@@ -1116,36 +1218,87 @@ func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
 		mu.Unlock()
 	}
 
-	getter := func(link string) (string, string, string, error) {
+	getter := func(link string) (*turnCred, error) {
 		mu.Lock()
 		defer mu.Unlock()
 
-		if !cTime.IsZero() && time.Since(cTime) > 10*time.Minute {
+		if shouldRefreshCachedCreds(cached) || (!cTime.IsZero() && time.Since(cTime) > 10*time.Minute) {
 			cached = nil
 			next = 0
 			cTime = time.Time{}
 		}
 
 		if len(cached) < poolSize {
-			u, p, a, err := f(link)
+			cred, err := f(link)
 			if err != nil {
-				return "", "", "", err
+				return nil, err
 			}
 
-			cached = append(cached, &turnCred{user: u, pass: p, addr: a})
+			cached = append(cached, cred)
 			if cTime.IsZero() {
 				cTime = time.Now()
 			}
 			log.Printf("Successfully registered User Identity %d/%d", len(cached), poolSize)
-			return u, p, a, nil
+			return cloneTurnCred(cred), nil
 		}
 
 		cred := cached[next]
 		next = (next + 1) % len(cached)
-		return cred.user, cred.pass, cred.addr, nil
+		return cloneTurnCred(cred), nil
 	}
 
 	return getter, reset
+}
+
+func cloneTurnCred(cred *turnCred) *turnCred {
+	if cred == nil {
+		return nil
+	}
+	cloned := *cred
+	return &cloned
+}
+
+func credentialRotateAfter(cred *turnCred) time.Duration {
+	if cred == nil || cred.lifetime <= 0 {
+		return 0
+	}
+
+	lead := 2 * time.Minute
+	switch {
+	case cred.lifetime <= 30*time.Second:
+		lead = 5 * time.Second
+	case cred.lifetime <= 2*time.Minute:
+		lead = cred.lifetime / 4
+	case cred.lifetime <= 10*time.Minute:
+		lead = time.Minute
+	}
+
+	rotateAfter := cred.lifetime - lead
+	if rotateAfter <= 0 {
+		rotateAfter = cred.lifetime / 2
+	}
+	if rotateAfter <= 0 {
+		return 0
+	}
+	return rotateAfter
+}
+
+func shouldRefreshCachedCreds(cached []*turnCred) bool {
+	if len(cached) == 0 {
+		return false
+	}
+
+	now := time.Now()
+	for _, cred := range cached {
+		if cred == nil || cred.lifetime <= 0 || cred.fetchedAt.IsZero() {
+			continue
+		}
+		if now.Sub(cred.fetchedAt) >= credentialRotateAfter(cred) {
+			return true
+		}
+	}
+
+	return false
 }
 
 //export ProxyIncreaseThreads
