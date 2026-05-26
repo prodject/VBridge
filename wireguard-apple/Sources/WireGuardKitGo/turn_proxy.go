@@ -27,7 +27,6 @@ import (
     "encoding/json"
     "errors"
     "fmt"
-    "io"
 	"log"
 	"net"
 	"net/http"
@@ -293,7 +292,7 @@ func init() {
     log.SetOutput(ProxyLogger(0))
 }
 
-type getCredsFunc func(string) (*turnCred, error)
+type getCredsFunc func(context.Context, string) (*turnCred, error)
 
 type VKCredentials struct {
 	ClientID     string
@@ -358,325 +357,8 @@ func vkDelayRandom(minMs, maxMs int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-func getCreds(link string) (resCred *turnCred, resErr error) {
-    profile := getRandomProfile()
-    name := generateName()
-
-    log.Printf("Connecting - Name: %s | UA: %s", name, profile.UserAgent)
-
-	doRequest := func(data string, url string) (resp map[string]interface{}, err error) {
-
-		client := &http.Client{
-			Timeout: 20 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-				IdleConnTimeout:     90 * time.Second,
-			},
-		}
-		defer client.CloseIdleConnections()
-		req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(data)))
-		if err != nil {
-			return nil, err
-		}
-
-		applyBrowserProfile(req, profile)
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Add("Accept", "*/*")
-		req.Header.Add("Origin", "https://vk.ru")
-		req.Header.Add("Referer", "https://vk.ru/")
-		req.Header.Add("Sec-Fetch-Site", "same-site")
-		req.Header.Add("Sec-Fetch-Mode", "cors")
-		req.Header.Add("Sec-Fetch-Dest", "empty")
-		req.Header.Add("Priority", "u=1, i")
-
-		httpResp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if closeErr := httpResp.Body.Close(); closeErr != nil {
-				log.Printf("close response body: %s", closeErr)
-			}
-		}()
-
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		err = json.Unmarshal(body, &resp)
-		if err != nil {
-			return nil, err
-		}
-
-		return resp, nil
-	}
-
-	var resp map[string]interface{}
-	var err error
-	    defer func() {
-	        if r := recover(); r != nil {
-	            log.Printf("get TURN creds error (bad JSON?): %v\n\n", resp)
-	            resErr = fmt.Errorf("panic in getCreds: %v", r)
-	        }
-    }()
-
-	data := "client_id=6287487&token_type=messages&client_secret=QbYic1K3lEV5kTGiqlq2&version=1&app_id=6287487"
-	url := "https://login.vk.ru/?act=get_anonym_token"
-
-    var token1 string
-    var token2 string
-    const maxCaptchaAttempts = 3
-    const previewURL = "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id=%s"
-    const anonymousURL = "https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=%s"
-
-    for _, creds := range vkCredentialsList {
-        data = fmt.Sprintf("client_id=%s&token_type=messages&client_secret=%s&version=1&app_id=%s", creds.ClientID, creds.ClientSecret, creds.ClientID)
-        url = "https://login.vk.ru/?act=get_anonym_token"
-
-        resp, err = doRequest(data, url)
-        if err != nil {
-            log.Printf("[VK Auth] client_id=%s token1 failed: %v", creds.ClientID, err)
-            continue
-        }
-
-        tokenData, ok := resp["data"].(map[string]interface{})
-        if !ok {
-            log.Printf("[VK Auth] client_id=%s invalid token1 response: %v", creds.ClientID, resp)
-            continue
-        }
-
-        token1, ok = tokenData["access_token"].(string)
-        if !ok || token1 == "" {
-            log.Printf("[VK Auth] client_id=%s missing access_token", creds.ClientID)
-            continue
-        }
-
-        vkDelayRandom(100, 150)
-
-        previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
-        _, err = doRequest(previewData, fmt.Sprintf(previewURL, creds.ClientID))
-        if err != nil {
-            log.Printf("[VK Auth] Warning: getCallPreview failed for client_id=%s: %v", creds.ClientID, err)
-        }
-
-        vkDelayRandom(200, 400)
-
-        data = buildAnonymousTokenPayload(link, name, token1, "", "", "", "", "")
-        reqURL := fmt.Sprintf(anonymousURL, creds.ClientID)
-
-        token2 = ""
-        preferManualCaptcha := false
-        usedCachedToken := false
-        for attempt := 0; attempt <= maxCaptchaAttempts; attempt++ {
-            usedCachedToken = false
-            resp, err = doRequest(data, reqURL)
-            if err != nil {
-                log.Printf("[VK Auth] client_id=%s request failed: %v", creds.ClientID, err)
-                break
-            }
-
-            if errObj, hasErr := resp["error"].(map[string]interface{}); hasErr {
-                errCode, _ := errObj["error_code"].(float64)
-                if errCode == 14 {
-                    if attempt == maxCaptchaAttempts {
-                        err = fmt.Errorf("captcha failed after %d attempts", maxCaptchaAttempts)
-                        break
-                    }
-
-                    captchaErr := ParseVkCaptchaError(errObj)
-                    if captchaErr.IsCaptchaError() {
-                        log.Printf("[Captcha] Attempt %d/%d: solving...", attempt+1, maxCaptchaAttempts)
-
-                        if manualCaptchaOnly.Load() || preferManualCaptcha {
-                            if captchaErr.RedirectUri != "" {
-                                if preferManualCaptcha && !manualCaptchaOnly.Load() {
-                                    log.Printf("[Captcha] Auto solver failed on previous challenge; retrying with fresh manual proxy flow...")
-                                } else {
-                                    log.Printf("[Captcha] Manual captcha mode enabled; using proxy flow...")
-                                }
-                                successToken, solveErr := solveCaptchaViaProxy(captchaErr.RedirectUri)
-                                if solveErr != nil {
-                                    err = fmt.Errorf("manual captcha proxy solve error: %v", solveErr)
-                                    break
-                                }
-                                pushCachedToken(successToken, 4)
-
-                                if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
-                                    captchaErr.CaptchaAttempt = "1"
-                                }
-
-                                data = buildAnonymousTokenPayload(
-                                    link,
-                                    name,
-                                    token1,
-                                    captchaErr.CaptchaSid,
-                                    "",
-                                    successToken,
-                                    captchaErr.CaptchaTs,
-                                    captchaErr.CaptchaAttempt,
-                                )
-                                preferManualCaptcha = false
-                                continue
-                            }
-
-                            if captchaErr.CaptchaImg != "" {
-                                if preferManualCaptcha && !manualCaptchaOnly.Load() {
-                                    log.Printf("[Captcha] Auto solver failed on previous challenge; retrying with fresh manual image flow...")
-                                } else {
-                                    log.Printf("[Captcha] Manual captcha mode enabled; using image flow...")
-                                }
-                                captchaKey, solveErr := solveCaptchaViaHTTP(captchaErr.CaptchaImg)
-                                if solveErr != nil {
-                                    err = fmt.Errorf("manual captcha image solve error: %v", solveErr)
-                                    break
-                                }
-
-                                data = buildAnonymousTokenPayload(
-                                    link,
-                                    name,
-                                    token1,
-                                    captchaErr.CaptchaSid,
-                                    captchaKey,
-                                    "",
-                                    captchaErr.CaptchaTs,
-                                    captchaErr.CaptchaAttempt,
-                                )
-                                preferManualCaptcha = false
-                                continue
-                            }
-
-                            err = fmt.Errorf("manual captcha mode: no redirect_uri or captcha_img")
-                            break
-                        } else {
-                            successToken := popCachedToken()
-                            usedCachedToken = successToken != ""
-                            if usedCachedToken {
-                                log.Printf("[Captcha] Reusing cached success_token for a fresh VK group")
-                            } else {
-                                solveToken, solveErr := solveVkCaptcha(context.Background(), captchaErr)
-                                if solveErr != nil {
-                                    var retryErr *captchaManualRetryRequiredError
-                                    if errors.As(solveErr, &retryErr) {
-                                        preferManualCaptcha = true
-                                        log.Printf("[Captcha] Automatic solver degraded the current challenge; requesting a fresh challenge for manual solve...")
-                                        continue
-                                    }
-                                    err = fmt.Errorf("captcha solve error: %v", solveErr)
-                                    break
-                                }
-                                successToken = solveToken
-                                pushCachedToken(successToken, 4)
-                            }
-
-                            if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
-                                captchaErr.CaptchaAttempt = "1"
-                            }
-
-                            data = buildAnonymousTokenPayload(
-                                link,
-                                name,
-                                token1,
-                                captchaErr.CaptchaSid,
-                                "",
-                                successToken,
-                                captchaErr.CaptchaTs,
-                                captchaErr.CaptchaAttempt,
-                            )
-                            if usedCachedToken {
-                                preferManualCaptcha = false
-                            }
-                            continue
-                        }
-                    }
-                }
-                if errCode == 14 && usedCachedToken {
-                    log.Printf("[Captcha] Cached success_token was rejected by VK; invalidating cache")
-                    invalidateCachedToken()
-                }
-                err = fmt.Errorf("VK API error: %v", errObj)
-                break
-            }
-
-            token2, _ = resp["response"].(map[string]interface{})["token"].(string)
-            if token2 != "" {
-                err = nil
-                break
-            }
-            err = fmt.Errorf("missing token in response: %v", resp)
-            break
-        }
-
-        if err == nil && token2 != "" {
-            break
-        }
-    }
-
-    if token2 == "" {
-        return nil, fmt.Errorf("all VK credentials failed: %w", err)
-    }
-
-	data = fmt.Sprintf("%s%s%s", "session_data=%7B%22version%22%3A2%2C%22device_id%22%3A%22", uuid.New(), "%22%2C%22client_version%22%3A1.1%2C%22client_type%22%3A%22SDK_JS%22%7D&method=auth.anonymLogin&format=JSON&application_key=CGMMEJLGDIHBABABA")
-	url = "https://calls.okcdn.ru/fb.do"
-
-	resp, err = doRequest(data, url)
-	if err != nil {
-		return nil, fmt.Errorf("request error:%s", err)
-	}
-
-	token3 := resp["session_key"].(string)
-
-	data = fmt.Sprintf("joinLink=%s&isVideo=false&protocolVersion=5&anonymToken=%s&method=vchat.joinConversationByLink&format=JSON&application_key=CGMMEJLGDIHBABABA&session_key=%s", link, token2, token3)
-	url = "https://calls.okcdn.ru/fb.do"
-
-	resp, err = doRequest(data, url)
-	if err != nil {
-		return nil, fmt.Errorf("request error:%s", err)
-	}
-
-	turnServer, ok := resp["turn_server"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("missing turn_server in response")
-	}
-
-	user, _ := turnServer["username"].(string)
-	pass, _ := turnServer["credential"].(string)
-	rawURLs, _ := turnServer["urls"].([]interface{})
-	if user == "" || pass == "" || len(rawURLs) == 0 {
-		return nil, fmt.Errorf("invalid turn_server payload")
-	}
-
-	var address string
-	for _, rawURL := range rawURLs {
-		turn, ok := rawURL.(string)
-		if !ok || turn == "" {
-			continue
-		}
-		clean := strings.Split(turn, "?")[0]
-		address = strings.TrimPrefix(strings.TrimPrefix(clean, "turn:"), "turns:")
-		if address != "" {
-			break
-		}
-	}
-	if address == "" {
-		return nil, fmt.Errorf("no usable TURN URL in response")
-	}
-
-	lifetimeSeconds := 0
-	if value, ok := turnServer["lifetime"].(float64); ok && value > 0 {
-		lifetimeSeconds = int(value)
-	} else if value, ok := turnServer["ttl"].(float64); ok && value > 0 {
-		lifetimeSeconds = int(value)
-	}
-
-	return &turnCred{
-		user:       user,
-		pass:       pass,
-		addr:       address,
-		lifetime:   time.Duration(lifetimeSeconds) * time.Second,
-		fetchedAt:  time.Now(),
-	}, nil
+func getCreds(ctx context.Context, hash string) (*turnCred, error) {
+	return getVKTurnCredWithFallback(ctx, hash)
 }
 
 func dtlsFunc(ctx context.Context, conn net.PacketConn, peer *net.UDPAddr) (net.Conn, error) {
@@ -917,23 +599,123 @@ func (c *connectedUDPConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 type turnParams struct {
     host     string
     port     string
-    link     string
+    hashes    []string
+    nextHash  uint32
+    nextTurnURL uint32
     udp      bool
     getCreds getCredsFunc
     resetCreds func()
+    resetMu sync.Mutex
+    lastCredReset time.Time
+    quotaFailures int
+    authFailures int
+}
+
+func (tp *turnParams) nextHashValue() string {
+    if len(tp.hashes) == 0 {
+        return ""
+    }
+    index := atomic.AddUint32(&tp.nextHash, 1) - 1
+    return tp.hashes[int(index)%len(tp.hashes)]
+}
+
+func (tp *turnParams) fallbackHash(excluding string) string {
+    for _, hash := range tp.hashes {
+        if hash != "" && hash != excluding {
+            return hash
+        }
+    }
+    return ""
+}
+
+func (tp *turnParams) selectTurnAddress(cred *turnCred) string {
+    if cred == nil {
+        return ""
+    }
+    if len(cred.turnURLs) == 0 {
+        return cred.addr
+    }
+    index := atomic.AddUint32(&tp.nextTurnURL, 1) - 1
+    return cred.turnURLs[int(index)%len(cred.turnURLs)]
+}
+
+func (tp *turnParams) markCredentialSuccess() {
+    tp.resetMu.Lock()
+    tp.quotaFailures = 0
+    tp.authFailures = 0
+    tp.resetMu.Unlock()
+}
+
+func (tp *turnParams) maybeRotateCredentials(err error) {
+    if err == nil || tp.resetCreds == nil {
+        return
+    }
+
+    lower := strings.ToLower(err.Error())
+    if lower == "" {
+        return
+    }
+
+    tp.resetMu.Lock()
+    defer tp.resetMu.Unlock()
+
+    rotateNow := false
+    reason := ""
+
+    switch {
+    case strings.Contains(lower, "stream closed"):
+        rotateNow = true
+        reason = "stream closed"
+    case strings.Contains(lower, "turn квота"), strings.Contains(lower, "quota"), strings.Contains(lower, "error 486"):
+        tp.quotaFailures++
+        if tp.quotaFailures >= 5 {
+            rotateNow = true
+            reason = "turn quota threshold reached"
+        }
+    case strings.Contains(lower, "attribute not found"),
+        strings.Contains(lower, "unauthorized"),
+        strings.Contains(lower, "allocation mismatch"),
+        strings.Contains(lower, "error 508"),
+        strings.Contains(lower, "cannot create socket"),
+        strings.Contains(lower, "error 29"):
+        tp.authFailures++
+        if tp.authFailures >= 8 {
+            rotateNow = true
+            reason = "stun/auth failure threshold reached"
+        }
+    }
+
+    if !rotateNow {
+        return
+    }
+
+    if !tp.lastCredReset.IsZero() && time.Since(tp.lastCredReset) < 5*time.Second {
+        return
+    }
+
+    log.Printf("[Proxy] Early credential rotation requested: %s", reason)
+    tp.lastCredReset = time.Now()
+    tp.quotaFailures = 0
+    tp.authFailures = 0
+    tp.resetCreds()
 }
 
 func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UDPAddr, conn2 net.PacketConn, c chan<- error) {
 	var err error = nil
 	defer func() { c <- err }()
-	cred, err1 := turnParams.getCreds(turnParams.link)
+	hash := turnParams.nextHashValue()
+	cred, err1 := turnParams.getCreds(ctx, hash)
 	if err1 != nil {
 		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
 		return
 	}
 	user := cred.user
 	pass := cred.pass
-	url := cred.addr
+	url := turnParams.selectTurnAddress(cred)
+	if url == "" {
+		err = fmt.Errorf("failed to choose TURN server address")
+		return
+	}
 	urlhost, urlport, err1 := net.SplitHostPort(url)
 	if err1 != nil {
 		err = fmt.Errorf("failed to parse TURN server address: %s", err1)
@@ -1036,6 +818,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	if rt := getProxyRuntime(); rt != nil {
 		rt.deliverIncreaseAck(nil)
 	}
+	turnParams.markCredentialSuccess()
 	defer func() {
 		if err1 := relayConn.Close(); err1 != nil {
 			err = fmt.Errorf("failed to close TURN allocated connection: %s", err1)
@@ -1169,12 +952,13 @@ func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *ne
 
 			c := make(chan error)
 			go oneTurnConnection(ctx, turnParams, peer, conn2, c)
-			if err := <-c; err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				log.Printf("%s; reconnecting in %s", err, workerReconnectBackoff)
-			} else {
+				if err := <-c; err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					turnParams.maybeRotateCredentials(err)
+					log.Printf("%s; reconnecting in %s", err, workerReconnectBackoff)
+				} else {
 				if ctx.Err() != nil {
 					return
 				}
@@ -1196,6 +980,7 @@ func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *ne
 
 type turnCred struct {
 	user, pass, addr string
+	turnURLs         []string
 	lifetime         time.Duration
 	fetchedAt        time.Time
 }
@@ -1218,7 +1003,7 @@ func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
 		mu.Unlock()
 	}
 
-	getter := func(link string) (*turnCred, error) {
+	getter := func(ctx context.Context, hash string) (*turnCred, error) {
 		mu.Lock()
 		defer mu.Unlock()
 
@@ -1229,7 +1014,7 @@ func poolCreds(f getCredsFunc, poolSize int) (getCredsFunc, func()) {
 		}
 
 		if len(cached) < poolSize {
-			cred, err := f(link)
+			cred, err := f(ctx, hash)
 			if err != nil {
 				return nil, err
 			}
@@ -1299,6 +1084,27 @@ func shouldRefreshCachedCreds(cached []*turnCred) bool {
 	}
 
 	return false
+}
+
+func ParseHashes(raw string) []string {
+    var result []string
+    for _, value := range strings.Split(raw, ",") {
+        value = strings.TrimSpace(value)
+        if value == "" {
+            continue
+        }
+        if idx := strings.Index(value, "join/"); idx != -1 {
+            value = value[idx+len("join/"):]
+        }
+        if idx := strings.IndexAny(value, "/?#"); idx != -1 {
+            value = value[:idx]
+        }
+        value = strings.TrimSpace(value)
+        if value != "" {
+            result = append(result, value)
+        }
+    }
+    return result
 }
 
 //export ProxyIncreaseThreads
@@ -1432,21 +1238,27 @@ func StartProxy(cLink *C.char, cPeerAddr *C.char, cLocalAddr *C.char, cN C.int, 
 		return
 	}
 
-    parts := strings.Split(link, "join/")
-    link = parts[len(parts)-1]
-    if idx := strings.IndexAny(link, "/?#"); idx != -1 {
-        link = link[:idx]
+    hashes := ParseHashes(link)
+    if len(hashes) == 0 && link != "" {
+        hashes = []string{link}
+    }
+    if len(hashes) == 0 {
+        log.Printf("No valid VK hashes found in input")
+        signalProxyStartFailure()
+        return
     }
 
-    pooledCreds, resetCreds := poolCreds(getCreds, identityPoolSize)
     params := &turnParams{
-        host:       host,
-        port:       port,
-        link:       link,
-        udp:        udp,
-        getCreds:   pooledCreds,
-        resetCreds: resetCreds,
+        host:   host,
+        port:   port,
+        hashes: hashes,
+        udp:    udp,
     }
+    pooledCreds, resetCreds := poolCreds(func(ctx context.Context, hash string) (*turnCred, error) {
+        return getCreds(ctx, hash)
+    }, identityPoolSize)
+    params.getCreds = pooledCreds
+    params.resetCreds = resetCreds
 
     listenConnChan := make(chan net.PacketConn)
     connchan := make(chan net.PacketConn)
