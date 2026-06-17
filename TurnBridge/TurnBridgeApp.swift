@@ -95,7 +95,10 @@ struct VBridge: App {
         wdttServerKey: String,
         completionHandler: @escaping (Bool) -> Void
     ) {
-        SharedLogger.info("Connecting... peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
+        SharedLogger.info("Connecting... mode=\(transportMode.rawValue), peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
+        if transportMode == .wdtt {
+            SharedLogger.info("WDTT start config: vkLinkLen=\(vkLink.count), passwordSet=\(!wdttPassword.isEmpty), primaryHashLen=\(wdttClientKey.count), extraHashesLen=\(wdttServerKey.count)")
+        }
         let normalizedConfig = normalizedWgQuickConfig(wgQuickConfig, listenAddr: listenAddr)
 
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in

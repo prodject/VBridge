@@ -129,10 +129,7 @@ private struct CompiledSplitTunnelRules {
     var ignoredRules: [String]
 }
 
-private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<CChar>?) -> Void = { context, level, messageCStr in
-    guard let cStr = messageCStr else { return }
-    let message = String(cString: cStr).trimmingCharacters(in: .newlines)
-
+private func publishGoProxyLog(level: Int32, message: String) {
     let shouldRequestCaptchaRecovery =
         message.contains("captcha failed after") ||
         message.contains("manual captcha proxy solve error") ||
@@ -151,6 +148,16 @@ private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, In
         sharedLogger.log("[TP]: \(message, privacy: .public)")
         SharedLogger.info(message, source: .tunnel)
     }
+}
+
+private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<CChar>?) -> Void = { _, level, messageCStr in
+    guard let cStr = messageCStr else { return }
+    publishGoProxyLog(level: level, message: String(cString: cStr).trimmingCharacters(in: .newlines))
+}
+
+private let vbridgeGoLoggerCallback: @convention(c) (Int32, UnsafePointer<CChar>?) -> Void = { level, messageCStr in
+    guard let cStr = messageCStr else { return }
+    publishGoProxyLog(level: level, message: String(cString: cStr).trimmingCharacters(in: .newlines))
 }
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
@@ -437,6 +444,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
+        VBridgeWGSetLogger(vbridgeGoLoggerCallback)
         clearCaptchaRecoveryRequest()
 
         guard let protocolConfiguration = self.protocolConfiguration as? NETunnelProviderProtocol,
@@ -493,6 +501,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let vkLink = (providerConfiguration["vkLink"] as? String) ?? ""
         let wrapKeyHex = (providerConfiguration["wrapKeyHex"] as? String) ?? ""
         let wdttPassword = (providerConfiguration["wdttPassword"] as? String) ?? ""
+        let wdttClientKey = (providerConfiguration["wdttClientKey"] as? String) ?? ""
+        let wdttServerKey = (providerConfiguration["wdttServerKey"] as? String) ?? ""
 
         if useSingleProxyWorker && requestedNValue != 1 {
             SharedLogger.warning(
@@ -501,6 +511,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             )
         }
         SharedLogger.info("Peer: \(peerAddr), Mode: \(transportMode), N: \(nValue), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
+        if isWDTT {
+            SharedLogger.info(
+                "WDTT config: vkLinkLen=\(vkLink.count), passwordSet=\(!wdttPassword.isEmpty), primaryHashLen=\(wdttClientKey.count), extraHashesLen=\(wdttServerKey.count)",
+                source: .tunnel
+            )
+        }
 
         guard let proxyConfigJSON = makeAntonProxyConfigJSON(
             mode: transportMode,
@@ -534,6 +550,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             var effectiveUAPI = wgUAPI
 
             if isWDTT {
+                SharedLogger.info("WDTT waiting for WRAP-A GETCONF provision", source: .tunnel)
                 guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 120000),
                       let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.uapi.isEmpty else {
@@ -543,6 +560,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                     return
                 }
+                SharedLogger.info("WDTT provision received: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 effectiveUAPI = provision.uapi
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,

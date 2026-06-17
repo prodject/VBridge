@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 typedef void(*logger_fn_t)(void *context, int level, const char *msg);
+typedef void(*vbridge_logger_fn_t)(int level, const char *msg);
 typedef void(*captcha_fn_t)(void *context, const char *msg);
 extern void wgSetLogger(void *context, logger_fn_t logger_fn);
 extern int wgTurnOn(const char *settings, int32_t tun_fd);
@@ -27,6 +28,7 @@ extern int32_t VBridgeWGAttachWireGuard(int32_t handle, const char *settings, in
 extern void VBridgeWGTurnOff(int32_t handle);
 extern char *VBridgeWGGetConfig(int32_t handle);
 extern char *VBridgeWGWaitWrapAProvision(int32_t handle, int32_t timeoutMs);
+extern void VBridgeWGSetLogger(vbridge_logger_fn_t logger_fn);
 
 typedef void (*libxray_sockcallback)(uintptr_t fd, void* ctx);
 extern char *LibXrayCutGeoData(const char *datDir, const char *dstDir, const char *cutCodePath);
