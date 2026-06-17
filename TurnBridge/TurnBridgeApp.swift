@@ -115,7 +115,8 @@ struct VBridge: App {
 
             let protocolConfiguration = NETunnelProviderProtocol()
             let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
-            protocolConfiguration.providerBundleIdentifier = "\(currentAppBundleId).network-extension"
+            let providerBundleIdentifier = "\(currentAppBundleId).network-extension"
+            protocolConfiguration.providerBundleIdentifier = providerBundleIdentifier
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr
             protocolConfiguration.serverAddress = cleanIP
 
@@ -154,6 +155,7 @@ struct VBridge: App {
             SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular), ManualCaptcha=\(manualCaptcha)")
 
             tunnelManager.protocolConfiguration = protocolConfiguration
+            tunnelManager.localizedDescription = "VBridge"
             tunnelManager.isEnabled = true
             tunnelManager.saveToPreferences { error in
                 if let error = error {
@@ -162,22 +164,32 @@ struct VBridge: App {
                     completionHandler(false)
                     return
                 }
-                tunnelManager.loadFromPreferences { error in
+
+                NETunnelProviderManager.loadAllFromPreferences { refreshedManagers, error in
                     if let error = error {
-                        NSLog("Error (loadFromPreferences): \(error)")
-                        SharedLogger.error("Failed to reload tunnel preferences: \(error.localizedDescription)")
+                        NSLog("Error (reloadAllFromPreferences): \(error)")
+                        SharedLogger.error("Failed to reload tunnel preferences after save: \(error.localizedDescription)")
                         completionHandler(false)
                         return
                     }
 
-                    guard let session = tunnelManager.connection as? NETunnelProviderSession else {
-                        SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
+                    let refreshedManager = refreshedManagers?.first {
+                        guard let protocolConfiguration = $0.protocolConfiguration as? NETunnelProviderProtocol else {
+                            return false
+                        }
+                        return protocolConfiguration.providerBundleIdentifier == providerBundleIdentifier
+                    } ?? refreshedManagers?.first
+
+                    guard let refreshedManager,
+                          let session = refreshedManager.connection as? NETunnelProviderSession else {
+                        SharedLogger.error("reloaded tunnelManager.connection is not NETunnelProviderSession")
                         completionHandler(false)
                         return
                     }
                     do {
-                        SharedLogger.info("Starting tunnel session...")
-                        try session.startTunnel()
+                        let startupNonce = UUID().uuidString
+                        SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue), nonce=\(startupNonce.prefix(8))")
+                        try session.startTunnel(options: ["startupNonce": startupNonce as NSString])
                         completionHandler(true)
                     } catch {
                         NSLog("Error (startTunnel): \(error)")
