@@ -530,20 +530,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             self.vbridgeTunnelHandle = handle
 
-            let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
-            guard ready == 1 else {
-                VBridgeWGTurnOff(handle)
-                self.vbridgeTunnelHandle = -1
-                SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
-                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
-                return
-            }
-
             var networkSettings: NEPacketTunnelNetworkSettings
             var effectiveUAPI = wgUAPI
 
             if isWDTT {
-                guard let provisionJSON = self.waitForWrapAProvision(handle: handle),
+                guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 120000),
                       let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.uapi.isEmpty else {
                     VBridgeWGTurnOff(handle)
@@ -560,6 +551,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     tunnelRemoteAddress: peerAddr.components(separatedBy: ":").first ?? "127.0.0.1"
                 )
             } else if let tunnelConfiguration = tunnelConfiguration {
+                let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
+                guard ready == 1 else {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
+                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    return
+                }
+
                 networkSettings = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: tunnelConfiguration,
                     resolvedEndpoints: tunnelConfiguration.peers.map(\.endpoint)
@@ -662,8 +662,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return UUID().uuidString
     }
 
-    private func waitForWrapAProvision(handle: Int32) -> String? {
-        guard let pointer = VBridgeWGWaitWrapAProvision(handle, 30000) else {
+    private func waitForWrapAProvision(handle: Int32, timeoutMs: Int32) -> String? {
+        guard let pointer = VBridgeWGWaitWrapAProvision(handle, timeoutMs) else {
             return nil
         }
         defer { free(UnsafeMutableRawPointer(pointer)) }
