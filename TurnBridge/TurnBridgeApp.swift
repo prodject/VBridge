@@ -100,6 +100,8 @@ struct VBridge: App {
             SharedLogger.info("WDTT start config: vkLinkLen=\(vkLink.count), passwordSet=\(!wdttPassword.isEmpty), primaryHashLen=\(wdttClientKey.count), extraHashesLen=\(wdttServerKey.count)")
         }
         let normalizedConfig = normalizedWgQuickConfig(wgQuickConfig, listenAddr: listenAddr)
+        let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
+        let providerBundleIdentifier = "\(currentAppBundleId).network-extension"
 
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
             if let error = error {
@@ -109,13 +111,17 @@ struct VBridge: App {
                 return
             }
 
-            let preExistingTunnelManager = tunnelManagersInSettings?.first
+            let preExistingTunnelManager = tunnelManagersInSettings?.first {
+                guard let protocolConfiguration = $0.protocolConfiguration as? NETunnelProviderProtocol else {
+                    return false
+                }
+                return protocolConfiguration.providerBundleIdentifier == providerBundleIdentifier
+            } ?? tunnelManagersInSettings?.first
             let tunnelManager = preExistingTunnelManager ?? NETunnelProviderManager()
             SharedLogger.debug("Using \(preExistingTunnelManager != nil ? "existing" : "new") tunnel manager")
 
             let protocolConfiguration = NETunnelProviderProtocol()
-            let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
-            protocolConfiguration.providerBundleIdentifier = "\(currentAppBundleId).network-extension"
+            protocolConfiguration.providerBundleIdentifier = providerBundleIdentifier
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr
             protocolConfiguration.serverAddress = cleanIP
 
@@ -177,7 +183,13 @@ struct VBridge: App {
                         completionHandler(false)
                         return
                     }
-                    self.startTunnelSession(session, retriesRemaining: 5, completionHandler: completionHandler)
+                    self.startTunnelSession(
+                        session,
+                        retriesRemaining: 5,
+                        recoveryConfiguration: protocolConfiguration,
+                        providerBundleIdentifier: providerBundleIdentifier,
+                        completionHandler: completionHandler
+                    )
                 }
             }
         }
@@ -186,12 +198,22 @@ struct VBridge: App {
     private func startTunnelSession(
         _ session: NETunnelProviderSession,
         retriesRemaining: Int,
+        recoveryConfiguration: NETunnelProviderProtocol? = nil,
+        providerBundleIdentifier: String? = nil,
+        recoveryAttempted: Bool = false,
         completionHandler: @escaping (Bool) -> Void
     ) {
         if session.status == .disconnecting, retriesRemaining > 0 {
             SharedLogger.warning("Tunnel session still disconnecting; retrying start in 1s (remaining=\(retriesRemaining))")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.startTunnelSession(session, retriesRemaining: retriesRemaining - 1, completionHandler: completionHandler)
+                self.startTunnelSession(
+                    session,
+                    retriesRemaining: retriesRemaining - 1,
+                    recoveryConfiguration: recoveryConfiguration,
+                    providerBundleIdentifier: providerBundleIdentifier,
+                    recoveryAttempted: recoveryAttempted,
+                    completionHandler: completionHandler
+                )
             }
             return
         }
@@ -199,11 +221,102 @@ struct VBridge: App {
         do {
             SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue)")
             try session.startTunnel()
+            scheduleStartRecoveryIfNeeded(
+                session: session,
+                recoveryConfiguration: recoveryConfiguration,
+                providerBundleIdentifier: providerBundleIdentifier,
+                recoveryAttempted: recoveryAttempted
+            )
             completionHandler(true)
         } catch {
             NSLog("Error (startTunnel): \(error)")
             SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
             completionHandler(false)
+        }
+    }
+
+    private func scheduleStartRecoveryIfNeeded(
+        session: NETunnelProviderSession,
+        recoveryConfiguration: NETunnelProviderProtocol?,
+        providerBundleIdentifier: String?,
+        recoveryAttempted: Bool
+    ) {
+        guard !recoveryAttempted,
+              let recoveryConfiguration,
+              let providerBundleIdentifier else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            guard session.status == .disconnected else { return }
+            SharedLogger.warning("Tunnel returned to disconnected after start; recreating VPN manager once")
+            self.recreateAndStartTunnel(
+                protocolConfiguration: recoveryConfiguration,
+                providerBundleIdentifier: providerBundleIdentifier
+            )
+        }
+    }
+
+    private func recreateAndStartTunnel(
+        protocolConfiguration: NETunnelProviderProtocol,
+        providerBundleIdentifier: String
+    ) {
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            if let error {
+                SharedLogger.error("Failed to load tunnel managers for recovery: \(error.localizedDescription)")
+                return
+            }
+
+            let matchingManagers = (managers ?? []).filter { manager in
+                guard let protocolConfiguration = manager.protocolConfiguration as? NETunnelProviderProtocol else {
+                    return false
+                }
+                return protocolConfiguration.providerBundleIdentifier == providerBundleIdentifier
+            }
+
+            self.removeManagers(matchingManagers) {
+                let manager = NETunnelProviderManager()
+                manager.protocolConfiguration = protocolConfiguration
+                manager.localizedDescription = "VBridge"
+                manager.isEnabled = true
+                manager.saveToPreferences { error in
+                    if let error {
+                        SharedLogger.error("Failed to save recreated tunnel manager: \(error.localizedDescription)")
+                        return
+                    }
+                    manager.loadFromPreferences { error in
+                        if let error {
+                            SharedLogger.error("Failed to reload recreated tunnel manager: \(error.localizedDescription)")
+                            return
+                        }
+                        guard let session = manager.connection as? NETunnelProviderSession else {
+                            SharedLogger.error("recreated tunnelManager.connection is not NETunnelProviderSession")
+                            return
+                        }
+                        self.startTunnelSession(
+                            session,
+                            retriesRemaining: 0,
+                            recoveryAttempted: true
+                        ) { started in
+                            SharedLogger.info("Recreated tunnel manager start \(started ? "requested" : "failed")")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func removeManagers(_ managers: [NETunnelProviderManager], completion: @escaping () -> Void) {
+        guard let manager = managers.first else {
+            completion()
+            return
+        }
+
+        manager.removeFromPreferences { error in
+            if let error {
+                SharedLogger.warning("Failed to remove stale tunnel manager: \(error.localizedDescription)")
+            }
+            self.removeManagers(Array(managers.dropFirst()), completion: completion)
         }
     }
 
