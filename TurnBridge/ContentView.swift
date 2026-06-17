@@ -1783,13 +1783,13 @@ struct ContentView: View {
 
         SharedLogger.debug("Parsing clipboard config (\(clipboardString.count) chars)")
         do {
-            let profile: VPNProfile
+            let importedProfile: VPNProfile
             if clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix(ConfigParser.wdttScheme) {
-                profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: clipboardString), fallbackName: "WDTT")
+                importedProfile = profile(fromWDTT: try ConfigParser.parseWDTT(from: clipboardString), fallbackName: "WDTT")
             } else {
-                profile = profile(fromTurnConfig: try ConfigParser.parse(from: clipboardString), fallbackName: "Profile")
+                importedProfile = profile(fromTurnConfig: try ConfigParser.parse(from: clipboardString), fallbackName: "Profile")
             }
-            store.addProfile(profile)
+            store.addProfile(importedProfile)
             SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from clipboard")
 
             withAnimation { showImportModal = false }
