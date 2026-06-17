@@ -144,9 +144,13 @@ struct VBridge: App {
             ]
 
             let defaults = UserDefaults.standard
-            let excludeAPNs = defaults.object(forKey: "excludeAPNs") as? Bool ?? false
-            let excludeCellular = defaults.object(forKey: "excludeCellularServices") as? Bool ?? false
-            let excludeLAN = defaults.object(forKey: "excludeLocalNetworks") as? Bool ?? true
+            let storedExcludeAPNs = defaults.object(forKey: "excludeAPNs") as? Bool ?? false
+            let storedExcludeCellular = defaults.object(forKey: "excludeCellularServices") as? Bool ?? false
+            let storedExcludeLAN = defaults.object(forKey: "excludeLocalNetworks") as? Bool ?? true
+            let usesNativeWireGuardRoutes = transportMode == .wg
+            let excludeAPNs = usesNativeWireGuardRoutes ? storedExcludeAPNs : false
+            let excludeCellular = usesNativeWireGuardRoutes ? storedExcludeCellular : false
+            let excludeLAN = usesNativeWireGuardRoutes ? storedExcludeLAN : false
 
             // Keep Internet available while manual captcha is being solved.
             // With includeAllNetworks=true iOS can route browser traffic into a
@@ -157,7 +161,13 @@ struct VBridge: App {
             protocolConfiguration.excludeLocalNetworks = excludeLAN
 
             let manualCaptcha = UserDefaults.standard.bool(forKey: "manualCaptcha")
-            SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular), ManualCaptcha=\(manualCaptcha)")
+            if usesNativeWireGuardRoutes {
+                SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular), ManualCaptcha=\(manualCaptcha)")
+            } else {
+                SharedLogger.debug(
+                    "Routing: anton mode ignores iOS route exclusions (stored LAN=\(storedExcludeLAN), APNs=\(storedExcludeAPNs), Cellular=\(storedExcludeCellular)), ManualCaptcha=\(manualCaptcha)"
+                )
+            }
 
             tunnelManager.protocolConfiguration = protocolConfiguration
             tunnelManager.localizedDescription = "VBridge"
@@ -251,7 +261,7 @@ struct VBridge: App {
             guard session.status == .disconnected else { return }
             SharedLogger.warning("Tunnel returned to disconnected after start; recreating VPN manager once")
             self.recreateAndStartTunnel(
-                protocolConfiguration: recoveryConfiguration,
+                protocolConfiguration: recoveryConfiguration.copy() as? NETunnelProviderProtocol ?? recoveryConfiguration,
                 providerBundleIdentifier: providerBundleIdentifier
             )
         }
@@ -322,13 +332,21 @@ struct VBridge: App {
 
     func turnOffTunnel() {
         SharedLogger.info("Disconnecting...")
+        let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
+        let providerBundleIdentifier = "\(currentAppBundleId).network-extension"
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
             if let error = error {
                 NSLog("Error (loadAllFromPreferences): \(error)")
                 SharedLogger.error("Failed to load tunnel preferences: \(error.localizedDescription)")
                 return
             }
-            if let tunnelManager = tunnelManagersInSettings?.first {
+            let tunnelManager = tunnelManagersInSettings?.first {
+                guard let protocolConfiguration = $0.protocolConfiguration as? NETunnelProviderProtocol else {
+                    return false
+                }
+                return protocolConfiguration.providerBundleIdentifier == providerBundleIdentifier
+            }
+            if let tunnelManager {
                 guard let session = tunnelManager.connection as? NETunnelProviderSession else {
                     SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
                     return
