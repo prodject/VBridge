@@ -760,6 +760,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         sharedLogger.log("Stopping tunnel")
         SharedLogger.info("Stopping tunnel (reason: \(reason.rawValue))", source: .tunnel)
+        let startedAt = Date()
+        let completionLock = NSLock()
+        var didComplete = false
+        let completeOnce: (String) -> Void = { origin in
+            completionLock.lock()
+            let shouldComplete = !didComplete
+            didComplete = true
+            completionLock.unlock()
+
+            guard shouldComplete else { return }
+            let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+            SharedLogger.info("stopTunnel completion from \(origin) after \(elapsedMs)ms", source: .tunnel)
+            completionHandler()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 3.0) {
+            completeOnce("safety timeout")
+        }
 
         if vbridgeTunnelHandle >= 0 {
             VBridgeWGTurnOff(vbridgeTunnelHandle)
@@ -768,7 +786,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             clearCaptchaRequest()
             clearCaptchaRecoveryRequest()
             SharedLogger.info("Tunnel stopped", source: .tunnel)
-            completionHandler()
+            completeOnce("vk-turn-proxy-ios stop")
             return
         } else {
             StopProxy()
@@ -786,7 +804,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 SharedLogger.info("WireGuard adapter stopped", source: .wireguard)
             }
             SharedLogger.info("Tunnel stopped", source: .tunnel)
-            completionHandler()
+            completeOnce("adapter stop")
 
             #if os(macOS)
             // HACK: We have to kill the tunnel process ourselves because of a macOS bug

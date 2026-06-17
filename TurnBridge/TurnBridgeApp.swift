@@ -183,7 +183,7 @@ struct VBridge: App {
                         completionHandler(false)
                         return
                     }
-                    self.startTunnelSession(
+                    self.startTunnelSessionAfterPolicySettle(
                         session,
                         retriesRemaining: 5,
                         recoveryConfiguration: protocolConfiguration,
@@ -192,6 +192,27 @@ struct VBridge: App {
                     )
                 }
             }
+        }
+    }
+
+    private func startTunnelSessionAfterPolicySettle(
+        _ session: NETunnelProviderSession,
+        retriesRemaining: Int,
+        recoveryConfiguration: NETunnelProviderProtocol? = nil,
+        providerBundleIdentifier: String? = nil,
+        recoveryAttempted: Bool = false,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        SharedLogger.debug("Waiting 700ms for VPN policy settle before startTunnel")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            self.startTunnelSession(
+                session,
+                retriesRemaining: retriesRemaining,
+                recoveryConfiguration: recoveryConfiguration,
+                providerBundleIdentifier: providerBundleIdentifier,
+                recoveryAttempted: recoveryAttempted,
+                completionHandler: completionHandler
+            )
         }
     }
 
@@ -293,7 +314,7 @@ struct VBridge: App {
                             SharedLogger.error("recreated tunnelManager.connection is not NETunnelProviderSession")
                             return
                         }
-                        self.startTunnelSession(
+                        self.startTunnelSessionAfterPolicySettle(
                             session,
                             retriesRemaining: 0,
                             recoveryAttempted: true
