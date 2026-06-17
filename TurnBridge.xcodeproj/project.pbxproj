@@ -543,6 +543,7 @@
 						CFBundleURLName = com.prodject.vbridge;
 						CFBundleURLSchemes = (
 							vbridge,
+							wdtt,
 						);
 					},
 				);
@@ -603,6 +604,7 @@
 						CFBundleURLName = com.prodject.vbridge;
 						CFBundleURLSchemes = (
 							vbridge,
+							wdtt,
 						);
 					},
 				);

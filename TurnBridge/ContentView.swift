@@ -234,6 +234,9 @@ struct ContentView: View {
                 if handleWidgetURL(url) {
                     return
                 }
+                if handleConnectionURL(url) {
+                    return
+                }
                 guard url.isFileURL else { return }
                 importFromFile(url)
             }
@@ -661,16 +664,24 @@ struct ContentView: View {
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
         if profile.vkLink.isEmpty {
-            return "Please provide a valid TURN Server URL."
+            return profile.transportMode == .wdtt
+                ? "Please provide a valid VK call URL or hash."
+                : "Please provide a valid TURN Server URL."
         }
         if profile.peerAddr.isEmpty {
             return "Please provide a valid Peer Address."
         }
-        if profile.listenAddr.isEmpty {
+        if profile.transportMode != .wdtt, profile.listenAddr.isEmpty {
             return "Please provide a valid Listen Address."
         }
-        if profile.wgQuickConfig.isEmpty {
+        if profile.transportMode != .wdtt, profile.wgQuickConfig.isEmpty {
             return "Please provide a valid WireGuard configuration."
+        }
+        if profile.transportMode == .srtpCommunity, profile.wrapKeyHex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Please provide a valid SRTP-Community WRAP key."
+        }
+        if profile.transportMode == .wdtt, profile.wdttPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Please provide a valid WDTT password."
         }
         return nil
     }
@@ -725,7 +736,12 @@ struct ContentView: View {
                 wgQuickConfig: profile.wgQuickConfig,
                 turnHost: profile.turnHost,
                 turnPort: profile.turnPort,
-                useUdp: profile.useUdp
+                useUdp: profile.useUdp,
+                transportMode: profile.transportMode,
+                wrapKeyHex: profile.wrapKeyHex,
+                wdttPassword: profile.wdttPassword,
+                wdttClientKey: profile.wdttClientKey,
+                wdttServerKey: profile.wdttServerKey
             ) { isSuccess in
                 if !isSuccess {
                     cancelConnectWatchdog()
@@ -921,6 +937,24 @@ struct ContentView: View {
         }
 
         schedulePendingShortcutActionConsumption()
+        return true
+    }
+
+    private func handleConnectionURL(_ url: URL) -> Bool {
+        let raw = url.absoluteString
+        guard raw.lowercased().hasPrefix(ConfigParser.wdttScheme) else {
+            return false
+        }
+
+        do {
+            let profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: raw), fallbackName: "WDTT")
+            store.addProfile(profile)
+            SharedLogger.info("WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported from URL")
+            showAlert(title: "Success", message: "WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+        } catch {
+            SharedLogger.error("URL import failed: \(error.localizedDescription)")
+            showAlert(title: "Import Error", message: error.localizedDescription)
+        }
         return true
     }
 
@@ -1708,7 +1742,10 @@ struct ContentView: View {
     }
 
     private func effectiveConnectionTarget(for profile: VPNProfile) -> Int {
-        isAmneziaObfuscated(profile.wgQuickConfig) ? 1 : max(profile.nValue, 1)
+        if profile.transportMode == .wg, isAmneziaObfuscated(profile.wgQuickConfig) {
+            return 1
+        }
+        return max(profile.nValue, 1)
     }
 
     private func isAmneziaObfuscated(_ config: String) -> Bool {
@@ -1746,19 +1783,12 @@ struct ContentView: View {
 
         SharedLogger.debug("Parsing clipboard config (\(clipboardString.count) chars)")
         do {
-            let config = try ConfigParser.parse(from: clipboardString)
-            let profile = VPNProfile(
-                name: config.name ?? "Profile",
-                vkLink: config.turn,
-                peerAddr: config.peer,
-                listenAddr: config.listen,
-                nValue: config.n > 0 ? config.n : 10,
-                credsGroupSize: max(config.credsGroupSize ?? config.streamsPerCred ?? 12, 1),
-                wgQuickConfig: config.wg,
-                turnHost: config.turnHost ?? "",
-                turnPort: config.turnPort ?? "",
-                useUdp: config.udp ?? true
-            )
+            let profile: VPNProfile
+            if clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix(ConfigParser.wdttScheme) {
+                profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: clipboardString), fallbackName: "WDTT")
+            } else {
+                profile = profile(fromTurnConfig: try ConfigParser.parse(from: clipboardString), fallbackName: "Profile")
+            }
             store.addProfile(profile)
             SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from clipboard")
 
@@ -1800,20 +1830,16 @@ struct ContentView: View {
             }
 
             let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix(ConfigParser.wdttScheme) {
+                let profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: trimmed), fallbackName: uniqueProfileName(from: url.deletingPathExtension().lastPathComponent))
+                store.addProfile(profile)
+                SharedLogger.info("WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
+                showAlert(title: "Success", message: "WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+                return
+            }
+
             if trimmed.hasPrefix(ConfigParser.scheme) || ConfigParser.legacySchemes.contains(where: { trimmed.hasPrefix($0) }) {
-                let config = try ConfigParser.parse(from: trimmed)
-                let profile = VPNProfile(
-                    name: config.name ?? "Profile",
-                    vkLink: config.turn,
-                    peerAddr: config.peer,
-                    listenAddr: config.listen,
-                    nValue: config.n > 0 ? config.n : 10,
-                    credsGroupSize: max(config.credsGroupSize ?? config.streamsPerCred ?? 12, 1),
-                    wgQuickConfig: config.wg,
-                    turnHost: config.turnHost ?? "",
-                    turnPort: config.turnPort ?? "",
-                    useUdp: config.udp ?? true
-                )
+                let profile = profile(fromTurnConfig: try ConfigParser.parse(from: trimmed), fallbackName: "Profile")
                 store.addProfile(profile)
                 SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
                 showAlert(title: "Success", message: "Profile \"\(store.selectedProfile?.name ?? "")\" imported.")
@@ -1824,15 +1850,16 @@ struct ContentView: View {
             let profileName = uniqueProfileName(from: url.deletingPathExtension().lastPathComponent)
             let profile = VPNProfile(
                 name: profileName,
+                transportMode: .wg,
                 vkLink: "",
                 peerAddr: config.peerAddr,
                 listenAddr: "127.0.0.1:9000",
-                nValue: 10,
+                nValue: 30,
                 credsGroupSize: 12,
                 wgQuickConfig: config.wgQuickConfig,
                 turnHost: "",
                 turnPort: "",
-                useUdp: true
+                useUdp: false
             )
             store.addProfile(profile)
             SharedLogger.info("Amnezia profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
@@ -1841,6 +1868,46 @@ struct ContentView: View {
             SharedLogger.error("File import failed: \(error.localizedDescription)")
             showAlert(title: "Import Error", message: error.localizedDescription)
         }
+    }
+
+    private func profile(fromTurnConfig config: TurnConfigImport, fallbackName: String) -> VPNProfile {
+        let mode = VPNTransportMode(rawValue: config.mode ?? "") ?? .wg
+        return VPNProfile(
+            name: config.name ?? fallbackName,
+            transportMode: mode,
+            vkLink: config.turn,
+            peerAddr: config.peer,
+            listenAddr: config.listen,
+            nValue: config.n > 0 ? config.n : 30,
+            credsGroupSize: max(config.credsGroupSize ?? config.streamsPerCred ?? 12, 1),
+            wgQuickConfig: config.wg,
+            turnHost: config.turnHost ?? "",
+            turnPort: config.turnPort ?? "",
+            useUdp: config.udp ?? false,
+            wrapKeyHex: config.wrapKeyHex ?? "",
+            wdttPassword: config.wdttPassword ?? "",
+            wdttClientKey: config.wdttClientKey ?? "",
+            wdttServerKey: config.wdttServerKey ?? ""
+        )
+    }
+
+    private func profile(fromWDTT config: WDTTConfigImport, fallbackName: String) -> VPNProfile {
+        VPNProfile(
+            name: fallbackName,
+            transportMode: .wdtt,
+            vkLink: config.vkLink,
+            peerAddr: config.peerAddr,
+            listenAddr: "127.0.0.1:\(config.localPort)",
+            nValue: 30,
+            credsGroupSize: 12,
+            wgQuickConfig: "",
+            turnHost: "",
+            turnPort: "",
+            useUdp: false,
+            wdttPassword: config.password,
+            wdttClientKey: config.hashes.first ?? "",
+            wdttServerKey: config.hashes.dropFirst().joined(separator: ",")
+        )
     }
 
     private func addManualProfile() {

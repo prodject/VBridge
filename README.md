@@ -173,6 +173,7 @@ This project was made possible thanks to the work of the open-source community. 
 * [WireGuard-Apple](https://github.com/ut360e/wireguard-apple) — Licensed under MIT / GPL.
 * [Wireguardkit](https://github.com/Shahzainali/Wireguardkit) — Licensed under MIT / GPL.
 * [vk-turn-proxy](https://github.com/cacggghp/vk-turn-proxy) — Licensed under the GNU GPL.
+* [vk-turn-proxy-ios](https://github.com/anton48/vk-turn-proxy-ios) — Licensed under MIT; source for the DTLS+WG phased startup, SRTP-WRAP, and SRTP-WRAP-A / WDTT transport runtime integration.
 * [Amneziawg-Apple](https://github.com/amnezia-vpn/amneziawg-apple.git) — Licensed under MIT.
 * [WINGSV](https://github.com/WINGS-N/WINGSV) — Licensed under the GNU GPL.
 * [proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android) — Licensed under the GPL-3.0.

@@ -154,6 +154,7 @@ private let goProxyCLoggerCallback: @convention(c) (UnsafeMutableRawPointer?, In
 }
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
+    private var vbridgeTunnelHandle: Int32 = -1
 
 	    private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { [weak self] _, message in
@@ -446,29 +447,37 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
-        guard let wgQuickConfig = providerConfiguration["wgQuickConfig"] as? String else {
-            sharedLogger.error("wgQuickConfig missing from provider configuration")
-            SharedLogger.error("WireGuard config missing from provider configuration", source: .wireguard)
-            completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
-            return
+        let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
+        let isWDTT = transportMode == "wdtt"
+        var tunnelConfiguration: TunnelConfiguration?
+        var wgUAPI = ""
+
+        if !isWDTT {
+            guard let wgQuickConfig = providerConfiguration["wgQuickConfig"] as? String else {
+                sharedLogger.error("wgQuickConfig missing from provider configuration")
+                SharedLogger.error("WireGuard config missing from provider configuration", source: .wireguard)
+                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                return
+            }
+
+            do {
+                let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
+                let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
+                applySplitTunnelConfiguration(splitTunnel, to: parsedConfiguration)
+                tunnelConfiguration = parsedConfiguration
+                wgUAPI = PacketTunnelSettingsGenerator(
+                    tunnelConfiguration: parsedConfiguration,
+                    resolvedEndpoints: parsedConfiguration.peers.map(\.endpoint)
+                ).uapiConfiguration().0
+            } catch {
+                sharedLogger.error("wg-quick config parse error: \(error.localizedDescription)")
+                SharedLogger.error("Failed to parse WireGuard config: \(error.localizedDescription)", source: .wireguard)
+                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                return
+            }
         }
 
-        let tunnelConfiguration: TunnelConfiguration
-        do {
-            tunnelConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
-        } catch {
-            sharedLogger.error("wg-quick config parse error: \(error.localizedDescription)")
-            SharedLogger.error("Failed to parse WireGuard config: \(error.localizedDescription)", source: .wireguard)
-            completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
-            return
-        }
-
-        let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
-        applySplitTunnelConfiguration(splitTunnel, to: tunnelConfiguration)
-
-        guard let vkLink = providerConfiguration["vkLink"] as? String,
-              let peerAddr = providerConfiguration["peerAddr"] as? String,
-              let listenAddr = providerConfiguration["listenAddr"] as? String,
+        guard let peerAddr = providerConfiguration["peerAddr"] as? String,
               let nValueInt = providerConfiguration["nValue"] as? Int else {
             sharedLogger.error("Missing proxy parameters in configuration")
             SharedLogger.error("Missing proxy parameters in configuration", source: .tunnel)
@@ -476,13 +485,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         let requestedNValue = Int32(nValueInt)
-        let credsGroupSize = Int32(max((providerConfiguration["credsGroupSize"] as? Int) ?? 12, 1))
-        let useSingleProxyWorker = usesAmneziaObfuscation(tunnelConfiguration)
+        let useSingleProxyWorker = tunnelConfiguration.map(usesAmneziaObfuscation) ?? false
         let nValue = useSingleProxyWorker ? Int32(1) : requestedNValue
-        let manualCaptcha = (providerConfiguration["manualCaptcha"] as? Bool) ?? false
         let turnHost = (providerConfiguration["turnHost"] as? String) ?? ""
         let turnPort = (providerConfiguration["turnPort"] as? String) ?? ""
         let useUdp = (providerConfiguration["useUdp"] as? Bool) ?? true
+        let vkLink = (providerConfiguration["vkLink"] as? String) ?? ""
+        let wrapKeyHex = (providerConfiguration["wrapKeyHex"] as? String) ?? ""
+        let wdttPassword = (providerConfiguration["wdttPassword"] as? String) ?? ""
 
         if useSingleProxyWorker && requestedNValue != 1 {
             SharedLogger.warning(
@@ -490,50 +500,249 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 source: .tunnel
             )
         }
-        SharedLogger.info("Peer: \(peerAddr), Listen: \(listenAddr), N: \(nValue), Workers/Identity: \(credsGroupSize), ManualCaptcha: \(manualCaptcha), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
-        SharedLogger.info("Starting TURN proxy...", source: .tunnel)
+        SharedLogger.info("Peer: \(peerAddr), Mode: \(transportMode), N: \(nValue), TURN override: \(turnHost.isEmpty ? "auto" : turnHost):\(turnPort.isEmpty ? "auto" : turnPort), UDP: \(useUdp)", source: .tunnel)
 
-        ProxySetLogger(nil, goProxyCLoggerCallback)
-        ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
-
-        DispatchQueue.global(qos: .userInteractive).async {
-            StartProxy(vkLink, peerAddr, listenAddr, nValue, credsGroupSize, manualCaptcha ? 1 : 0, turnHost, turnPort, useUdp ? 1 : 0)
+        guard let proxyConfigJSON = makeAntonProxyConfigJSON(
+            mode: transportMode,
+            vkLink: vkLink,
+            peerAddr: peerAddr,
+            turnHost: turnHost,
+            turnPort: turnPort,
+            useUdp: useUdp,
+            nValue: Int(nValue),
+            wrapKeyHex: wrapKeyHex,
+            wdttPassword: wdttPassword
+        ) else {
+            SharedLogger.error("Failed to encode proxy config", source: .tunnel)
+            completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+            return
         }
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let ready = ProxyWaitReady(120000)
             guard let self = self else { return }
+            let handle = proxyConfigJSON.withCString {
+                VBridgeWGStartVKBootstrap(UnsafeMutablePointer(mutating: $0))
+            }
+            guard handle >= 0 else {
+                SharedLogger.error("VBridgeWGStartVKBootstrap failed: \(handle)", source: .tunnel)
+                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                return
+            }
+            self.vbridgeTunnelHandle = handle
 
-            if ready == 0 {
-                StopProxy()
-                sharedLogger.error("TURN proxy failed before DTLS became ready")
-                SharedLogger.error("TURN proxy startup failed before DTLS became ready", source: .tunnel)
+            let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
+            guard ready == 1 else {
+                VBridgeWGTurnOff(handle)
+                self.vbridgeTunnelHandle = -1
+                SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                 return
             }
 
-            SharedLogger.info("DTLS ready, starting WireGuard adapter...", source: .tunnel)
-            self.adapter.start(tunnelConfiguration: tunnelConfiguration) { [weak self] adapterError in
-                guard let self = self else { return }
-                if let adapterError = adapterError {
-                    sharedLogger.error("WireGuard adapter error: \(adapterError.localizedDescription)")
-                    SharedLogger.error("WireGuard adapter failed: \(adapterError.localizedDescription)", source: .wireguard)
-                } else {
-                    let interfaceName = self.adapter.interfaceName ?? "unknown"
-                    sharedLogger.log("Tunnel interface is \(interfaceName)")
-                    SharedLogger.info("Tunnel up on interface \(interfaceName)", source: .wireguard)
+            var networkSettings: NEPacketTunnelNetworkSettings
+            var effectiveUAPI = wgUAPI
+
+            if isWDTT {
+                guard let provisionJSON = self.waitForWrapAProvision(handle: handle),
+                      let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
+                      !provision.uapi.isEmpty else {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    SharedLogger.error("WDTT provision failed", source: .tunnel)
+                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    return
                 }
-                completionHandler(adapterError)
+                effectiveUAPI = provision.uapi
+                networkSettings = self.createTunnelSettings(
+                    address: provision.address,
+                    dns: provision.dns,
+                    mtu: provision.mtu.map(String.init) ?? "1280",
+                    tunnelRemoteAddress: peerAddr.components(separatedBy: ":").first ?? "127.0.0.1"
+                )
+            } else if let tunnelConfiguration = tunnelConfiguration {
+                networkSettings = PacketTunnelSettingsGenerator(
+                    tunnelConfiguration: tunnelConfiguration,
+                    resolvedEndpoints: tunnelConfiguration.peers.map(\.endpoint)
+                ).generateNetworkSettings()
+            } else {
+                VBridgeWGTurnOff(handle)
+                self.vbridgeTunnelHandle = -1
+                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                return
+            }
+
+            self.setTunnelNetworkSettings(networkSettings) { error in
+                if let error = error {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    completionHandler(error)
+                    return
+                }
+
+                guard let tunFd = self.findTunFileDescriptor() else {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    SharedLogger.error("Could not find TUN file descriptor", source: .wireguard)
+                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    return
+                }
+
+                let attachResult = effectiveUAPI.withCString {
+                    VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
+                }
+                guard attachResult == 1 else {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
+                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    return
+                }
+                SharedLogger.info("Tunnel up with anton48 runtime", source: .wireguard)
+                completionHandler(nil)
             }
         }
+    }
+
+    private struct WrapAProvision: Decodable {
+        let address: String
+        let dns: String
+        let mtu: Int?
+        let uapi: String
+    }
+
+    private func makeAntonProxyConfigJSON(
+        mode: String,
+        vkLink: String,
+        peerAddr: String,
+        turnHost: String,
+        turnPort: String,
+        useUdp: Bool,
+        nValue: Int,
+        wrapKeyHex: String,
+        wdttPassword: String
+    ) -> String? {
+        let useWDTT = mode == "wdtt"
+        let useSRTPCommunity = mode == "srtpCommunity"
+        let payload: [String: Any] = [
+            "vk_link": vkLink,
+            "peer_addr": peerAddr,
+            "turn_server": turnHost,
+            "turn_port": turnPort,
+            "use_dtls": !useWDTT,
+            "use_udp": useUdp,
+            "use_wrap": useSRTPCommunity,
+            "wrap_key_hex": wrapKeyHex,
+            "use_srtp": false,
+            "use_wrap_a": useWDTT,
+            "wrap_a_password": wdttPassword,
+            "device_id": persistedDeviceID(),
+            "num_conns": max(nValue, 1),
+            "cred_pool_cooldown_seconds": 120
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+
+    private func persistedDeviceID() -> String {
+        let key = "wdtt.device.id"
+        if let groupID = SharedLogger.appGroupID,
+           let defaults = UserDefaults(suiteName: groupID) {
+            if let existing = defaults.string(forKey: key), !existing.isEmpty {
+                return existing
+            }
+            let value = UUID().uuidString
+            defaults.set(value, forKey: key)
+            defaults.synchronize()
+            return value
+        }
+        return UUID().uuidString
+    }
+
+    private func waitForWrapAProvision(handle: Int32) -> String? {
+        guard let pointer = VBridgeWGWaitWrapAProvision(handle, 30000) else {
+            return nil
+        }
+        defer { free(UnsafeMutableRawPointer(pointer)) }
+        let json = String(cString: pointer)
+        return json.isEmpty ? nil : json
+    }
+
+    private func createTunnelSettings(
+        address: String,
+        dns: String,
+        mtu: String,
+        tunnelRemoteAddress: String
+    ) -> NEPacketTunnelNetworkSettings {
+        let parts = address.split(separator: "/", maxSplits: 1).map(String.init)
+        let ip = parts.first ?? "192.168.102.3"
+        let prefix = parts.count > 1 ? (Int(parts[1]) ?? 24) : 24
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: tunnelRemoteAddress)
+        let ipv4 = NEIPv4Settings(addresses: [ip], subnetMasks: [prefixToSubnet(prefix)])
+        ipv4.includedRoutes = [NEIPv4Route.default()]
+        settings.ipv4Settings = ipv4
+
+        let dnsServers = dns
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !dnsServers.isEmpty {
+            let dnsSettings = NEDNSSettings(servers: dnsServers)
+            dnsSettings.matchDomains = [""]
+            settings.dnsSettings = dnsSettings
+        }
+
+        if let mtuValue = Int(mtu), mtuValue > 0 {
+            settings.mtu = NSNumber(value: mtuValue)
+        } else {
+            settings.mtu = NSNumber(value: 1280)
+        }
+        return settings
+    }
+
+    private func prefixToSubnet(_ prefix: Int) -> String {
+        let clamped = min(max(prefix, 0), 32)
+        var mask: UInt32 = 0
+        for i in 0..<clamped {
+            mask |= (1 << (31 - i))
+        }
+        return "\(mask >> 24).\((mask >> 16) & 0xFF).\((mask >> 8) & 0xFF).\(mask & 0xFF)"
+    }
+
+    private func findTunFileDescriptor() -> Int32? {
+        var buffer = [CChar](repeating: 0, count: Int(IFNAMSIZ))
+        for fd: Int32 in 0...1024 {
+            var length = socklen_t(buffer.count)
+            if getsockopt(fd, 2, 2, &buffer, &length) == 0 {
+                let name = String(cString: buffer)
+                if name.hasPrefix("utun") {
+                    return fd
+                }
+            }
+        }
+        return nil
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         sharedLogger.log("Stopping tunnel")
         SharedLogger.info("Stopping tunnel (reason: \(reason.rawValue))", source: .tunnel)
 
-        StopProxy()
-        SharedLogger.info("TURN proxy stopped", source: .tunnel)
+        if vbridgeTunnelHandle >= 0 {
+            VBridgeWGTurnOff(vbridgeTunnelHandle)
+            vbridgeTunnelHandle = -1
+            SharedLogger.info("anton48 runtime stopped", source: .tunnel)
+            clearCaptchaRequest()
+            clearCaptchaRecoveryRequest()
+            SharedLogger.info("Tunnel stopped", source: .tunnel)
+            completionHandler()
+            return
+        } else {
+            StopProxy()
+            SharedLogger.info("TURN proxy stopped", source: .tunnel)
+        }
         clearCaptchaRequest()
         clearCaptchaRecoveryRequest()
 
@@ -561,6 +770,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         sharedLogger.log("handleAppMessage: received \(messageData.count) bytes")
         if messageData.count == 1, messageData[0] == 0 {
             sharedLogger.log("handleAppMessage: runtime configuration requested")
+            if vbridgeTunnelHandle >= 0, let pointer = VBridgeWGGetConfig(vbridgeTunnelHandle) {
+                defer { free(UnsafeMutableRawPointer(pointer)) }
+                let settings = String(cString: pointer)
+                completionHandler(settings.data(using: .utf8))
+                return
+            }
             adapter.getRuntimeConfiguration { settings in
                 var data: Data?
                 if let settings = settings {

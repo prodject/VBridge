@@ -88,6 +88,11 @@ struct VBridge: App {
         turnHost: String,
         turnPort: String,
         useUdp: Bool,
+        transportMode: VPNTransportMode,
+        wrapKeyHex: String,
+        wdttPassword: String,
+        wdttClientKey: String,
+        wdttServerKey: String,
         completionHandler: @escaping (Bool) -> Void
     ) {
         SharedLogger.info("Connecting... peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
@@ -121,7 +126,12 @@ struct VBridge: App {
                 "manualCaptcha": UserDefaults.standard.bool(forKey: "manualCaptcha"),
                 "turnHost": turnHost,
                 "turnPort": turnPort,
-                "useUdp": useUdp
+                "useUdp": useUdp,
+                "transportMode": transportMode.rawValue,
+                "wrapKeyHex": wrapKeyHex,
+                "wdttPassword": wdttPassword,
+                "wdttClientKey": wdttClientKey,
+                "wdttServerKey": wdttServerKey
             ]
 
             let defaults = UserDefaults.standard

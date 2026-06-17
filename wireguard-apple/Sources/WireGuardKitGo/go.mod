@@ -3,13 +3,18 @@ module github.com/amnezia-vpn/amneziawg-apple
 go 1.26
 
 require (
+	github.com/bogdanfinn/fhttp v0.6.8
+	github.com/bogdanfinn/tls-client v1.14.0
+	github.com/bogdanfinn/utls v1.7.7-barnius
 	github.com/cbeuw/connutil v1.0.1
 	github.com/google/uuid v1.6.0
 	github.com/pion/dtls/v3 v3.1.2
 	github.com/pion/logging v0.2.4
+	github.com/pion/rtp v1.10.1
+	github.com/pion/srtp/v3 v3.0.10
 	github.com/pion/turn/v5 v5.0.2
 	golang.org/x/sys v0.43.0
-	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 )
 
 require (

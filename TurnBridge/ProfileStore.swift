@@ -92,7 +92,7 @@ class ProfileStore: ObservableObject {
             wgQuickConfig: defaults.string(forKey: "wgQuickConfig") ?? "",
             turnHost: defaults.string(forKey: "turnHost") ?? "",
             turnPort: defaults.string(forKey: "turnPort") ?? "",
-            useUdp: defaults.object(forKey: "useUdp") as? Bool ?? true
+            useUdp: defaults.object(forKey: "useUdp") as? Bool ?? false
         )
         profiles = [profile]
         selectedProfileID = profile.id
