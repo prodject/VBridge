@@ -115,8 +115,7 @@ struct VBridge: App {
 
             let protocolConfiguration = NETunnelProviderProtocol()
             let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
-            let providerBundleIdentifier = "\(currentAppBundleId).network-extension"
-            protocolConfiguration.providerBundleIdentifier = providerBundleIdentifier
+            protocolConfiguration.providerBundleIdentifier = "\(currentAppBundleId).network-extension"
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr
             protocolConfiguration.serverAddress = cleanIP
 
@@ -165,39 +164,46 @@ struct VBridge: App {
                     return
                 }
 
-                NETunnelProviderManager.loadAllFromPreferences { refreshedManagers, error in
+                tunnelManager.loadFromPreferences { error in
                     if let error = error {
-                        NSLog("Error (reloadAllFromPreferences): \(error)")
-                        SharedLogger.error("Failed to reload tunnel preferences after save: \(error.localizedDescription)")
+                        NSLog("Error (loadFromPreferences): \(error)")
+                        SharedLogger.error("Failed to reload tunnel preferences: \(error.localizedDescription)")
                         completionHandler(false)
                         return
                     }
 
-                    let refreshedManager = refreshedManagers?.first {
-                        guard let protocolConfiguration = $0.protocolConfiguration as? NETunnelProviderProtocol else {
-                            return false
-                        }
-                        return protocolConfiguration.providerBundleIdentifier == providerBundleIdentifier
-                    } ?? refreshedManagers?.first
-
-                    guard let refreshedManager,
-                          let session = refreshedManager.connection as? NETunnelProviderSession else {
-                        SharedLogger.error("reloaded tunnelManager.connection is not NETunnelProviderSession")
+                    guard let session = tunnelManager.connection as? NETunnelProviderSession else {
+                        SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
                         completionHandler(false)
                         return
                     }
-                    do {
-                        let startupNonce = UUID().uuidString
-                        SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue), nonce=\(startupNonce.prefix(8))")
-                        try session.startTunnel(options: ["startupNonce": startupNonce as NSString])
-                        completionHandler(true)
-                    } catch {
-                        NSLog("Error (startTunnel): \(error)")
-                        SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
-                        completionHandler(false)
-                    }
+                    self.startTunnelSession(session, retriesRemaining: 5, completionHandler: completionHandler)
                 }
             }
+        }
+    }
+
+    private func startTunnelSession(
+        _ session: NETunnelProviderSession,
+        retriesRemaining: Int,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        if session.status == .disconnecting, retriesRemaining > 0 {
+            SharedLogger.warning("Tunnel session still disconnecting; retrying start in 1s (remaining=\(retriesRemaining))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.startTunnelSession(session, retriesRemaining: retriesRemaining - 1, completionHandler: completionHandler)
+            }
+            return
+        }
+
+        do {
+            SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue)")
+            try session.startTunnel()
+            completionHandler(true)
+        } catch {
+            NSLog("Error (startTunnel): \(error)")
+            SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
+            completionHandler(false)
         }
     }
 
