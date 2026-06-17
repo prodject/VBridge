@@ -12,16 +12,20 @@ import WireGuardKitC
 /// A type alias for `Result` type that holds a tuple with source and resolved endpoint.
 typealias EndpointResolutionResult = Result<(Endpoint, Endpoint), DNSResolutionError>
 
-class PacketTunnelSettingsGenerator {
+public class PacketTunnelSettingsGenerator {
     static let runtimeMatchDomainPrefix = "__vbridge_match_domain__:"
     static let runtimeDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
 
     let tunnelConfiguration: TunnelConfiguration
     let resolvedEndpoints: [Endpoint?]
 
-    init(tunnelConfiguration: TunnelConfiguration, resolvedEndpoints: [Endpoint?]) {
+    public init(tunnelConfiguration: TunnelConfiguration, resolvedEndpoints: [Endpoint?]) {
         self.tunnelConfiguration = tunnelConfiguration
         self.resolvedEndpoints = resolvedEndpoints
+    }
+
+    public func uapiConfigurationString() -> String {
+        uapiConfiguration().0
     }
 
     func endpointUapiConfiguration() -> (String, [EndpointResolutionResult?]) {
@@ -126,7 +130,7 @@ class PacketTunnelSettingsGenerator {
         return (wgSettings, resolutionResults)
     }
 
-    func generateNetworkSettings() -> NEPacketTunnelNetworkSettings {
+    public func generateNetworkSettings() -> NEPacketTunnelNetworkSettings {
         /* iOS requires a tunnel endpoint, whereas in WireGuard it's valid for
          * a tunnel to have no endpoint, or for there to be many endpoints, in
          * which case, displaying a single one in settings doesn't really

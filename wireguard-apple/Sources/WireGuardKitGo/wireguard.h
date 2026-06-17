@@ -21,6 +21,13 @@ extern void wgBumpSockets(int handle);
 extern void wgDisableSomeRoamingForBrokenMobileSemantics(int handle);
 extern const char *wgVersion();
 
+extern int32_t VBridgeWGStartVKBootstrap(const char *jsonConfig);
+extern int32_t VBridgeWGWaitBootstrapReady(int32_t handle, int32_t timeoutMs);
+extern int32_t VBridgeWGAttachWireGuard(int32_t handle, const char *settings, int32_t tun_fd);
+extern void VBridgeWGTurnOff(int32_t handle);
+extern char *VBridgeWGGetConfig(int32_t handle);
+extern char *VBridgeWGWaitWrapAProvision(int32_t handle, int32_t timeoutMs);
+
 typedef void (*libxray_sockcallback)(uintptr_t fd, void* ctx);
 extern char *LibXrayCutGeoData(const char *datDir, const char *dstDir, const char *cutCodePath);
 extern char *LibXrayLoadGeoData(const char *datDir, const char *name, const char *geoType);

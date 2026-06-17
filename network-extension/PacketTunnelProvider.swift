@@ -468,7 +468,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 wgUAPI = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: parsedConfiguration,
                     resolvedEndpoints: parsedConfiguration.peers.map(\.endpoint)
-                ).uapiConfiguration().0
+                ).uapiConfigurationString()
             } catch {
                 sharedLogger.error("wg-quick config parse error: \(error.localizedDescription)")
                 SharedLogger.error("Failed to parse WireGuard config: \(error.localizedDescription)", source: .wireguard)
