@@ -17,7 +17,7 @@ static void disable_async_preempt(void) {
 
 // Logging callback type matching wireguard-apple convention
 typedef void(*logger_fn_t)(int level, const char *msg);
-static void callLogger(void *fn, int level, const char *msg) {
+static void vbridgeCallLogger(void *fn, int level, const char *msg) {
 	((logger_fn_t)fn)(level, msg);
 }
 
@@ -984,7 +984,7 @@ type clogWriter struct {
 func (w *clogWriter) Write(p []byte) (int, error) {
 	msg := C.CString(string(p))
 	defer C.free(unsafe.Pointer(msg))
-	C.callLogger(w.fn, 0, msg)
+	C.vbridgeCallLogger(w.fn, 0, msg)
 	return len(p), nil
 }
 
@@ -1259,5 +1259,3 @@ func init() {
 		}
 	}
 }
-
-func main() {}
