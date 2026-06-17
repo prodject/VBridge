@@ -1765,6 +1765,9 @@ func (p *Proxy) TURNServerIP() string {
 // stopTunnel doesn't return within ~26s, losing log buffers in the
 // process; bounding the wait avoids that path.
 func (p *Proxy) Stop() {
+	if p.sessCancel != nil {
+		p.sessCancel()
+	}
 	p.cancel()
 	p.wg.Wait()
 }
@@ -1777,6 +1780,9 @@ func (p *Proxy) Stop() {
 // the leftover goroutines die when the Go runtime terminates moments
 // later as iOS reaps the extension process.
 func (p *Proxy) StopWithTimeout(timeout time.Duration) {
+	if p.sessCancel != nil {
+		p.sessCancel()
+	}
 	p.cancel()
 	done := make(chan struct{})
 	go func() {
@@ -2848,6 +2854,19 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 		return ch
 	}
 	turnDone := spawnTURN(turnAddr, creds)
+	turnDoneDrained := false
+	defer func() {
+		connCancel()
+		if turnDoneDrained {
+			return
+		}
+		select {
+		case <-turnDone:
+			turnDoneDrained = true
+		case <-time.After(2 * time.Second):
+			log.Printf("proxy: [conn %d] WRAP-A TURN worker did not stop within 2s", connIdx)
+		}
+	}()
 
 	// WRAP-A obfuscation around the DTLS-transport end of the pipe, then a
 	// plain DTLS client with amurcanov's exact config.
@@ -2861,6 +2880,7 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 		connCancel()
 		select {
 		case turnErr := <-turnDone:
+			turnDoneDrained = true
 			if turnErr != nil {
 				// Mirror runDTLSSession's error attribution so quota / auth
 				// failures land on the slot that actually carried the cred.
@@ -4789,4 +4809,3 @@ func (s *srtpSessionConn) Close() error {
 	})
 	return firstErr
 }
-
