@@ -130,12 +130,22 @@ private struct CompiledSplitTunnelRules {
 }
 
 private func publishGoProxyLog(level: Int32, message: String) {
+    let lowercasedMessage = message.lowercased()
     let shouldRequestCaptchaRecovery =
         message.contains("captcha failed after") ||
         message.contains("manual captcha proxy solve error") ||
         message.contains("manual captcha image solve error") ||
         message.contains("manual captcha timed out") ||
         message.contains("Fatal manual captcha error")
+    let shouldSurfaceConnectionWarning =
+        lowercasedMessage.contains("allocation quota reached") ||
+        lowercasedMessage.contains("allocate quota error") ||
+        lowercasedMessage.contains("error 486") ||
+        lowercasedMessage.contains("failed to refresh allocation") ||
+        lowercasedMessage.contains("failed to refresh permissions") ||
+        lowercasedMessage.contains("all retransmissions failed") ||
+        lowercasedMessage.contains("broken pipe") ||
+        lowercasedMessage.contains("i/o timeout")
 
     if shouldRequestCaptchaRecovery {
         storeCaptchaRecoveryRequest(reason: message)
@@ -144,6 +154,9 @@ private func publishGoProxyLog(level: Int32, message: String) {
     if level == 1 {
         sharedLogger.error("[TP]: \(message, privacy: .public)")
         SharedLogger.error(message, source: .tunnel)
+    } else if shouldSurfaceConnectionWarning {
+        sharedLogger.warning("[TP]: \(message, privacy: .public)")
+        SharedLogger.warning(message, source: .tunnel)
     } else {
         sharedLogger.log("[TP]: \(message, privacy: .public)")
         SharedLogger.info(message, source: .tunnel)
@@ -615,7 +628,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                     return
                 }
-                SharedLogger.info("Tunnel up with anton48 runtime", source: .wireguard)
+                SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
                 completionHandler(nil)
             }
         }
@@ -751,7 +764,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if vbridgeTunnelHandle >= 0 {
             VBridgeWGTurnOff(vbridgeTunnelHandle)
             vbridgeTunnelHandle = -1
-            SharedLogger.info("anton48 runtime stopped", source: .tunnel)
+            SharedLogger.info("vk-turn-proxy-ios runtime stopped", source: .tunnel)
             clearCaptchaRequest()
             clearCaptchaRecoveryRequest()
             SharedLogger.info("Tunnel stopped", source: .tunnel)

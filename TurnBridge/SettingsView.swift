@@ -54,7 +54,7 @@ struct SettingsView: View {
 
                 Stepper("Connections (n): \(profile.nValue)", value: binding(\.nValue), in: 1...32)
                 Stepper("Workers per TURN identity: \(profile.credsGroupSize)", value: binding(\.credsGroupSize), in: 1...32)
-                Text("`n` controls total parallel TURN sessions. The anton48 runtime is tuned for fast 30-connection startup.")
+                Text("`n` controls total parallel TURN sessions. The vk-turn-proxy-ios runtime is tuned for fast 30-connection startup.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

@@ -1036,6 +1036,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                     upload: context.state.uploadSpeedText ?? "UL --"
                 )
 
+                disconnectControlRow(state: context.state)
+
                 liveActivityCompactNetworkRow(
                     isp: context.state.ispText,
                     ip: context.state.ipAddressText
@@ -1083,6 +1085,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                             download: context.state.downloadSpeedText ?? "DL --",
                             upload: context.state.uploadSpeedText ?? "UL --"
                         )
+
+                        disconnectControlRow(state: context.state)
                     }
                     .padding(.horizontal, 2)
                 }
@@ -1391,39 +1395,36 @@ private struct VBridgeLiveActivityWidget: Widget {
         if state.phase == .connected || state.phase == .connecting || state.phase == .disconnecting {
             if let disconnectURL = URL(string: "vbridge://disconnect") {
                 Link(destination: disconnectURL) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 5) {
                         Image(systemName: "power.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                         Text("Disconnect")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 4)
                     .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(maxWidth: 126, alignment: .center)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
             } else {
-                HStack {
+                HStack(spacing: 5) {
                     Image(systemName: "power.circle.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
                     Text("Disconnect")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
-                    Spacer(minLength: 0)
+                        .lineLimit(1)
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity)
-                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(maxWidth: 126, alignment: .center)
+                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }
