@@ -93,6 +93,7 @@ struct VBridge: App {
         wdttPassword: String,
         wdttClientKey: String,
         wdttServerKey: String,
+        seededTURN: SeededTURNCredentials? = nil,
         completionHandler: @escaping (Bool) -> Void
     ) {
         SharedLogger.info("Connecting... mode=\(transportMode.rawValue), peer=\(peerAddr), listen=\(listenAddr), n=\(nValue)")
@@ -125,7 +126,7 @@ struct VBridge: App {
             let cleanIP = peerAddr.components(separatedBy: ":").first ?? peerAddr
             protocolConfiguration.serverAddress = cleanIP
 
-            protocolConfiguration.providerConfiguration = [
+            var providerConfiguration: [String: Any] = [
                 "wgQuickConfig": normalizedConfig,
                 "vkLink": vkLink,
                 "peerAddr": peerAddr,
@@ -142,6 +143,11 @@ struct VBridge: App {
                 "wdttClientKey": wdttClientKey,
                 "wdttServerKey": wdttServerKey
             ]
+            if let seededTURN {
+                providerConfiguration["seededTURN"] = seededTURN.providerConfiguration
+                SharedLogger.info("Using seeded TURN credentials: addr=\(seededTURN.address)")
+            }
+            protocolConfiguration.providerConfiguration = providerConfiguration
 
             let defaults = UserDefaults.standard
             let excludeAPNs = defaults.object(forKey: "excludeAPNs") as? Bool ?? false

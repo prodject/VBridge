@@ -458,6 +458,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
         VBridgeWGSetLogger(vbridgeGoLoggerCallback)
+        VBridgeWGSetTimezoneOffset(Int32(TimeZone.current.secondsFromGMT()))
+        if let logPath = SharedLogger.logFileURL?.path {
+            logPath.withCString {
+                VBridgeWGSetLogFilePath($0)
+            }
+        }
         clearCaptchaRecoveryRequest()
 
         guard let protocolConfiguration = self.protocolConfiguration as? NETunnelProviderProtocol,
@@ -516,6 +522,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let wdttPassword = (providerConfiguration["wdttPassword"] as? String) ?? ""
         let wdttClientKey = (providerConfiguration["wdttClientKey"] as? String) ?? ""
         let wdttServerKey = (providerConfiguration["wdttServerKey"] as? String) ?? ""
+        let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
 
         if useSingleProxyWorker && requestedNValue != 1 {
             SharedLogger.warning(
@@ -540,7 +547,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             useUdp: useUdp,
             nValue: Int(nValue),
             wrapKeyHex: wrapKeyHex,
-            wdttPassword: wdttPassword
+            wdttPassword: wdttPassword,
+            seededTURN: seededTURN
         ) else {
             SharedLogger.error("Failed to encode proxy config", source: .tunnel)
             completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
@@ -663,11 +671,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         useUdp: Bool,
         nValue: Int,
         wrapKeyHex: String,
-        wdttPassword: String
+        wdttPassword: String,
+        seededTURN: [String: String]?
     ) -> String? {
         let useWDTT = mode == "wdtt"
         let useSRTPCommunity = mode == "srtpCommunity"
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "vk_link": vkLink,
             "peer_addr": peerAddr,
             "turn_server": turnHost,
@@ -683,6 +692,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "num_conns": max(nValue, 1),
             "cred_pool_cooldown_seconds": 120
         ]
+        if let seededTURN,
+           let address = seededTURN["address"], !address.isEmpty,
+           let username = seededTURN["username"], !username.isEmpty,
+           let password = seededTURN["password"], !password.isEmpty {
+            payload["seeded_turn"] = [
+                "address": address,
+                "username": username,
+                "password": password
+            ]
+        }
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let json = String(data: data, encoding: .utf8) else {

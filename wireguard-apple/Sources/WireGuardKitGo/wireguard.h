@@ -29,6 +29,19 @@ extern void VBridgeWGTurnOff(int32_t handle);
 extern char *VBridgeWGGetConfig(int32_t handle);
 extern char *VBridgeWGWaitWrapAProvision(int32_t handle, int32_t timeoutMs);
 extern void VBridgeWGSetLogger(vbridge_logger_fn_t logger_fn);
+extern char *VBridgeWGProbeVKCreds(
+    const char *linkID,
+    const char *vkHostIPsJSON,
+    const char *savedSID,
+    const char *savedKey,
+    const char *savedToken1,
+    const char *savedClientID,
+    double savedTs,
+    double savedAttempt
+);
+extern void VBridgeWGSetLogFilePath(const char *path);
+extern void VBridgeWGSetTimezoneOffset(int offsetSeconds);
+extern char *VBridgeWGGetTURNServerIP(int32_t handle);
 
 typedef void (*libxray_sockcallback)(uintptr_t fd, void* ctx);
 extern char *LibXrayCutGeoData(const char *datDir, const char *dstDir, const char *cutCodePath);

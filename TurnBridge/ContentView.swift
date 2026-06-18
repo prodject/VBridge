@@ -1,6 +1,8 @@
 import SwiftUI
 import NetworkExtension
 import UniformTypeIdentifiers
+import WebKit
+import WireGuardKitGo
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -125,6 +127,152 @@ private struct ConnectionPingSample: Equatable {
     }
 }
 
+private struct PreBootstrapCaptchaView: View {
+    let url: String
+    let onToken: (String) -> Void
+    let onLimit: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let targetURL = URL(string: url) {
+                    PreBootstrapCaptchaWebView(
+                        url: targetURL,
+                        onToken: { token in
+                            onToken(token)
+                            dismiss()
+                        },
+                        onLimit: onLimit
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 36, weight: .semibold))
+                        Text("Invalid captcha URL")
+                            .font(.headline)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Captcha")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PreBootstrapCaptchaWebView: UIViewRepresentable {
+    let url: URL
+    let onToken: (String) -> Void
+    let onLimit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onToken: onToken, onLimit: onLimit)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+
+        let contentController = WKUserContentController()
+        contentController.add(context.coordinator, name: "captchaToken")
+        contentController.addUserScript(WKUserScript(
+            source: Self.captureScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
+        configuration.userContentController = contentController
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        private let onToken: (String) -> Void
+        private let onLimit: () -> Void
+        private var didResolve = false
+
+        init(onToken: @escaping (String) -> Void, onLimit: @escaping () -> Void) {
+            self.onToken = onToken
+            self.onLimit = onLimit
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let body = message.body as? String else { return }
+            if body.hasPrefix("token:"), !didResolve {
+                didResolve = true
+                onToken(String(body.dropFirst("token:".count)))
+            } else if body.hasPrefix("state:limit") {
+                onLimit()
+            }
+        }
+    }
+
+    private static let captureScript = """
+    (function() {
+        var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.captchaToken;
+        if (!h) return;
+
+        function inspect(data) {
+            try {
+                if (data && data.response && data.response.success_token) {
+                    h.postMessage('token:' + data.response.success_token);
+                } else if (data && data.response && data.response.status === 'ERROR_LIMIT') {
+                    h.postMessage('state:limit:api_error_limit');
+                }
+            } catch (e) {}
+        }
+
+        var origFetch = window.fetch;
+        if (origFetch) {
+            window.fetch = function() {
+                var url = arguments[0];
+                if (typeof url === 'object' && url.url) url = url.url;
+                var urlStr = String(url || '');
+                var p = origFetch.apply(this, arguments);
+                if (urlStr.indexOf('captchaNotRobot.check') !== -1) {
+                    p.then(function(response) {
+                        return response.clone().json();
+                    }).then(inspect).catch(function() {});
+                }
+                return p;
+            };
+        }
+
+        var origOpen = XMLHttpRequest.prototype.open;
+        var origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this._vbridgeURL = String(url || '');
+            return origOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function() {
+            var xhr = this;
+            if ((xhr._vbridgeURL || '').indexOf('captchaNotRobot.check') !== -1) {
+                xhr.addEventListener('load', function() {
+                    try { inspect(JSON.parse(xhr.responseText)); } catch(e) {}
+                });
+            }
+            return origSend.apply(this, arguments);
+        };
+    })();
+    """
+}
+
 private struct SpeedMeasurementResult {
     var downloadMbps: Double?
     var uploadMbps: Double?
@@ -136,6 +284,23 @@ private struct CaptchaRecoveryRequest: Codable, Equatable {
     let id: String
     let reason: String
     let createdAt: TimeInterval
+}
+
+private struct PreBootstrapCaptchaChallenge: Identifiable, Equatable {
+    let id = UUID()
+    let url: String
+}
+
+private enum PreBootstrapCaptchaResult {
+    case solved(String)
+    case refresh
+    case dismissed
+}
+
+private enum PreBootstrapProbeResult {
+    case ok(SeededTURNCredentials)
+    case captcha(url: String, sid: String, ts: Double, attempt: Double, token1: String, clientID: String, isRateLimit: Bool)
+    case error(String)
 }
 
 struct ContentView: View {
@@ -180,6 +345,8 @@ struct ContentView: View {
     @State private var pendingShortcutActionTask: Task<Void, Never>?
     @State private var captchaRecoveryRestartCount = 0
     @State private var lastHandledCaptchaRecoveryID: String?
+    @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
+    @State private var preBootstrapCaptchaContinuation: CheckedContinuation<PreBootstrapCaptchaResult, Never>?
 
     private let connectWatchdogTimeout: UInt64 = 180
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
@@ -216,6 +383,22 @@ struct ContentView: View {
                 CaptchaSolverView(request: request) {
                     captchaBridge.clear()
                 }
+            }
+            .sheet(item: $preBootstrapCaptcha, onDismiss: {
+                completePreBootstrapCaptcha(.dismissed)
+            }) { challenge in
+                PreBootstrapCaptchaView(
+                    url: challenge.url,
+                    onToken: { token in
+                        completePreBootstrapCaptcha(.solved(token))
+                    },
+                    onLimit: {
+                        completePreBootstrapCaptcha(.refresh)
+                    },
+                    onCancel: {
+                        completePreBootstrapCaptcha(.dismissed)
+                    }
+                )
             }
             .sheet(isPresented: $showFileImporter) {
                 DocumentPicker(
@@ -727,37 +910,261 @@ struct ContentView: View {
             let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
             tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
             SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
-            app.turnOnTunnel(
-                vkLink: profile.vkLink,
-                peerAddr: profile.peerAddr,
-                listenAddr: effectiveListenAddr,
-                nValue: configuredThreadCount,
-                credsGroupSize: max(profile.credsGroupSize, 1),
-                wgQuickConfig: profile.wgQuickConfig,
-                turnHost: profile.turnHost,
-                turnPort: profile.turnPort,
-                useUdp: profile.useUdp,
-                transportMode: profile.transportMode,
-                wrapKeyHex: profile.wrapKeyHex,
-                wdttPassword: profile.wdttPassword,
-                wdttClientKey: profile.wdttClientKey,
-                wdttServerKey: profile.wdttServerKey
-            ) { isSuccess in
-                if !isSuccess {
-                    cancelConnectWatchdog()
-                    resetSpeedTelemetry()
-                    vpnStatus = .disconnected
-                    SharedLogger.error("Tunnel start failed")
-                    endLiveActivity(profileName: profile.name, immediate: true)
-                    presentConnectionIssue(
-                        title: "Connection Failed",
-                        message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
-                    )
+            Task {
+                do {
+                    let seededTURN = try await prepareSeededTURNIfNeeded(for: profile)
+                    await MainActor.run {
+                        guard vpnStatus == .connecting else { return }
+                        startConfiguredTunnel(
+                            profile: profile,
+                            listenAddr: effectiveListenAddr,
+                            configuredThreadCount: configuredThreadCount,
+                            seededTURN: seededTURN
+                        )
+                    }
+                } catch {
+                    await MainActor.run {
+                        cancelConnectWatchdog()
+                        resetSpeedTelemetry()
+                        vpnStatus = .disconnected
+                        SharedLogger.error("Pre-bootstrap failed: \(error.localizedDescription)")
+                        endLiveActivity(profileName: profile.name, immediate: true)
+                        presentConnectionIssue(
+                            title: "Connection Failed",
+                            message: error.localizedDescription
+                        )
+                        refreshWidgetTimelines()
+                    }
                 }
-                refreshWidgetTimelines()
             }
             startConnectWatchdog()
         }
+    }
+
+    private func startConfiguredTunnel(
+        profile: VPNProfile,
+        listenAddr: String,
+        configuredThreadCount: Int,
+        seededTURN: SeededTURNCredentials?
+    ) {
+        app.turnOnTunnel(
+            vkLink: profile.vkLink,
+            peerAddr: profile.peerAddr,
+            listenAddr: listenAddr,
+            nValue: configuredThreadCount,
+            credsGroupSize: max(profile.credsGroupSize, 1),
+            wgQuickConfig: profile.wgQuickConfig,
+            turnHost: profile.turnHost,
+            turnPort: profile.turnPort,
+            useUdp: profile.useUdp,
+            transportMode: profile.transportMode,
+            wrapKeyHex: profile.wrapKeyHex,
+            wdttPassword: profile.wdttPassword,
+            wdttClientKey: profile.wdttClientKey,
+            wdttServerKey: profile.wdttServerKey,
+            seededTURN: seededTURN
+        ) { isSuccess in
+            if !isSuccess {
+                cancelConnectWatchdog()
+                resetSpeedTelemetry()
+                vpnStatus = .disconnected
+                SharedLogger.error("Tunnel start failed")
+                endLiveActivity(profileName: profile.name, immediate: true)
+                presentConnectionIssue(
+                    title: "Connection Failed",
+                    message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
+                )
+            }
+            refreshWidgetTimelines()
+        }
+    }
+
+    @MainActor
+    private func prepareSeededTURNIfNeeded(for profile: VPNProfile) async throws -> SeededTURNCredentials? {
+        guard profile.transportMode == .wdtt else { return nil }
+
+        configureGoRuntimeForPreBootstrap()
+
+        if let cached = CredCache.loadValidCred() {
+            SharedLogger.info("WDTT pre-bootstrap: using cached TURN cred addr=\(cached.address)")
+            return cached
+        }
+
+        SharedLogger.info("WDTT pre-bootstrap: no usable cached TURN cred, probing VK before VPN start")
+
+        var savedSID = ""
+        var savedKey = ""
+        var savedToken1 = ""
+        var savedClientID = ""
+        var savedTs: Double = 0
+        var savedAttempt: Double = 0
+        let linkID = vkLinkID(from: profile.vkLink)
+
+        for attempt in 1...5 {
+            SharedLogger.info("WDTT pre-bootstrap probe attempt \(attempt)/5")
+            let result = await probeVKCreds(
+                linkID: linkID,
+                savedSID: savedSID,
+                savedKey: savedKey,
+                savedToken1: savedToken1,
+                savedClientID: savedClientID,
+                savedTs: savedTs,
+                savedAttempt: savedAttempt
+            )
+
+            switch result {
+            case .ok(let creds):
+                if !profile.turnHost.isEmpty, !profile.turnPort.isEmpty {
+                    let override = SeededTURNCredentials(
+                        address: "\(profile.turnHost):\(profile.turnPort)",
+                        username: creds.username,
+                        password: creds.password
+                    )
+                    SharedLogger.info("WDTT pre-bootstrap: TURN override active, using \(override.address)")
+                    return override
+                }
+                SharedLogger.info("WDTT pre-bootstrap: TURN creds acquired addr=\(creds.address)")
+                return creds
+
+            case .captcha(let url, let sid, let ts, let captchaAttempt, let token1, let clientID, let isRateLimit):
+                if isRateLimit {
+                    throw preBootstrapError("VK temporarily rate-limited captcha. Try again in a minute.")
+                }
+                SharedLogger.warning("WDTT pre-bootstrap: captcha required before VPN start")
+                switch await awaitPreBootstrapCaptcha(url: url) {
+                case .solved(let token):
+                    savedSID = sid
+                    savedKey = token
+                    savedToken1 = token1
+                    savedClientID = clientID
+                    savedTs = ts
+                    savedAttempt = captchaAttempt
+                case .refresh:
+                    savedSID = ""
+                    savedKey = ""
+                    savedToken1 = ""
+                    savedClientID = ""
+                    savedTs = 0
+                    savedAttempt = 0
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                case .dismissed:
+                    throw preBootstrapError("Captcha was dismissed before WDTT pre-bootstrap completed.")
+                }
+
+            case .error(let message):
+                throw preBootstrapError("WDTT pre-bootstrap probe failed: \(message)")
+            }
+        }
+
+        throw preBootstrapError("WDTT pre-bootstrap exhausted 5 attempts without TURN credentials.")
+    }
+
+    private func configureGoRuntimeForPreBootstrap() {
+        VBridgeWGSetTimezoneOffset(Int32(TimeZone.current.secondsFromGMT()))
+        if let logPath = SharedLogger.logFileURL?.path {
+            logPath.withCString {
+                VBridgeWGSetLogFilePath($0)
+            }
+        }
+    }
+
+    private func vkLinkID(from value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), let last = url.pathComponents.last, !last.isEmpty, last != "/" {
+            return last
+        }
+        return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
+    }
+
+    private func probeVKCreds(
+        linkID: String,
+        savedSID: String,
+        savedKey: String,
+        savedToken1: String,
+        savedClientID: String,
+        savedTs: Double,
+        savedAttempt: Double
+    ) async -> PreBootstrapProbeResult {
+        await Task.detached(priority: .userInitiated) {
+            let cResult = linkID.withCString { linkPtr in
+                "".withCString { hostIPsPtr in
+                    savedSID.withCString { sidPtr in
+                        savedKey.withCString { keyPtr in
+                            savedToken1.withCString { tokenPtr in
+                                savedClientID.withCString { clientIDPtr in
+                                    VBridgeWGProbeVKCreds(
+                                        linkPtr,
+                                        hostIPsPtr,
+                                        sidPtr,
+                                        keyPtr,
+                                        tokenPtr,
+                                        clientIDPtr,
+                                        savedTs,
+                                        savedAttempt
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            guard let cResult else {
+                return .error("VBridgeWGProbeVKCreds returned NULL")
+            }
+            defer { free(UnsafeMutableRawPointer(cResult)) }
+
+            let json = String(cString: cResult)
+            guard let data = json.data(using: .utf8),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .error("invalid probe JSON: \(String(json.prefix(200)))")
+            }
+
+            switch dict["status"] as? String {
+            case "ok":
+                let creds = SeededTURNCredentials(
+                    address: dict["turn_address"] as? String ?? "",
+                    username: dict["turn_username"] as? String ?? "",
+                    password: dict["turn_password"] as? String ?? ""
+                )
+                guard !creds.address.isEmpty, !creds.username.isEmpty, !creds.password.isEmpty else {
+                    return .error("probe returned empty TURN credentials")
+                }
+                return .ok(creds)
+            case "captcha":
+                return .captcha(
+                    url: dict["captcha_url"] as? String ?? "",
+                    sid: dict["sid"] as? String ?? "",
+                    ts: dict["ts"] as? Double ?? 0,
+                    attempt: dict["attempt"] as? Double ?? 0,
+                    token1: dict["token1"] as? String ?? "",
+                    clientID: dict["client_id"] as? String ?? "",
+                    isRateLimit: dict["is_rate_limit"] as? Bool ?? false
+                )
+            default:
+                return .error(dict["message"] as? String ?? "unknown probe error")
+            }
+        }.value
+    }
+
+    @MainActor
+    private func awaitPreBootstrapCaptcha(url: String) async -> PreBootstrapCaptchaResult {
+        await withCheckedContinuation { continuation in
+            preBootstrapCaptchaContinuation = continuation
+            preBootstrapCaptcha = PreBootstrapCaptchaChallenge(url: url)
+        }
+    }
+
+    @MainActor
+    private func completePreBootstrapCaptcha(_ result: PreBootstrapCaptchaResult) {
+        guard let continuation = preBootstrapCaptchaContinuation else { return }
+        preBootstrapCaptchaContinuation = nil
+        preBootstrapCaptcha = nil
+        continuation.resume(returning: result)
+    }
+
+    private func preBootstrapError(_ message: String) -> NSError {
+        NSError(domain: "VBridge.WDTTPreBootstrap", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     private func handleCaptchaRecoveryIfNeeded() {

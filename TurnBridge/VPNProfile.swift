@@ -1,5 +1,19 @@
 import Foundation
 
+struct SeededTURNCredentials: Codable, Equatable {
+    let address: String
+    let username: String
+    let password: String
+
+    var providerConfiguration: [String: String] {
+        [
+            "address": address,
+            "username": username,
+            "password": password
+        ]
+    }
+}
+
 enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
     case wg
     case srtpCommunity

@@ -12,6 +12,7 @@
 		B1A1C0012F00000000000002 /* VBridgeWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1A1C0012F00000000000001 /* VBridgeWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
+		B2D4C0012F90000100000001 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -23,6 +24,13 @@
 			remoteInfo = "network-extension";
 		};
 		A7EBA65C2F606C00003CA7F3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A7EBA6242F606924003CA7F3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A7EBA6552F606B0F003CA7F3;
+			remoteInfo = WireguardGoBridge;
+		};
+		B2D4C0022F90000100000002 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A7EBA6242F606924003CA7F3 /* Project object */;
 			proxyType = 1;
@@ -128,6 +136,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B2D4C0012F90000100000001 /* WireGuardKitGo in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -213,6 +222,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				B2D4C0032F90000100000003 /* PBXTargetDependency */,
 				A7EBA64E2F606A38003CA7F3 /* PBXTargetDependency */,
 				B1A1C0012F00000000000005 /* PBXTargetDependency */,
 			);
@@ -221,6 +231,7 @@
 			);
 			name = VBridge;
 			packageProductDependencies = (
+				A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */,
 				D2F0A0022F606C0003CA7F3 /* SpeedcheckerSDK */,
 			);
 			productName = VBridge;
@@ -387,6 +398,11 @@
 			isa = PBXTargetDependency;
 			target = A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */;
 			targetProxy = A7EBA65C2F606C00003CA7F3 /* PBXContainerItemProxy */;
+		};
+		B2D4C0032F90000100000003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A7EBA6552F606B0F003CA7F3 /* WireguardGoBridge */;
+			targetProxy = B2D4C0022F90000100000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
