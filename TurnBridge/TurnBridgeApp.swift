@@ -102,7 +102,8 @@ struct VBridge: App {
         }
         let normalizedConfig = normalizedWgQuickConfig(wgQuickConfig, listenAddr: listenAddr)
         let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
-        let providerBundleIdentifier = "\(currentAppBundleId).network-extension"
+        let providerBundleIdentifier = Self.packetTunnelProviderBundleIdentifier(appBundleIdentifier: currentAppBundleId)
+        SharedLogger.debug("Packet tunnel provider id: app=\(currentAppBundleId), provider=\(providerBundleIdentifier)")
 
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
             if let error = error {
@@ -199,6 +200,19 @@ struct VBridge: App {
                 }
             }
         }
+    }
+
+    private static func packetTunnelProviderBundleIdentifier(appBundleIdentifier: String) -> String {
+        if let plugInsURL = Bundle.main.builtInPlugInsURL {
+            let appexURL = plugInsURL.appendingPathComponent("network-extension.appex")
+            if let appexBundle = Bundle(url: appexURL),
+               let bundleIdentifier = appexBundle.bundleIdentifier,
+               !bundleIdentifier.isEmpty {
+                return bundleIdentifier
+            }
+        }
+
+        return "\(appBundleIdentifier).network-extension"
     }
 
     private func startTunnelSessionAfterPolicySettle(
