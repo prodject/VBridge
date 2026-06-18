@@ -111,6 +111,43 @@ jobs:
           # extension in PlugIns. Keep widgets out of the unsigned IPA artifact.
           rm -rf "$PACKAGE_ROOT/Payload/VBridge.app/PlugIns/VBridgeWidgetExtension.appex"
 
+          SIGNED_APP_PATH="$PACKAGE_ROOT/Payload/VBridge.app"
+          PACKET_TUNNEL_PATH="$SIGNED_APP_PATH/PlugIns/PacketTunnel.appex"
+
+          sign_nested_code() {
+            local root="$1"
+            if [ -d "$root/Frameworks" ]; then
+              while IFS= read -r framework; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$framework"
+              done < <(find "$root/Frameworks" -type d -name "*.framework")
+
+              while IFS= read -r dylib; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$dylib"
+              done < <(find "$root/Frameworks" -type f -name "*.dylib")
+            fi
+          }
+
+          sign_nested_code "$PACKET_TUNNEL_PATH"
+          /usr/bin/codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements network-extension/network_extension.entitlements \
+            "$PACKET_TUNNEL_PATH"
+
+          sign_nested_code "$SIGNED_APP_PATH"
+          /usr/bin/codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements TurnBridge/TurnBridge.entitlements \
+            "$SIGNED_APP_PATH"
+
+          echo "Packaged app entitlements:"
+          /usr/bin/codesign -d --entitlements :- "$SIGNED_APP_PATH" 2>/dev/null || true
+          echo "Packaged PacketTunnel entitlements:"
+          /usr/bin/codesign -d --entitlements :- "$PACKET_TUNNEL_PATH" 2>/dev/null || true
+
           (cd "$PACKAGE_ROOT" && ditto -c -k --sequesterRsrc --keepParent Payload "$IPA_PATH")
 
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
