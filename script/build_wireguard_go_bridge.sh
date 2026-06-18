@@ -63,7 +63,23 @@ fi
 GO_VERSION=$("$GO_BIN" version 2>/dev/null || true)
 [ -n "$GO_VERSION" ] || fail "Unable to read Go version"
 
-current_stamp="go=${GO_VERSION};platform=${PLATFORM_NAME:-iphoneos};archs=${ARCHS:-arm64};target=${IPHONEOS_DEPLOYMENT_TARGET:-unknown}"
+source_hash=$(
+    cd "$wireguard_go_dir"
+    find . \
+        \( -path './out' -o -path './.tmp' \) -prune -o \
+        -type f \
+        \( -name '*.go' -o -name '*.c' -o -name '*.h' -o -name '*.s' -o -name 'Makefile' -o -name 'go.mod' -o -name 'go.sum' \) \
+        -print |
+        LC_ALL=C sort |
+        while IFS= read -r source_file; do
+            shasum -a 256 "$source_file"
+        done |
+        shasum -a 256 |
+        awk '{print $1}'
+)
+[ -n "$source_hash" ] || fail "Unable to compute WireGuardGoBridge source hash"
+
+current_stamp="go=${GO_VERSION};platform=${PLATFORM_NAME:-iphoneos};archs=${ARCHS:-arm64};target=${IPHONEOS_DEPLOYMENT_TARGET:-unknown};src=${source_hash}"
 
 outputs_ready=0
 if [ -f "$out_dir/libwg-go.a" ] && [ -f "$out_dir/wireguard-go-version.h" ] && [ -f "$stamp_file" ]; then
@@ -90,8 +106,14 @@ cd "$wireguard_go_dir"
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 make_cmd=${MAKE:-/usr/bin/make}
 
+if [ "$outputs_ready" -ne 1 ]; then
+    rm -f "$out_dir/libwg-go.a" "$out_dir/wireguard-go-version.h" "$stamp_file"
+    rm -rf "$wireguard_go_dir/.tmp/wireguard-go-bridge"
+fi
+
 log "🔨 Building WireGuardGoBridge in $wireguard_go_dir"
 log "   Go: $GO_VERSION"
+log "   Source hash: $source_hash"
 log "   Jobs: $jobs"
 
 if ! "$make_cmd" -j"$jobs" build version-header >"$log_file" 2>&1; then

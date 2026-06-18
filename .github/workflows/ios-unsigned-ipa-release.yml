@@ -38,7 +38,7 @@ jobs:
         with:
           path: |
             wireguard-apple/Sources/WireGuardKitGo/out
-          key: wireguard-go-bridge-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/*.go', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
+          key: wireguard-go-bridge-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
 
       - name: Show toolchain
         run: |
