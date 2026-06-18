@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Security)
-import Security
-#endif
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -116,12 +113,10 @@ public struct SharedLogger {
     private static let _appGroupID: String? = {
         var candidates: [String] = []
 
-        // 1) Ask the runtime code-signing subsystem first. This survives
-        // DER entitlements and resigning formats where Mach-O XML scanning
-        // cannot see the embedded entitlement plist.
-        if let groups = appGroupsFromCurrentTask() {
-            candidates.append(contentsOf: groups)
-        }
+        // 1) Stable project default. This is the configured App Group in all
+        // app, extension, and widget entitlements; prefer it over brittle
+        // binary entitlement scans.
+        candidates.append(defaultAppGroupID)
 
         // 2) Fallback: try reading App Group from code signature entitlements in the Mach-O binary.
         if let groups = appGroupsFromBinary() {
@@ -132,9 +127,6 @@ public struct SharedLogger {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
         let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
         candidates.append("group.\(baseBundleID)")
-
-        // 4) Stable project default fallback.
-        candidates.append(defaultAppGroupID)
 
         for candidate in candidates {
             if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: candidate) != nil {
@@ -148,22 +140,6 @@ public struct SharedLogger {
     }()
 
     static var appGroupID: String? { _appGroupID }
-
-    private static func appGroupsFromCurrentTask() -> [String]? {
-        #if canImport(Security)
-        guard let task = SecTaskCreateFromSelf(nil),
-              let value = SecTaskCopyValueForEntitlement(
-                task,
-                "com.apple.security.application-groups" as CFString,
-                nil
-              ) else {
-            return nil
-        }
-        return value as? [String]
-        #else
-        return nil
-        #endif
-    }
 
     private static func appGroupsFromBinary() -> [String]? {
         // Try own executable first
