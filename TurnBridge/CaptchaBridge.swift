@@ -26,18 +26,6 @@ enum CaptchaBridgeNotification {
     static let requestDidChange = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
 }
 
-private func captchaBridgeDarwinCallback(
-    _ center: CFNotificationCenter?,
-    _ observer: UnsafeMutableRawPointer?,
-    _ name: CFNotificationName?,
-    _ object: UnsafeRawPointer?,
-    _ userInfo: CFDictionary?
-) {
-    guard let observer else { return }
-    let token = Unmanaged<NotificationObserver>.fromOpaque(observer).takeUnretainedValue()
-    token.fire()
-}
-
 @MainActor
 final class CaptchaBridge: ObservableObject {
     @Published var activeRequest: CaptchaRequest?
@@ -156,7 +144,11 @@ final class CaptchaBridge: ObservableObject {
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(observer).toOpaque(),
-            captchaBridgeDarwinCallback,
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let token = Unmanaged<NotificationObserver>.fromOpaque(observer).takeUnretainedValue()
+                token.fire()
+            },
             CaptchaBridgeNotification.requestDidChange.rawValue,
             nil,
             .deliverImmediately
