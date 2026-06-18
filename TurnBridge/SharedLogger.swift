@@ -134,9 +134,7 @@ public struct SharedLogger {
             }
         }
 
-        // Last resort: keep deterministic fallback instead of nil, so
-        // UserDefaults(suiteName:) path remains consistent for debug builds.
-        return candidates.first
+        return nil
     }()
 
     static var appGroupID: String? { _appGroupID }
@@ -339,6 +337,8 @@ public struct SharedLogger {
         ispName: String? = nil,
         ipAddress: String? = nil
     ) {
+        guard appGroupID != nil else { return }
+
         let phase = rawStatus.flatMap(normalizedWidgetState(from:))
         VBridgeLiveActivityStore.update(
             profileName: profileName,
@@ -356,6 +356,8 @@ public struct SharedLogger {
     }
 
     private static func updateWidgetLiveStateIfNeeded(message: String) {
+        guard appGroupID != nil else { return }
+
         var phase: VBridgeLiveActivityPhase?
         if message.contains("VPN status:") {
             let statusValue = message.replacingOccurrences(of: "VPN status:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -401,6 +403,8 @@ public struct SharedLogger {
     }
 
     private static func reloadWidgetTimelinesIfAvailable() {
+        guard appGroupID != nil else { return }
+
 #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
