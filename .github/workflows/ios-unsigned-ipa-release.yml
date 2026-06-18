@@ -106,6 +106,11 @@ jobs:
           PACKAGE_ROOT="$(mktemp -d)"
           mkdir -p "$PACKAGE_ROOT/Payload"
           ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/VBridge.app"
+
+          # GBox-style resigners are more reliable with a single Packet Tunnel
+          # extension in PlugIns. Keep widgets out of the unsigned IPA artifact.
+          rm -rf "$PACKAGE_ROOT/Payload/VBridge.app/PlugIns/VBridgeWidgetExtension.appex"
+
           (cd "$PACKAGE_ROOT" && ditto -c -k --sequesterRsrc --keepParent Payload "$IPA_PATH")
 
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
