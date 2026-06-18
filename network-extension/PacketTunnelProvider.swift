@@ -561,10 +561,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             var networkSettings: NEPacketTunnelNetworkSettings
             var effectiveUAPI = wgUAPI
+            let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
+            guard ready == 1 else {
+                VBridgeWGTurnOff(handle)
+                self.vbridgeTunnelHandle = -1
+                if ready == 0 {
+                    SharedLogger.error("VK/TURN bootstrap timed out", source: .tunnel)
+                } else {
+                    SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
+                }
+                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                return
+            }
+            SharedLogger.info("VK/TURN bootstrap ready", source: .tunnel)
+
+            let turnServerIP = self.currentTURNServerIP(handle: handle)
+            if turnServerIP.isEmpty {
+                SharedLogger.warning("Bootstrap ready but TURN server IP is empty", source: .tunnel)
+            } else {
+                SharedLogger.info("TURN server IP: \(turnServerIP)", source: .tunnel)
+            }
 
             if isWDTT {
                 SharedLogger.info("WDTT waiting for WRAP-A GETCONF provision", source: .tunnel)
-                guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 120000),
+                guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 30000),
                       let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.uapi.isEmpty else {
                     VBridgeWGTurnOff(handle)
@@ -579,18 +599,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     address: provision.address,
                     dns: provision.dns,
                     mtu: provision.mtu.map(String.init) ?? "1280",
-                    tunnelRemoteAddress: peerAddr.components(separatedBy: ":").first ?? "127.0.0.1"
+                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP
                 )
             } else if let tunnelConfiguration = tunnelConfiguration {
-                let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
-                guard ready == 1 else {
-                    VBridgeWGTurnOff(handle)
-                    self.vbridgeTunnelHandle = -1
-                    SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
-                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
-                    return
-                }
-
                 networkSettings = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: tunnelConfiguration,
                     resolvedEndpoints: tunnelConfiguration.peers.map(\.endpoint)
@@ -602,34 +613,36 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             }
 
-            self.setTunnelNetworkSettings(networkSettings) { error in
-                if let error = error {
-                    VBridgeWGTurnOff(handle)
-                    self.vbridgeTunnelHandle = -1
-                    completionHandler(error)
-                    return
-                }
+            DispatchQueue.main.async {
+                self.setTunnelNetworkSettings(networkSettings) { error in
+                    if let error = error {
+                        VBridgeWGTurnOff(handle)
+                        self.vbridgeTunnelHandle = -1
+                        completionHandler(error)
+                        return
+                    }
 
-                guard let tunFd = self.findTunFileDescriptor() else {
-                    VBridgeWGTurnOff(handle)
-                    self.vbridgeTunnelHandle = -1
-                    SharedLogger.error("Could not find TUN file descriptor", source: .wireguard)
-                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
-                    return
-                }
+                    guard let tunFd = self.findTunFileDescriptor() else {
+                        VBridgeWGTurnOff(handle)
+                        self.vbridgeTunnelHandle = -1
+                        SharedLogger.error("Could not find TUN file descriptor", source: .wireguard)
+                        completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                        return
+                    }
 
-                let attachResult = effectiveUAPI.withCString {
-                    VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
+                    let attachResult = effectiveUAPI.withCString {
+                        VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
+                    }
+                    guard attachResult == 1 else {
+                        VBridgeWGTurnOff(handle)
+                        self.vbridgeTunnelHandle = -1
+                        SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
+                        completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                        return
+                    }
+                    SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                    completionHandler(nil)
                 }
-                guard attachResult == 1 else {
-                    VBridgeWGTurnOff(handle)
-                    self.vbridgeTunnelHandle = -1
-                    SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
-                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
-                    return
-                }
-                SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
-                completionHandler(nil)
             }
         }
     }
@@ -700,6 +713,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         defer { free(UnsafeMutableRawPointer(pointer)) }
         let json = String(cString: pointer)
         return json.isEmpty ? nil : json
+    }
+
+    private func currentTURNServerIP(handle: Int32) -> String {
+        guard let pointer = VBridgeWGGetTURNServerIP(handle) else {
+            return ""
+        }
+        defer { free(UnsafeMutableRawPointer(pointer)) }
+        return String(cString: pointer)
     }
 
     private func createTunnelSettings(
