@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 90
 
     env:
@@ -19,10 +19,7 @@ jobs:
       XCODE_TARGET: VBridge
       XCODE_CONFIGURATION: Release
       XCODE_SDK: iphoneos
-      # GitHub-hosted Xcode 16.4 supports iOS deployment targets only up to 18.5.99.
-      # Keep the repo's local project settings as-is, but build the CI artifact with
-      # the highest target supported by the runner toolchain.
-      IPHONEOS_DEPLOYMENT_TARGET: "18.5"
+      IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,66 +81,6 @@ jobs:
             MARKETING_VERSION="$APP_VERSION" \
             CURRENT_PROJECT_VERSION="$APP_BUILD" \
             build
-
-      - name: Ad-hoc sign app bundle with entitlements
-        run: |
-          set -euo pipefail
-
-          APP_PATH="$GITHUB_WORKSPACE/build/${XCODE_CONFIGURATION}-iphoneos/VBridge.app"
-          if [ ! -d "$APP_PATH" ]; then
-            APP_PATH="$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/Build/Products/${XCODE_CONFIGURATION}-iphoneos/VBridge.app" -print -quit)"
-          fi
-
-          test -n "$APP_PATH"
-          test -d "$APP_PATH"
-
-          sign_if_signable() {
-            local path="$1"
-            if [ -e "$path" ]; then
-              /usr/bin/codesign --force --sign - --timestamp=none "$path"
-            fi
-          }
-
-          sign_bundle() {
-            local bundle_path="$1"
-            local entitlements_path="$2"
-
-            if [ -d "$bundle_path/Frameworks" ]; then
-              while IFS= read -r framework; do
-                sign_if_signable "$framework"
-              done < <(find "$bundle_path/Frameworks" -type d -name "*.framework")
-
-              while IFS= read -r dylib; do
-                sign_if_signable "$dylib"
-              done < <(find "$bundle_path/Frameworks" -type f -name "*.dylib")
-            fi
-
-            /usr/bin/codesign \
-              --force \
-              --sign - \
-              --timestamp=none \
-              --entitlements "$entitlements_path" \
-              "$bundle_path"
-          }
-
-          if [ -d "$APP_PATH/PlugIns/network-extension.appex" ]; then
-            sign_bundle "$APP_PATH/PlugIns/network-extension.appex" "network-extension/network_extension.entitlements"
-          fi
-          if [ -d "$APP_PATH/PlugIns/VBridgeWidgetExtension.appex" ]; then
-            sign_bundle "$APP_PATH/PlugIns/VBridgeWidgetExtension.appex" "WidgetExtension/WidgetExtension.entitlements"
-          fi
-          sign_bundle "$APP_PATH" "TurnBridge/TurnBridge.entitlements"
-
-          echo "App entitlements:"
-          /usr/bin/codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true
-          if [ -d "$APP_PATH/PlugIns/network-extension.appex" ]; then
-            echo "Network extension entitlements:"
-            /usr/bin/codesign -d --entitlements :- "$APP_PATH/PlugIns/network-extension.appex" 2>/dev/null || true
-          fi
-          if [ -d "$APP_PATH/PlugIns/VBridgeWidgetExtension.appex" ]; then
-            echo "Widget extension entitlements:"
-            /usr/bin/codesign -d --entitlements :- "$APP_PATH/PlugIns/VBridgeWidgetExtension.appex" 2>/dev/null || true
-          fi
 
       - name: Package unsigned IPA
         id: package
