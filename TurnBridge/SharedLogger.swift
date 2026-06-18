@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Security)
+import Security
+#endif
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -113,17 +116,24 @@ public struct SharedLogger {
     private static let _appGroupID: String? = {
         var candidates: [String] = []
 
-        // 1) Try reading App Group from code signature entitlements in the Mach-O binary.
+        // 1) Ask the runtime code-signing subsystem first. This survives
+        // DER entitlements and resigning formats where Mach-O XML scanning
+        // cannot see the embedded entitlement plist.
+        if let groups = appGroupsFromCurrentTask() {
+            candidates.append(contentsOf: groups)
+        }
+
+        // 2) Fallback: try reading App Group from code signature entitlements in the Mach-O binary.
         if let groups = appGroupsFromBinary() {
             candidates.append(contentsOf: groups)
         }
 
-        // 2) Fallback: derive from bundle ID (works for Xcode-signed builds).
+        // 3) Fallback: derive from bundle ID (works for Xcode-signed builds).
         let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
         let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
         candidates.append("group.\(baseBundleID)")
 
-        // 3) Stable project default fallback.
+        // 4) Stable project default fallback.
         candidates.append(defaultAppGroupID)
 
         for candidate in candidates {
@@ -138,6 +148,22 @@ public struct SharedLogger {
     }()
 
     static var appGroupID: String? { _appGroupID }
+
+    private static func appGroupsFromCurrentTask() -> [String]? {
+        #if canImport(Security)
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                task,
+                "com.apple.security.application-groups" as CFString,
+                nil
+              ) else {
+            return nil
+        }
+        return value as? [String]
+        #else
+        return nil
+        #endif
+    }
 
     private static func appGroupsFromBinary() -> [String]? {
         // Try own executable first
@@ -195,9 +221,20 @@ public struct SharedLogger {
     }
 
     static var logFileURL: URL? {
-        guard let groupID = appGroupID else { return nil }
-        let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
-        return container?.appendingPathComponent("vpn_tunnel.log")
+        if let groupID = appGroupID,
+           let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
+            return container.appendingPathComponent("vpn_tunnel.log")
+        }
+
+        // Main-app fallback for improperly re-signed builds where the App
+        // Group entitlement is absent. The Network Extension cannot share this
+        // file, but app-side logs and UI remain usable instead of showing a
+        // broken empty state.
+        guard !Bundle.main.bundlePath.hasSuffix(".appex"),
+              let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documents.appendingPathComponent("vpn_tunnel.log")
     }
 
     private static func normalizedWidgetState(from rawValue: String) -> VBridgeLiveActivityPhase? {
