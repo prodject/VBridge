@@ -8,6 +8,7 @@ import WireGuardKit
 import WireGuardKitGo
 import os
 import Network
+import Darwin
 
 let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
@@ -16,6 +17,14 @@ private let captchaRecoveryStorageKey = "captcha.recovery.request"
 private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.recovery.request.changed" as CFString)
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
+private let goRuntimeMemoryLimit = "24MiB"
+
+private func configureGoRuntimeMemoryBeforeFirstCall() {
+    setenv("GOMEMLIMIT", goRuntimeMemoryLimit, 1)
+    setenv("GOGC", "25", 1)
+    setenv("GODEBUG", "asyncpreemptoff=1,madvdontneed=1", 1)
+    NSLog("Go runtime env configured: GOMEMLIMIT=\(goRuntimeMemoryLimit), GOGC=25")
+}
 
 private struct CaptchaRecoveryRequest: Codable {
     let id: String
@@ -456,6 +465,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         NSLog("START TUNNEL CALLED")
+        configureGoRuntimeMemoryBeforeFirstCall()
         sharedLogger.log("START TUNNEL CALLED")
         SharedLogger.info("START TUNNEL CALLED", source: .tunnel)
         sharedLogger.log("=== Starting tunnel ===")

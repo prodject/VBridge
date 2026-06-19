@@ -1197,11 +1197,11 @@ func init() {
 	// Trade-offs vs 40 MB: ~2-3× more GC cycles, possibly +5-10% CPU
 	// during heavy traffic, possible throughput regression of a few % in
 	// speedtest. If those regress noticeably, bump back to 38 MB. If
-	// jetsam still fires at 35 MB, the next lever is reducing live
-	// working set (smaller per-conn buffers, fewer goroutines, lower
-	// NumConns) rather than dropping the limit further.
-	debug.SetMemoryLimit(35 << 20)
-	log.Printf("bridge: GOMEMLIMIT set to 35 MB (soft cap for jetsam defence — lowered from 40 MB in build 130)")
+	// Current GBox-signed builds can cross the 50 MB ActiveHard limit during
+	// Go runtime startup before bootstrap logs are emitted. Keep the cap lower
+	// so initial GC pressure starts before the extension reaches jetsam.
+	debug.SetMemoryLimit(24 << 20)
+	log.Printf("bridge: GOMEMLIMIT set to 24 MB (soft cap for NetworkExtension jetsam defence)")
 
 	// Periodic debug.FreeOSMemory() — added in build 131 after build 130
 	// soak confirmed Fix A reduced but did not eliminate JETSAM_REASON_
