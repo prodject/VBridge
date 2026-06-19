@@ -386,8 +386,7 @@ final class VBridgeLiveActivityCoordinator {
         pingSamples: [VBridgePingSample]? = nil
     ) {
         let updatedAt = Date()
-        VBridgeLiveActivityStore.update(
-            profileName: profileName,
+        var content = VBridgeVPNLiveActivityAttributes.ContentState(
             phase: phase,
             activeConnections: activeConnections,
             totalConnections: totalConnections,
@@ -400,9 +399,54 @@ final class VBridgeLiveActivityCoordinator {
             pingSamples: pingSamples,
             updatedAt: updatedAt
         )
-        guard let snapshot = VBridgeLiveActivityStore.load() else { return }
+
+        if let existing = VBridgeLiveActivityStore.load(), existing.profileName == profileName {
+            if content.activeConnections == nil {
+                content.activeConnections = existing.content.activeConnections
+            }
+            if content.totalConnections == nil {
+                content.totalConnections = existing.content.totalConnections
+            }
+            if content.relayIP == nil {
+                content.relayIP = existing.content.relayIP
+            }
+            if content.estimatedRemainingSeconds == nil {
+                content.estimatedRemainingSeconds = existing.content.estimatedRemainingSeconds
+            }
+            if content.downloadSpeedMbps == nil {
+                content.downloadSpeedMbps = existing.content.downloadSpeedMbps
+            }
+            if content.uploadSpeedMbps == nil {
+                content.uploadSpeedMbps = existing.content.uploadSpeedMbps
+            }
+            if content.ispName == nil {
+                content.ispName = existing.content.ispName
+            }
+            if content.ipAddress == nil {
+                content.ipAddress = existing.content.ipAddress
+            }
+            if content.pingSamples == nil {
+                content.pingSamples = existing.content.pingSamples
+            }
+        }
+
+        if phase == .connecting || phase == .disconnecting || phase == .disconnected || phase == .unknown {
+            content.activeConnections = nil
+            content.totalConnections = nil
+            content.relayIP = nil
+            content.estimatedRemainingSeconds = nil
+            content.downloadSpeedMbps = nil
+            content.uploadSpeedMbps = nil
+            content.ispName = nil
+            content.ipAddress = nil
+            content.pingSamples = nil
+        }
+
+        let snapshot = VBridgeLiveActivitySnapshot(profileName: profileName, content: content)
+        VBridgeLiveActivityStore.save(snapshot)
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            NSLog("Live Activity not started: activities are disabled")
             return
         }
 

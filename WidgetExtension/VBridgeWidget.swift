@@ -1001,50 +1001,10 @@ private struct PingCompactView: View {
 private struct VBridgeLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VBridgeVPNLiveActivityAttributes.self) { context in
-            VStack(alignment: .leading, spacing: 8) {
-                liveActivityHeader(
-                    profileName: context.attributes.profileName,
-                    state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
-                    statusLabel: context.state.phase.displayTitle,
-                    statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
-                    statusAccent: liveActivityStatusAccent(phase: context.state.phase)
-                )
-
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(context.state.progressText ?? "0/0")
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-
-                    Text(context.state.relayText)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.52)
-
-                    Spacer(minLength: 0)
-                }
-
-                ProgressView(value: context.state.progressFraction ?? 1)
-                    .tint(.white)
-                    .progressViewStyle(.linear)
-                    .scaleEffect(x: 1, y: 0.75, anchor: .center)
-
-                liveActivitySpeedRow(
-                    download: context.state.downloadSpeedText ?? "DL --",
-                    upload: context.state.uploadSpeedText ?? "UL --"
-                )
-
-                disconnectControlRow(state: context.state)
-
-                liveActivityCompactNetworkRow(
-                    isp: context.state.ispText,
-                    ip: context.state.ipAddressText
-                )
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 14)
+            liveActivityLockScreenView(
+                profileName: context.attributes.profileName,
+                state: context.state
+            )
             .activityBackgroundTint(Color.black.opacity(0.82))
             .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
@@ -1059,66 +1019,57 @@ private struct VBridgeLiveActivityWidget: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(context.state.progressText ?? "0/0")
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(context.attributes.profileName)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
 
-                            Text(context.state.relayText)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.55)
-
-                            Spacer(minLength: 0)
-                        }
-
-                        ProgressView(value: context.state.progressFraction ?? 1)
-                            .tint(.white)
-                            .progressViewStyle(.linear)
-                            .scaleEffect(x: 1, y: 0.72, anchor: .center)
-
-                        liveActivitySpeedRow(
-                            download: context.state.downloadSpeedText ?? "DL --",
-                            upload: context.state.uploadSpeedText ?? "UL --"
-                        )
-
-                        disconnectControlRow(state: context.state)
+                        Text(context.state.progressText ?? context.state.phase.displayTitle)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     .padding(.horizontal, 2)
                 }
 
-                DynamicIslandExpandedRegion(.trailing) { EmptyView() }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text(String(context.state.activeConnections ?? 0))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
 
                 DynamicIslandExpandedRegion(.bottom) {
                     liveActivityExpandedBottomView(state: context.state)
                 }
             } compactLeading: {
-                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(liveActivityTint(for: context.state.phase))
-            } compactTrailing: {
-                Text(String(context.state.activeConnections ?? 0))
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text("VB")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            } minimal: {
-                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
+            } compactTrailing: {
+                Image(systemName: context.state.phase == .connected ? "lock.fill" : "wifi")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(liveActivityTint(for: context.state.phase))
+                    .foregroundStyle(.white)
+            } minimal: {
+                Circle()
+                    .fill(liveActivityTint(for: context.state.phase))
+                    .frame(width: 9, height: 9)
             }
             .keylineTint(liveActivityTint(for: context.state.phase))
         }
     }
 
-    private func liveActivityLockScreenView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+    private func liveActivityLockScreenView(
+        profileName: String,
+        state: VBridgeVPNLiveActivityAttributes.ContentState
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             liveActivityHeader(
-                profileName: "VBridge",
+                profileName: profileName,
                 state: WidgetSnapshot.State(rawValue: state.phase.rawValue) ?? .unknown,
                 statusLabel: state.phase.displayTitle,
                 statusSymbol: liveActivityStatusSymbol(phase: state.phase),
@@ -1196,7 +1147,7 @@ private struct VBridgeLiveActivityWidget: Widget {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
     }
 
     private func liveActivityStatusSymbol(
@@ -1386,45 +1337,6 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .minimumScaleFactor(0.55)
 
                 Spacer(minLength: 0)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func disconnectControlRow(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        if state.phase == .connected || state.phase == .connecting || state.phase == .disconnecting {
-            if let disconnectURL = URL(string: "vbridge://disconnect") {
-                Link(destination: disconnectURL) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "power.circle.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text("Disconnect")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                    }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: 126, alignment: .center)
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            } else {
-                HStack(spacing: 5) {
-                    Image(systemName: "power.circle.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                    Text("Disconnect")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: 126, alignment: .center)
-                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
     }
