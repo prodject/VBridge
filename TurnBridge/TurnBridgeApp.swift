@@ -165,6 +165,9 @@ struct VBridge: App {
 
             let manualCaptcha = UserDefaults.standard.bool(forKey: "manualCaptcha")
             SharedLogger.debug("Routing: LAN=\(excludeLAN), APNs=\(excludeAPNs), Cellular=\(excludeCellular), ManualCaptcha=\(manualCaptcha)")
+            let configuredProviderBundleID = protocolConfiguration.providerBundleIdentifier ?? "nil"
+            NSLog("ProviderBundleID configured = \(configuredProviderBundleID)")
+            SharedLogger.info("ProviderBundleID configured = \(configuredProviderBundleID)")
 
             tunnelManager.protocolConfiguration = protocolConfiguration
             tunnelManager.localizedDescription = "VBridge"
@@ -183,6 +186,15 @@ struct VBridge: App {
                         SharedLogger.error("Failed to reload tunnel preferences: \(error.localizedDescription)")
                         completionHandler(false)
                         return
+                    }
+
+                    if let proto = tunnelManager.protocolConfiguration as? NETunnelProviderProtocol {
+                        let loadedProviderBundleID = proto.providerBundleIdentifier ?? "nil"
+                        NSLog("ProviderBundleID loaded = \(loadedProviderBundleID)")
+                        SharedLogger.info("ProviderBundleID loaded = \(loadedProviderBundleID)")
+                    } else {
+                        NSLog("ProviderBundleID loaded = nil protocol")
+                        SharedLogger.warning("ProviderBundleID loaded = nil protocol")
                     }
 
                     guard let session = tunnelManager.connection as? NETunnelProviderSession else {

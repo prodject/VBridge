@@ -455,6 +455,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        NSLog("START TUNNEL CALLED")
+        sharedLogger.log("START TUNNEL CALLED")
+        SharedLogger.info("START TUNNEL CALLED", source: .tunnel)
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
         VBridgeWGSetLogger(vbridgeGoLoggerCallback)
