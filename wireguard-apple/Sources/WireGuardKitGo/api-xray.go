@@ -1,3 +1,6 @@
+//go:build xray
+// +build xray
+
 package main
 
 /*
