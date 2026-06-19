@@ -1001,10 +1001,48 @@ private struct PingCompactView: View {
 private struct VBridgeLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VBridgeVPNLiveActivityAttributes.self) { context in
-            liveActivityLockScreenView(
-                profileName: context.attributes.profileName,
-                state: context.state
-            )
+            VStack(alignment: .leading, spacing: 8) {
+                liveActivityHeader(
+                    profileName: context.attributes.profileName,
+                    state: WidgetSnapshot.State(rawValue: context.state.phase.rawValue) ?? .unknown,
+                    statusLabel: context.state.phase.displayTitle,
+                    statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
+                    statusAccent: liveActivityStatusAccent(phase: context.state.phase)
+                )
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(context.state.progressText ?? "0/0")
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Text(context.state.relayText)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.52)
+
+                    Spacer(minLength: 0)
+                }
+
+                ProgressView(value: context.state.progressFraction ?? 1)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.75, anchor: .center)
+
+                liveActivitySpeedRow(
+                    download: context.state.downloadSpeedText ?? "DL --",
+                    upload: context.state.uploadSpeedText ?? "UL --"
+                )
+
+                liveActivityCompactNetworkRow(
+                    isp: context.state.ispText,
+                    ip: context.state.ipAddressText
+                )
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
             .activityBackgroundTint(Color.black.opacity(0.82))
             .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
@@ -1019,45 +1057,55 @@ private struct VBridgeLiveActivityWidget: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(context.attributes.profileName)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(context.state.progressText ?? "0/0")
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
 
-                        Text(context.state.progressText ?? context.state.phase.displayTitle)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.78))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            Text(context.state.relayText)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+
+                            Spacer(minLength: 0)
+                        }
+
+                        ProgressView(value: context.state.progressFraction ?? 1)
+                            .tint(.white)
+                            .progressViewStyle(.linear)
+                            .scaleEffect(x: 1, y: 0.72, anchor: .center)
+
+                        liveActivitySpeedRow(
+                            download: context.state.downloadSpeedText ?? "DL --",
+                            upload: context.state.uploadSpeedText ?? "UL --"
+                        )
                     }
                     .padding(.horizontal, 2)
                 }
 
-                DynamicIslandExpandedRegion(.trailing) {
-                    Text(String(context.state.activeConnections ?? 0))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
+                DynamicIslandExpandedRegion(.trailing) { EmptyView() }
 
                 DynamicIslandExpandedRegion(.bottom) {
                     liveActivityExpandedBottomView(state: context.state)
                 }
             } compactLeading: {
-                Text("VB")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(liveActivityTint(for: context.state.phase))
             } compactTrailing: {
-                Image(systemName: context.state.phase == .connected ? "lock.fill" : "wifi")
-                    .font(.system(size: 12, weight: .semibold))
+                Text(String(context.state.activeConnections ?? 0))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             } minimal: {
-                Circle()
-                    .fill(liveActivityTint(for: context.state.phase))
-                    .frame(width: 9, height: 9)
+                Image(systemName: context.state.phase == .connected ? "lock.shield.fill" : "wifi")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(liveActivityTint(for: context.state.phase))
             }
             .keylineTint(liveActivityTint(for: context.state.phase))
         }
