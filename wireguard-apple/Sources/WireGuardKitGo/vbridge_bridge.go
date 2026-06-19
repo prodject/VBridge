@@ -7,12 +7,15 @@ package main
 #include <mach/mach.h>
 #include <mach/task_info.h>
 
-// Set GODEBUG=asyncpreemptoff=1 BEFORE Go runtime initializes.
-// This prevents "fatal error: non-Go code disabled sigaltstack"
-// on iOS Network Extensions where sigaltstack is disabled on some threads.
+// Set Go runtime knobs BEFORE Go runtime initializes. PacketTunnel has a
+// hard ~50 MB jetsam budget on iOS; Swift-side setenv can be too late because
+// the linked Go archive may initialize before startTunnel reaches the first
+// explicit bridge call.
 __attribute__((constructor))
-static void disable_async_preempt(void) {
-	setenv("GODEBUG", "asyncpreemptoff=1", 1);
+static void configure_go_runtime(void) {
+	setenv("GODEBUG", "asyncpreemptoff=1,madvdontneed=1", 1);
+	setenv("GOMEMLIMIT", "20MiB", 1);
+	setenv("GOGC", "10", 1);
 }
 
 // Logging callback type matching wireguard-apple convention
@@ -1200,8 +1203,8 @@ func init() {
 	// Current GBox-signed builds can cross the 50 MB ActiveHard limit during
 	// Go runtime startup before bootstrap logs are emitted. Keep the cap lower
 	// so initial GC pressure starts before the extension reaches jetsam.
-	debug.SetMemoryLimit(24 << 20)
-	log.Printf("bridge: GOMEMLIMIT set to 24 MB (soft cap for NetworkExtension jetsam defence)")
+	debug.SetMemoryLimit(20 << 20)
+	log.Printf("bridge: GOMEMLIMIT set to 20 MB (soft cap for NetworkExtension jetsam defence)")
 
 	// Periodic debug.FreeOSMemory() — added in build 131 after build 130
 	// soak confirmed Fix A reduced but did not eliminate JETSAM_REASON_
