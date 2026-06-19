@@ -180,8 +180,7 @@ enum VBridgeWidgetSnapshotStore {
     }()
 
     private static var defaults: UserDefaults? {
-        guard SharedLogger.appGroupID != nil else { return nil }
-        return UserDefaults(suiteName: appGroupID)
+        UserDefaults(suiteName: appGroupID)
     }
 
     static func load() -> VBridgeWidgetSnapshot? {
@@ -204,8 +203,6 @@ enum VBridgeWidgetSnapshotStore {
     }
 
     private static func reloadWidgetTimelinesIfAvailable() {
-        guard SharedLogger.appGroupID != nil else { return }
-
 #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
@@ -230,8 +227,7 @@ enum VBridgeLiveActivityStore {
     }()
 
     private static var defaults: UserDefaults? {
-        guard SharedLogger.appGroupID != nil else { return nil }
-        return UserDefaults(suiteName: appGroupID)
+        UserDefaults(suiteName: appGroupID)
     }
 
     static func load() -> VBridgeLiveActivitySnapshot? {
@@ -359,8 +355,6 @@ enum VBridgeLiveActivityStore {
     }
 
     private static func reloadWidgetTimelinesIfAvailable() {
-        guard SharedLogger.appGroupID != nil else { return }
-
 #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
