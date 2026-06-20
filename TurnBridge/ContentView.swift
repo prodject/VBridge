@@ -508,16 +508,42 @@ struct ContentView: View {
     }
 
     private var backgroundGradient: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.94, green: 0.93, blue: 0.97).opacity(0.96),
-                Color(red: 0.86, green: 0.82, blue: 0.96).opacity(0.92),
-                Color(red: 0.66, green: 0.54, blue: 0.97).opacity(0.86)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        ZStack {
+            LinearGradient(
+                colors: backgroundGradientColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            if colorScheme == .dark {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.035),
+                        Color.clear,
+                        Color(red: 0.59, green: 0.41, blue: 0.98).opacity(0.08)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
         .ignoresSafeArea()
+    }
+
+    private var backgroundGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.08, green: 0.09, blue: 0.13),
+                Color(red: 0.12, green: 0.11, blue: 0.18),
+                Color(red: 0.18, green: 0.14, blue: 0.30)
+            ]
+        }
+
+        return [
+            Color(red: 0.94, green: 0.93, blue: 0.97).opacity(0.96),
+            Color(red: 0.86, green: 0.82, blue: 0.96).opacity(0.92),
+            Color(red: 0.66, green: 0.54, blue: 0.97).opacity(0.86)
+        ]
     }
 
     private var headerSection: some View {
@@ -540,14 +566,26 @@ struct ContentView: View {
 
     private var titleGradient: LinearGradient {
         LinearGradient(
-            colors: [
-                Color(red: 0.32, green: 0.30, blue: 0.40),
-                Color(red: 0.53, green: 0.37, blue: 0.98),
-                Color(red: 0.40, green: 0.48, blue: 0.96)
-            ],
+            colors: titleGradientColors,
             startPoint: .leading,
             endPoint: .trailing
         )
+    }
+
+    private var titleGradientColors: [Color] {
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.90, green: 0.89, blue: 0.97),
+                Color(red: 0.68, green: 0.56, blue: 1.00),
+                Color(red: 0.48, green: 0.70, blue: 1.00)
+            ]
+        }
+
+        return [
+            Color(red: 0.32, green: 0.30, blue: 0.40),
+            Color(red: 0.53, green: 0.37, blue: 0.98),
+            Color(red: 0.40, green: 0.48, blue: 0.96)
+        ]
     }
 
     private var appVersionText: String {
@@ -563,7 +601,7 @@ struct ContentView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16), lineWidth: 1)
+                        .stroke(cardBorderColor, lineWidth: 1)
                 )
                 .padding(.horizontal, 20)
         }
@@ -579,9 +617,16 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                .stroke(cardBorderColor, lineWidth: 1)
         )
         .padding(.horizontal, 20)
+    }
+
+    private var cardBorderColor: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(0.12)
+        }
+        return Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16)
     }
 
     private var tunnelStatusIcon: some View {
@@ -830,7 +875,7 @@ struct ContentView: View {
 
     private var updateButtonBackground: Color {
         if colorScheme == .dark {
-            return Color(red: 0.31, green: 0.20, blue: 0.68).opacity(0.92)
+            return Color(red: 0.38, green: 0.28, blue: 0.72).opacity(0.58)
         }
         return Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.14)
     }
