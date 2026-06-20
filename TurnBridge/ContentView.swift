@@ -555,7 +555,7 @@ struct ContentView: View {
 
             Text(appVersionText)
                 .font(.system(size: 14, weight: .semibold, design: .default))
-                .foregroundColor(.secondary)
+                .foregroundColor(mainSecondaryForegroundColor)
 
             connectionTelemetrySection()
         }
@@ -575,9 +575,9 @@ struct ContentView: View {
     private var titleGradientColors: [Color] {
         if colorScheme == .dark {
             return [
-                Color(red: 0.90, green: 0.89, blue: 0.97),
-                Color(red: 0.68, green: 0.56, blue: 1.00),
-                Color(red: 0.48, green: 0.70, blue: 1.00)
+                .white,
+                .white.opacity(0.96),
+                .white.opacity(0.90)
             ]
         }
 
@@ -627,6 +627,21 @@ struct ContentView: View {
             return Color.white.opacity(0.12)
         }
         return Color(red: 0.53, green: 0.37, blue: 0.98).opacity(0.16)
+    }
+
+    private var mainForegroundColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+
+    private var mainSecondaryForegroundColor: Color {
+        colorScheme == .dark ? .white.opacity(0.72) : .secondary
+    }
+
+    private func toolbarForegroundColor(isEnabled: Bool = true) -> Color {
+        if colorScheme == .dark {
+            return isEnabled ? .white : .white.opacity(0.45)
+        }
+        return isEnabled ? .primary : .secondary
     }
 
     private var tunnelStatusIcon: some View {
@@ -702,11 +717,13 @@ struct ContentView: View {
             }) {
                 Image(systemName: "plus")
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+                    .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
             }
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            let canEditProfile = vpnStatus == .disconnected && store.selectedProfile != nil
+
             Button(action: {
                 guard let id = store.selectedProfileID else { return }
                 if vpnStatus == .disconnected {
@@ -715,7 +732,7 @@ struct ContentView: View {
             }) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.title3)
-                    .foregroundColor(vpnStatus == .disconnected && store.selectedProfile != nil ? .primary : .secondary)
+                    .foregroundColor(toolbarForegroundColor(isEnabled: canEditProfile))
             }
 
             Button(action: {
@@ -725,13 +742,13 @@ struct ContentView: View {
             }) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(.title3)
-                    .foregroundColor(vpnStatus == .disconnected ? .primary : .secondary)
+                    .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
             }
 
             NavigationLink(destination: GlobalSettingsView()) {
                 Image(systemName: "gearshape.fill")
                     .font(.title3)
-                    .foregroundColor(.primary)
+                    .foregroundColor(toolbarForegroundColor())
             }
         }
     }
@@ -758,13 +775,13 @@ struct ContentView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
             }
-            .foregroundColor(.primary)
+            .foregroundColor(mainForegroundColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.secondary.opacity(0.4), lineWidth: 1)
+                    .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.22) : Color.secondary.opacity(0.4), lineWidth: 1)
             )
         }
     }
@@ -866,6 +883,10 @@ struct ContentView: View {
     }
 
     private var iconColor: Color {
+        if colorScheme == .dark {
+            return .white
+        }
+
         switch vpnStatus {
         case .connected: return .green
         case .connecting, .disconnecting: return .orange
@@ -1980,15 +2001,15 @@ struct ContentView: View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.black.opacity(0.72))
+                .foregroundStyle(colorScheme == .dark ? .white.opacity(0.84) : .black.opacity(0.72))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.58))
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.66) : .black.opacity(0.58))
                 Text(value)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? .white : .black)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
@@ -2001,7 +2022,7 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
         )
     }
 
@@ -2010,20 +2031,20 @@ struct ContentView: View {
             HStack(spacing: 5) {
                 Text(verbatim: sample.badgeText)
                     .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(colorScheme == .dark ? .white : .black)
                 Circle()
                     .fill(sample.dotColor)
                     .frame(width: 5, height: 5)
                 Spacer(minLength: 0)
                 Text(verbatim: sample.compactLatencyText)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.black.opacity(0.74))
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.74) : .black.opacity(0.74))
             }
 
             HStack(spacing: 2) {
                 ForEach(0..<5, id: \.self) { index in
                     Capsule(style: .continuous)
-                        .fill(sample.dotCount > index ? sample.dotColor : .black.opacity(0.08))
+                        .fill(sample.dotCount > index ? sample.dotColor : (colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.08)))
                         .frame(width: 8, height: 3)
                 }
             }
@@ -2034,7 +2055,7 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
         )
     }
 
@@ -2055,13 +2076,13 @@ struct ContentView: View {
             HStack {
                 Text(connectionProgressText ?? "0/0")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.black.opacity(0.78))
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.82) : .black.opacity(0.78))
 
                 Spacer(minLength: 0)
 
                 Text(statusLabel)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.54))
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.66) : .black.opacity(0.54))
             }
 
             HStack(spacing: 8) {
