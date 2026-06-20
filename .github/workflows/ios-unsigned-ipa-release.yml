@@ -45,9 +45,8 @@ jobs:
       - name: Compute CI app version
         run: |
           set -euo pipefail
-          APP_MINOR=$((GITHUB_RUN_NUMBER + GITHUB_RUN_ATTEMPT - 1))
-          APP_VERSION="1.${APP_MINOR}"
-          APP_BUILD="${APP_MINOR}"
+          APP_VERSION="2.0"
+          APP_BUILD="200"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
           echo "CI app version: $APP_VERSION ($APP_BUILD)"
