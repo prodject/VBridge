@@ -863,6 +863,7 @@
 				);
 				MARKETING_VERSION = 1.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.tunnel;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridge.mac.tunnel;
 				PRODUCT_MODULE_NAME = PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SKIP_INSTALL = YES;
@@ -898,6 +899,7 @@
 				);
 				MARKETING_VERSION = 1.2.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.tunnel;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridge.mac.tunnel;
 				PRODUCT_MODULE_NAME = PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SKIP_INSTALL = YES;
