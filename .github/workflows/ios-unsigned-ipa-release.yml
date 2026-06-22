@@ -44,13 +44,25 @@ jobs:
           go version
 
       - name: Compute CI app version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          APP_VERSION="2.1"
-          APP_BUILD="210"
+          MAJOR_VERSION="2"
+          LATEST_VERSION="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 100 \
+              --json name,tagName \
+              --jq '[.[] | [(.name | capture("^VBridge (?<version>'"$MAJOR_VERSION"'\\.[0-9]+)$")? | .version), (.tagName | capture("^vbridge-(?<version>'"$MAJOR_VERSION"'\\.[0-9]+)-")? | .version)] | .[]] | map(select(. != null)) | unique | sort_by(split(".")[1] | tonumber) | last // "'"$MAJOR_VERSION"'.0"'
+          )"
+          LATEST_MINOR="${LATEST_VERSION#${MAJOR_VERSION}.}"
+          NEXT_MINOR="$((LATEST_MINOR + 1))"
+          APP_VERSION="${MAJOR_VERSION}.${NEXT_MINOR}"
+          APP_BUILD="${MAJOR_VERSION}${NEXT_MINOR}0"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
-          echo "CI app version: $APP_VERSION ($APP_BUILD)"
+          echo "CI app version: $APP_VERSION ($APP_BUILD), previous: $LATEST_VERSION"
 
       - name: Prebuild WireGuard Go bridge
         run: |

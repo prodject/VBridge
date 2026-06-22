@@ -280,6 +280,11 @@ struct VBridge: App {
         do {
             SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue)")
             try session.startTunnel()
+            schedulePostStartDiagnosticIfNeeded(
+                session: session,
+                providerBundleIdentifier: providerBundleIdentifier,
+                recoveryAttempted: recoveryAttempted
+            )
             scheduleStartRecoveryIfNeeded(
                 session: session,
                 recoveryConfiguration: recoveryConfiguration,
@@ -292,6 +297,22 @@ struct VBridge: App {
             SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
             completionHandler(false)
         }
+    }
+
+    private func schedulePostStartDiagnosticIfNeeded(
+        session: NETunnelProviderSession,
+        providerBundleIdentifier: String?,
+        recoveryAttempted: Bool
+    ) {
+#if os(macOS) || targetEnvironment(macCatalyst)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            guard session.status == .disconnected || session.status == .invalid else { return }
+            let providerID = providerBundleIdentifier ?? "unknown"
+            SharedLogger.error(
+                "macOS tunnel provider did not launch after startTunnel; status=\(session.status.rawValue), provider=\(providerID), recoveryAttempted=\(recoveryAttempted). If there are no TUNNEL logs after this point, macOS rejected the Network Extension before PacketTunnelProvider.startTunnel. A DMG signed ad-hoc can build and save VPN preferences, but running packet-tunnel providers on macOS usually requires a Developer ID/provisioned signature with the Network Extension entitlement."
+            )
+        }
+#endif
     }
 
     private func scheduleStartRecoveryIfNeeded(
