@@ -615,6 +615,13 @@ struct VBridgeVPNLiveActivityAttributes {
         var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
         var updatedAt: Date
+
+        var progressText: String? {
+            guard let activeConnections, let totalConnections else {
+                return nil
+            }
+            return "\(activeConnections)/\(totalConnections)"
+        }
     }
 
     var profileName: String
