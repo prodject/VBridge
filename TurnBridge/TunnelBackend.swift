@@ -414,7 +414,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
 }
 
 final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
-    private let helperURL = URL(fileURLWithPath: "/Library/PrivilegedHelperTools/com.prodject.vbridge.helper")
+    private let helperBaseURL = URL(string: "http://127.0.0.1:41737/v1/tunnel")!
 
     func start(_ configuration: TunnelStartConfiguration, completionHandler: @escaping (Bool) -> Void) {
 #if targetEnvironment(macCatalyst)
@@ -423,19 +423,10 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
             SharedLogger.info("WDTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.wdttPassword.isEmpty), primaryHashLen=\(configuration.wdttClientKey.count), extraHashesLen=\(configuration.wdttServerKey.count)")
         }
 
-        guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
-            SharedLogger.error("macOS privileged helper is not installed at \(helperURL.path). The shared macOS backend layer is active, but a root helper/CLI is required to create utun routes and DNS without NetworkExtension.")
-            completionHandler(false)
-            return
-        }
-
         do {
-            let configURL = try writeConfiguration(configuration)
-            try runHelper(arguments: ["start", "--config", configURL.path])
-            SharedLogger.info("macOS privileged helper start requested")
-            completionHandler(true)
+            try post("start", body: configuration, completionHandler: completionHandler)
         } catch {
-            SharedLogger.error("macOS privileged helper start failed: \(error.localizedDescription)")
+            SharedLogger.error("macOS privileged helper request failed: \(error.localizedDescription)")
             completionHandler(false)
         }
 #else
@@ -445,54 +436,52 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
 
     func stop() {
 #if targetEnvironment(macCatalyst)
-        guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
-            SharedLogger.warning("macOS privileged helper is not installed, nothing to stop")
-            return
-        }
-
         do {
-            try runHelper(arguments: ["stop"])
-            SharedLogger.info("macOS privileged helper stop requested")
+            try post("stop", body: EmptyHelperRequest()) { _ in }
         } catch {
-            SharedLogger.error("macOS privileged helper stop failed: \(error.localizedDescription)")
+            SharedLogger.error("macOS privileged helper stop request failed: \(error.localizedDescription)")
         }
 #endif
     }
 
 #if targetEnvironment(macCatalyst)
-    private func writeConfiguration(_ configuration: TunnelStartConfiguration) throws -> URL {
-        let directory = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("VBridge", isDirectory: true)
-            ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("VBridge", isDirectory: true)
+    private struct EmptyHelperRequest: Encodable {}
 
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let configURL = directory.appendingPathComponent("helper-start.json")
+    private func post<T: Encodable>(_ path: String, body: T, completionHandler: @escaping (Bool) -> Void) throws {
+        let url = helperBaseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(configuration).write(to: configURL, options: [.atomic])
-        return configURL
+        request.httpBody = try encoder.encode(body)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error {
+                SharedLogger.error("macOS privileged helper is not reachable at \(self.helperBaseURL.absoluteString): \(error.localizedDescription). The macOS backend layer is active, but a root helper service is required to create utun routes and DNS without NetworkExtension.")
+                self.complete(onMain: completionHandler, false)
+                return
+            }
+
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard (200..<300).contains(statusCode) else {
+                let message = data.flatMap { String(data: $0, encoding: .utf8) }?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                SharedLogger.error("macOS privileged helper rejected \(path): HTTP \(statusCode)\(message?.isEmpty == false ? " - \(message!)" : "")")
+                self.complete(onMain: completionHandler, false)
+                return
+            }
+
+            SharedLogger.info("macOS privileged helper \(path) requested")
+            self.complete(onMain: completionHandler, true)
+        }
+        .resume()
     }
 
-    private func runHelper(arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = helperURL
-        process.arguments = arguments
-
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NSError(
-                domain: "VBridge.MacPrivilegedHelper",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: message?.isEmpty == false ? message! : "helper exited with status \(process.terminationStatus)"]
-            )
+    private func complete(onMain completionHandler: @escaping (Bool) -> Void, _ value: Bool) {
+        DispatchQueue.main.async {
+            completionHandler(value)
         }
     }
 #endif
