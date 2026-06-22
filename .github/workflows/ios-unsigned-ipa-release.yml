@@ -46,8 +46,8 @@ jobs:
       - name: Compute CI app version
         run: |
           set -euo pipefail
-          APP_VERSION="2.0"
-          APP_BUILD="200"
+          APP_VERSION="2.1"
+          APP_BUILD="210"
           echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
           echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
           echo "CI app version: $APP_VERSION ($APP_BUILD)"
