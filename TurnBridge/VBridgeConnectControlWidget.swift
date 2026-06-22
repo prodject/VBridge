@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import AppIntents
 import SwiftUI
 import WidgetKit
@@ -24,3 +25,4 @@ struct VBridgeConnectControlWidget: ControlWidget {
         .description("Connect or disconnect the last used VPN profile from Control Center.")
     }
 }
+#endif

@@ -20,6 +20,7 @@ jobs:
       XCODE_CONFIGURATION: Release
       XCODE_SDK: iphoneos
       IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+      MACOSX_DEPLOYMENT_TARGET: "26.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -173,6 +174,71 @@ jobs:
           path: ${{ steps.package.outputs.ipa_path }}
           if-no-files-found: error
 
+      - name: Prebuild WireGuard Go bridge for macOS
+        run: |
+          set -euo pipefail
+          PLATFORM_NAME=macosx \
+          ARCHS="arm64 x86_64" \
+          MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+          ./script/build_wireguard_go_bridge.sh
+          test -f wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a
+          test -f wireguard-apple/Sources/WireGuardKitGo/out/wireguard-go-version.h
+
+      - name: Archive macOS app
+        run: |
+          set -euo pipefail
+
+          xcodebuild archive \
+            -project "$XCODE_PROJECT" \
+            -target VBridgeMac \
+            -configuration "$XCODE_CONFIGURATION" \
+            -destination "generic/platform=macOS,variant=Mac Catalyst" \
+            -archivePath "$GITHUB_WORKSPACE/build/VBridgeMac.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            MARKETING_VERSION="$APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$APP_BUILD"
+
+      - name: Package macOS DMG
+        id: package_macos
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$GITHUB_WORKSPACE/build/VBridgeMac.xcarchive/Products/Applications/VBridgeMac.app"
+          test -d "$APP_PATH"
+
+          DMG_ROOT="$(mktemp -d)"
+          ditto "$APP_PATH" "$DMG_ROOT/VBridge.app"
+
+          if [ -d "$DMG_ROOT/VBridge.app/Contents/PlugIns/PacketTunnel.appex" ]; then
+            /usr/bin/codesign --force --sign - --timestamp=none "$DMG_ROOT/VBridge.app/Contents/PlugIns/PacketTunnel.appex" || true
+          fi
+          /usr/bin/codesign --force --sign - --timestamp=none "$DMG_ROOT/VBridge.app" || true
+
+          DMG_FILENAME="vbridge-${GITHUB_SHA}-${APP_VERSION}-macos.dmg"
+          DMG_PATH="$GITHUB_WORKSPACE/$DMG_FILENAME"
+          hdiutil create \
+            -volname "VBridge" \
+            -srcfolder "$DMG_ROOT" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+
+          echo "dmg_filename=$DMG_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_macos.outputs.dmg_filename }}
+          path: ${{ steps.package_macos.outputs.dmg_path }}
+          if-no-files-found: error
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         env:
@@ -190,4 +256,6 @@ jobs:
             Build number: `${{ steps.package.outputs.app_build }}`
             Build target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
             Artifact: `${{ steps.package.outputs.ipa_filename }}`
-          files: ${{ steps.package.outputs.ipa_path }}
+          files: |
+            ${{ steps.package.outputs.ipa_path }}
+            ${{ steps.package_macos.outputs.dmg_path }}

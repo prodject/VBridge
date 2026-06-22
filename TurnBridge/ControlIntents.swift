@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import AppIntents
 import WidgetKit
 
@@ -41,3 +42,4 @@ struct ToggleVPNControlIntent: SetValueIntent {
         return .result()
     }
 }
+#endif

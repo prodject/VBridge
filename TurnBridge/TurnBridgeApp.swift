@@ -4,7 +4,9 @@
 
 import SwiftUI
 import NetworkExtension
+#if !targetEnvironment(macCatalyst)
 import AppIntents
+#endif
 
 @main
 struct VBridge: App {
@@ -12,9 +14,11 @@ struct VBridge: App {
 
     init() {
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
+#if !targetEnvironment(macCatalyst)
         if #available(iOS 16.0, *) {
             VBridgeAppShortcuts.updateAppShortcutParameters()
         }
+#endif
     }
 
     var body: some Scene {

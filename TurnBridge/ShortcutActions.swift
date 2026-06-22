@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import AppIntents
 
 @available(iOS 16.0, *)
@@ -71,3 +72,4 @@ struct VBridgeAppShortcuts: AppShortcutsProvider {
         )
     }
 }
+#endif

@@ -79,7 +79,8 @@ source_hash=$(
 )
 [ -n "$source_hash" ] || fail "Unable to compute WireGuardGoBridge source hash"
 
-current_stamp="go=${GO_VERSION};platform=${PLATFORM_NAME:-iphoneos};archs=${ARCHS:-arm64};target=${IPHONEOS_DEPLOYMENT_TARGET:-unknown};src=${source_hash}"
+deployment_target=${IPHONEOS_DEPLOYMENT_TARGET:-${MACOSX_DEPLOYMENT_TARGET:-unknown}}
+current_stamp="go=${GO_VERSION};platform=${PLATFORM_NAME:-iphoneos};archs=${ARCHS:-arm64};target=${deployment_target};src=${source_hash}"
 
 outputs_ready=0
 if [ -f "$out_dir/libwg-go.a" ] && [ -f "$out_dir/wireguard-go-version.h" ] && [ -f "$stamp_file" ]; then

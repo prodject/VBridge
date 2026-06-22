@@ -1,3 +1,4 @@
+#if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
 import ActivityKit
 import Foundation
 #if canImport(WidgetKit)
@@ -27,7 +28,6 @@ struct VBridgePingSample: Codable, Hashable {
         }
     }
 }
-
 @available(iOS 16.1, *)
 enum VBridgeLiveActivityPhase: String, Codable, Hashable {
     case connecting
@@ -544,3 +544,153 @@ final class VBridgeLiveActivityCoordinator {
         activity = nil
     }
 }
+#else
+import Foundation
+
+struct VBridgePingSample: Codable, Hashable {
+    var name: String
+    var latencyMs: Int?
+
+    var compactLatencyText: String {
+        guard let latencyMs else { return "--" }
+        return "\(latencyMs)ms"
+    }
+
+    var badgeText: String {
+        switch name {
+        case "Cloudflare":
+            return "CF"
+        case "Google":
+            return "GO"
+        case "Yandex":
+            return "YN"
+        default:
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+}
+
+enum VBridgeLiveActivityPhase: String, Codable, Hashable {
+    case connecting
+    case connected
+    case disconnecting
+    case disconnected
+    case unknown
+
+    var displayTitle: String {
+        switch self {
+        case .connecting:
+            return "Connecting"
+        case .connected:
+            return "Connected"
+        case .disconnecting:
+            return "Disconnecting"
+        case .disconnected:
+            return "Disconnected"
+        case .unknown:
+            return "Unknown"
+        }
+    }
+
+    var isActiveSession: Bool {
+        switch self {
+        case .connecting, .connected, .disconnecting:
+            return true
+        case .disconnected, .unknown:
+            return false
+        }
+    }
+}
+
+struct VBridgeVPNLiveActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        var phase: VBridgeLiveActivityPhase
+        var activeConnections: Int?
+        var totalConnections: Int?
+        var relayIP: String?
+        var estimatedRemainingSeconds: Int?
+        var downloadSpeedMbps: Double?
+        var uploadSpeedMbps: Double?
+        var ispName: String?
+        var ipAddress: String?
+        var pingSamples: [VBridgePingSample]?
+        var updatedAt: Date
+    }
+
+    var profileName: String
+}
+
+struct VBridgeLiveActivitySnapshot: Codable, Hashable {
+    var profileName: String
+    var content: VBridgeVPNLiveActivityAttributes.ContentState
+}
+
+struct VBridgeWidgetSnapshot: Codable, Hashable {
+    var profileName: String
+    var phase: VBridgeLiveActivityPhase
+    var activeConnections: Int?
+    var totalConnections: Int?
+    var relayIP: String?
+    var estimatedRemainingSeconds: Int?
+    var downloadSpeedMbps: Double?
+    var uploadSpeedMbps: Double?
+    var ispName: String?
+    var ipAddress: String?
+    var pingSamples: [VBridgePingSample]?
+    var updatedAt: Date
+}
+
+enum VBridgeWidgetSnapshotStore {
+    static func load() -> VBridgeWidgetSnapshot? { nil }
+    static func save(_ snapshot: VBridgeWidgetSnapshot) {}
+    static func clear() {}
+}
+
+enum VBridgeLiveActivityStore {
+    static func load() -> VBridgeLiveActivitySnapshot? { nil }
+    static func save(_ snapshot: VBridgeLiveActivitySnapshot) {}
+    static func clear() {}
+
+    static func update(
+        profileName: String? = nil,
+        phase: VBridgeLiveActivityPhase? = nil,
+        activeConnections: Int? = nil,
+        totalConnections: Int? = nil,
+        relayIP: String? = nil,
+        estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil,
+        pingSamples: [VBridgePingSample]? = nil,
+        updatedAt: Date = .now
+    ) {}
+}
+
+@MainActor
+final class VBridgeLiveActivityCoordinator {
+    static let shared = VBridgeLiveActivityCoordinator()
+
+    private init() {}
+
+    func sync(
+        profileName: String,
+        phase: VBridgeLiveActivityPhase,
+        activeConnections: Int? = nil,
+        totalConnections: Int? = nil,
+        relayIP: String? = nil,
+        estimatedRemainingSeconds: Int? = nil,
+        downloadSpeedMbps: Double? = nil,
+        uploadSpeedMbps: Double? = nil,
+        ispName: String? = nil,
+        ipAddress: String? = nil,
+        pingSamples: [VBridgePingSample]? = nil
+    ) {}
+
+    func end(
+        profileName: String,
+        finalPhase: VBridgeLiveActivityPhase = .disconnected,
+        immediate: Bool = true
+    ) {}
+}
+#endif

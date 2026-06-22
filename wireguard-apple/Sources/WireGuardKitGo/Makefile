@@ -16,11 +16,13 @@ DESTDIR ?= $(CONFIGURATION_BUILD_DIR)
 BUILDDIR ?= $(CONFIGURATION_TEMP_DIR)/wireguard-go-bridge
 
 
-#CFLAGS_PREFIX := $(if $(DEPLOYMENT_TARGET_CLANG_FLAG_NAME),-$(DEPLOYMENT_TARGET_CLANG_FLAG_NAME)=$($(DEPLOYMENT_TARGET_CLANG_ENV_NAME)),) -isysroot $(SDKROOT) -arch
-CFLAGS_PREFIX := $(if $(IPHONEOS_DEPLOYMENT_TARGET),-miphoneos-version-min=$(IPHONEOS_DEPLOYMENT_TARGET),) -isysroot $(SDKROOT) -arch
+MACOS_DEPLOYMENT_FLAG := $(if $(MACOSX_DEPLOYMENT_TARGET),-mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET),)
+IOS_DEPLOYMENT_FLAG := $(if $(IPHONEOS_DEPLOYMENT_TARGET),-miphoneos-version-min=$(IPHONEOS_DEPLOYMENT_TARGET),)
+CFLAGS_PREFIX := $(if $(filter macosx maccatalyst,$(PLATFORM_NAME)),$(MACOS_DEPLOYMENT_FLAG),$(IOS_DEPLOYMENT_FLAG)) -isysroot $(SDKROOT) -arch
 GOARCH_arm64 := arm64
 GOARCH_x86_64 := amd64
 GOOS_macosx := darwin
+GOOS_maccatalyst := darwin
 GOOS_iphoneos := ios
 
 build: $(DESTDIR)/libwg-go.a
