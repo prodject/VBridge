@@ -177,7 +177,8 @@ jobs:
       - name: Prebuild WireGuard Go bridge for macOS
         run: |
           set -euo pipefail
-          PLATFORM_NAME=macosx \
+          PLATFORM_NAME=maccatalyst \
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
           ARCHS="arm64 x86_64" \
           MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
           ./script/build_wireguard_go_bridge.sh
