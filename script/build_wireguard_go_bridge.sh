@@ -51,6 +51,15 @@ stamp_file="$out_dir/.build_wireguard_go_bridge.stamp"
 
 mkdir -p "$out_dir"
 
+if [ "${EFFECTIVE_PLATFORM_NAME:-}" = "-maccatalyst" ]; then
+    PLATFORM_NAME=maccatalyst
+    export PLATFORM_NAME
+    if [ -z "${SDKROOT:-}" ]; then
+        SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+        export SDKROOT
+    fi
+fi
+
 GO_BIN=$(command -v go 2>/dev/null || true)
 if [ -z "$GO_BIN" ] && [ -x /opt/homebrew/bin/go ]; then
     GO_BIN=/opt/homebrew/bin/go
