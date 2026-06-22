@@ -190,7 +190,7 @@ jobs:
 
           xcodebuild archive \
             -project "$XCODE_PROJECT" \
-            -target VBridgeMac \
+            -scheme VBridgeMac \
             -configuration "$XCODE_CONFIGURATION" \
             -destination "generic/platform=macOS,variant=Mac Catalyst" \
             -archivePath "$GITHUB_WORKSPACE/build/VBridgeMac.xcarchive" \
