@@ -216,10 +216,43 @@ jobs:
           DMG_ROOT="$(mktemp -d)"
           ditto "$APP_PATH" "$DMG_ROOT/VBridge.app"
 
-          if [ -d "$DMG_ROOT/VBridge.app/Contents/PlugIns/PacketTunnel.appex" ]; then
-            /usr/bin/codesign --force --sign - --timestamp=none "$DMG_ROOT/VBridge.app/Contents/PlugIns/PacketTunnel.appex" || true
+          sign_nested_code() {
+            local root="$1"
+            if [ -d "$root/Contents/Frameworks" ]; then
+              while IFS= read -r framework; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$framework"
+              done < <(find "$root/Contents/Frameworks" -type d -name "*.framework")
+
+              while IFS= read -r dylib; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$dylib"
+              done < <(find "$root/Contents/Frameworks" -type f -name "*.dylib")
+            fi
+          }
+
+          PACKET_TUNNEL_PATH="$DMG_ROOT/VBridge.app/Contents/PlugIns/PacketTunnel.appex"
+          if [ -d "$PACKET_TUNNEL_PATH" ]; then
+            sign_nested_code "$PACKET_TUNNEL_PATH"
+            /usr/bin/codesign \
+              --force \
+              --sign - \
+              --timestamp=none \
+              --entitlements network-extension/network_extension.entitlements \
+              "$PACKET_TUNNEL_PATH"
           fi
-          /usr/bin/codesign --force --sign - --timestamp=none "$DMG_ROOT/VBridge.app" || true
+          sign_nested_code "$DMG_ROOT/VBridge.app"
+          /usr/bin/codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements TurnBridge/TurnBridge.entitlements \
+            "$DMG_ROOT/VBridge.app"
+
+          echo "Packaged macOS app entitlements:"
+          /usr/bin/codesign -d --entitlements :- "$DMG_ROOT/VBridge.app" 2>/dev/null || true
+          if [ -d "$PACKET_TUNNEL_PATH" ]; then
+            echo "Packaged macOS PacketTunnel entitlements:"
+            /usr/bin/codesign -d --entitlements :- "$PACKET_TUNNEL_PATH" 2>/dev/null || true
+          fi
 
           DMG_FILENAME="vbridge-${GITHUB_SHA}-${APP_VERSION}-macos.dmg"
           DMG_PATH="$GITHUB_WORKSPACE/$DMG_FILENAME"

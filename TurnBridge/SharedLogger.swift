@@ -200,6 +200,12 @@ public struct SharedLogger {
             return container.appendingPathComponent("vpn_tunnel.log")
         }
 
+#if os(macOS) || targetEnvironment(macCatalyst)
+        if let sharedLogFileURL = macOSSharedLogFileURL {
+            return sharedLogFileURL
+        }
+#endif
+
         // Main-app fallback for improperly re-signed builds where the App
         // Group entitlement is absent. The Network Extension cannot share this
         // file, but app-side logs and UI remain usable instead of showing a
@@ -210,6 +216,13 @@ public struct SharedLogger {
         }
         return documents.appendingPathComponent("vpn_tunnel.log")
     }
+
+#if os(macOS) || targetEnvironment(macCatalyst)
+    private static var macOSSharedLogFileURL: URL? {
+        URL(fileURLWithPath: "/Users/Shared/VBridge", isDirectory: true)
+            .appendingPathComponent("vpn_tunnel.log")
+    }
+#endif
 
     private static func normalizedWidgetState(from rawValue: String) -> VBridgeLiveActivityPhase? {
         let lowered = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -421,6 +434,10 @@ public struct SharedLogger {
         let entry = LogEntry(id: UUID(), timestamp: Date(), level: level, source: source, message: message)
         let logLine = entry.rawLine + "\n"
         guard let data = logLine.data(using: .utf8) else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
 
         if FileManager.default.fileExists(atPath: url.path) {
             if let fileHandle = try? FileHandle(forWritingTo: url) {
