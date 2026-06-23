@@ -28,6 +28,7 @@ import (
 const (
 	listenAddress = "127.0.0.1:41737"
 	stateDir      = "/Library/Application Support/VBridge"
+	routeStatePath = stateDir + "/active-route.json"
 	logPath       = "/Users/Shared/VBridge/vpn_tunnel.log"
 )
 
@@ -61,6 +62,13 @@ type activeTunnel struct {
 	interfaceName string
 	turnServerIP string
 	defaultGateway string
+	routesApplied bool
+}
+
+type routeState struct {
+	InterfaceName  string `json:"interfaceName"`
+	TurnServerIP   string `json:"turnServerIP"`
+	DefaultGateway string `json:"defaultGateway"`
 }
 
 type helperServer struct {
@@ -71,6 +79,8 @@ type helperServer struct {
 func main() {
 	setupLogging()
 	log.Printf("vbridge-helper starting on %s", listenAddress)
+	cleanupPersistedRoutes()
+	cleanupStaleUtunDefaultRoutes()
 
 	server := &helperServer{}
 	mux := http.NewServeMux()
@@ -180,18 +190,14 @@ func (s *helperServer) stopLocked() {
 	s.active = nil
 
 	log.Printf("stopping tunnel interface=%s turn=%s", t.interfaceName, t.turnServerIP)
-	if t.turnServerIP != "" {
-		runCommand("route", "delete", "-host", t.turnServerIP)
-	}
-	if t.interfaceName != "" {
-		runCommand("route", "delete", "default", "-interface", t.interfaceName)
-	}
+	cleanupRoutes(t.interfaceName, t.turnServerIP)
 	if t.proxy != nil {
 		t.proxy.StopWithTimeout(2 * time.Second)
 	}
 	if t.device != nil {
 		t.device.Close()
 	}
+	clearRouteState()
 }
 
 func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
@@ -214,6 +220,27 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 	if err != nil {
 		return nil, err
 	}
+	var tunDevice tun.Device
+	var dev *device.Device
+	var interfaceName string
+	var turnServerIP string
+	routesApplied := false
+	startSucceeded := false
+	defer func() {
+		if startSucceeded {
+			return
+		}
+		if routesApplied || interfaceName != "" || turnServerIP != "" {
+			cleanupRoutes(interfaceName, turnServerIP)
+			clearRouteState()
+		}
+		if dev != nil {
+			dev.Close()
+		} else if tunDevice != nil {
+			tunDevice.Close()
+		}
+		p.StopWithTimeout(2 * time.Second)
+	}()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -221,19 +248,16 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 	}()
 
 	if err := waitBootstrap(ctx, p, errCh, 120*time.Second); err != nil {
-		p.StopWithTimeout(2 * time.Second)
 		return nil, err
 	}
 
-	turnServerIP := p.TURNServerIP()
+	turnServerIP = p.TURNServerIP()
 	if turnServerIP == "" {
-		p.StopWithTimeout(2 * time.Second)
 		return nil, errors.New("TURN server IP is empty after bootstrap")
 	}
 
 	provision, err := p.WaitWrapAProvision(30 * time.Second)
 	if err != nil {
-		p.StopWithTimeout(2 * time.Second)
 		return nil, fmt.Errorf("wait WDTT provision: %w", err)
 	}
 
@@ -241,46 +265,49 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 	if mtu <= 0 {
 		mtu = 1280
 	}
-	tunDevice, err := tun.CreateTUN("utun", mtu)
+	tunDevice, err = tun.CreateTUN("utun", mtu)
 	if err != nil {
-		p.StopWithTimeout(2 * time.Second)
 		return nil, fmt.Errorf("create utun: %w", err)
 	}
 
-	interfaceName, err := tunDevice.Name()
+	interfaceName, err = tunDevice.Name()
 	if err != nil {
-		tunDevice.Close()
-		p.StopWithTimeout(2 * time.Second)
 		return nil, fmt.Errorf("read utun name: %w", err)
 	}
 
-	if err := configureInterface(interfaceName, provision.Address, provision.DNS, mtu, turnServerIP, defaultGateway); err != nil {
-		tunDevice.Close()
-		p.StopWithTimeout(2 * time.Second)
+	if err := configureInterface(interfaceName, provision.Address, mtu); err != nil {
 		return nil, err
 	}
 
 	bind := turnbind.NewTURNBind(p)
 	logger := device.NewLogger(device.LogLevelVerbose, "(vbridge-helper/wireguard) ")
-	dev := device.NewDevice(tunDevice, bind, logger)
+	dev = device.NewDevice(tunDevice, bind, logger)
+	tunDevice = nil
 	if err := dev.IpcSet(provision.UAPIConfig()); err != nil {
-		dev.Close()
-		p.StopWithTimeout(2 * time.Second)
 		return nil, fmt.Errorf("wireguard ipc set: %w", err)
 	}
 	if err := dev.Up(); err != nil {
-		dev.Close()
-		p.StopWithTimeout(2 * time.Second)
 		return nil, fmt.Errorf("wireguard up: %w", err)
+	}
+	if err := applyRoutes(interfaceName, turnServerIP, defaultGateway); err != nil {
+		return nil, err
+	}
+	routesApplied = true
+	writeRouteState(interfaceName, turnServerIP, defaultGateway)
+
+	if provision.DNS != "" {
+		log.Printf("DNS requested by server: %s (not applied globally by helper yet)", provision.DNS)
 	}
 
 	log.Printf("tunnel started interface=%s address=%s dns=%s mtu=%d turn=%s gateway=%s", interfaceName, provision.Address, provision.DNS, mtu, turnServerIP, defaultGateway)
+	startSucceeded = true
 	return &activeTunnel{
 		device:         dev,
 		proxy:          p,
 		interfaceName:  interfaceName,
 		turnServerIP:   turnServerIP,
 		defaultGateway: defaultGateway,
+		routesApplied:  routesApplied,
 	}, nil
 }
 
@@ -345,7 +372,7 @@ func waitBootstrap(ctx context.Context, p *proxy.Proxy, errCh <-chan error, time
 	}
 }
 
-func configureInterface(interfaceName, address, dns string, mtu int, turnServerIP, defaultGateway string) error {
+func configureInterface(interfaceName, address string, mtu int) error {
 	ip, prefix, err := splitCIDR(address)
 	if err != nil {
 		return err
@@ -355,18 +382,76 @@ func configureInterface(interfaceName, address, dns string, mtu int, turnServerI
 	if err := runCommand("ifconfig", interfaceName, "inet", ip, ip, "netmask", netmask, "mtu", strconv.Itoa(mtu), "up"); err != nil {
 		return fmt.Errorf("configure %s: %w", interfaceName, err)
 	}
+	return nil
+}
+
+func applyRoutes(interfaceName, turnServerIP, defaultGateway string) error {
 	if defaultGateway != "" && turnServerIP != "" {
 		if err := runCommand("route", "add", "-host", turnServerIP, defaultGateway); err != nil {
 			return fmt.Errorf("add TURN host route: %w", err)
 		}
 	}
 	if err := runCommand("route", "add", "default", "-interface", interfaceName); err != nil {
+		cleanupRoutes(interfaceName, turnServerIP)
 		return fmt.Errorf("add default tunnel route: %w", err)
 	}
-	if dns != "" {
-		log.Printf("DNS requested by server: %s (not applied globally by helper yet)", dns)
-	}
 	return nil
+}
+
+func cleanupRoutes(interfaceName, turnServerIP string) {
+	if turnServerIP != "" {
+		runCommand("route", "delete", "-host", turnServerIP)
+	}
+	if interfaceName != "" {
+		runCommand("route", "delete", "default", "-interface", interfaceName)
+	}
+}
+
+func writeRouteState(interfaceName, turnServerIP, defaultGateway string) {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		log.Printf("write route state mkdir failed: %v", err)
+		return
+	}
+	data, err := json.Marshal(routeState{
+		InterfaceName:  interfaceName,
+		TurnServerIP:   turnServerIP,
+		DefaultGateway: defaultGateway,
+	})
+	if err != nil {
+		log.Printf("write route state marshal failed: %v", err)
+		return
+	}
+	if err := os.WriteFile(routeStatePath, data, 0o644); err != nil {
+		log.Printf("write route state failed: %v", err)
+	}
+}
+
+func cleanupPersistedRoutes() {
+	data, err := os.ReadFile(routeStatePath)
+	if err != nil {
+		return
+	}
+	var state routeState
+	if err := json.Unmarshal(data, &state); err != nil {
+		log.Printf("route state invalid, removing: %v", err)
+		clearRouteState()
+		return
+	}
+	log.Printf("cleaning persisted route state interface=%s turn=%s", state.InterfaceName, state.TurnServerIP)
+	cleanupRoutes(state.InterfaceName, state.TurnServerIP)
+	clearRouteState()
+}
+
+func clearRouteState() {
+	if err := os.Remove(routeStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("remove route state failed: %v", err)
+	}
+}
+
+func cleanupStaleUtunDefaultRoutes() {
+	for i := 0; i < 32; i++ {
+		runCommand("route", "delete", "default", "-interface", fmt.Sprintf("utun%d", i))
+	}
 }
 
 func currentDefaultGateway() (string, error) {

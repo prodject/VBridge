@@ -8,6 +8,10 @@ HELPER="/Library/PrivilegedHelperTools/${LABEL}"
 mkdir -p /Users/Shared/VBridge
 chmod 755 /Users/Shared/VBridge
 
+for i in $(/usr/bin/jot 32 0); do
+  /sbin/route delete default -interface "utun${i}" >/dev/null 2>&1 || true
+done
+
 chown root:wheel "$HELPER"
 chmod 755 "$HELPER"
 chown root:wheel "$PLIST"

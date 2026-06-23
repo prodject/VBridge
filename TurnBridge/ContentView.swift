@@ -1049,6 +1049,10 @@ struct ContentView: View {
     private func prepareSeededTURNIfNeeded(for profile: VPNProfile) async throws -> SeededTURNCredentials? {
         guard profile.transportMode == .wdtt else { return nil }
 
+#if targetEnvironment(macCatalyst)
+        SharedLogger.info("WDTT pre-bootstrap: skipped on macOS; privileged helper performs VK/TURN bootstrap")
+        return nil
+#else
         configureGoRuntimeForPreBootstrap()
 
         if let cached = CredCache.loadValidCred() {
@@ -1123,6 +1127,7 @@ struct ContentView: View {
         }
 
         throw preBootstrapError("WDTT pre-bootstrap exhausted 5 attempts without TURN credentials.")
+#endif
     }
 
     private func configureGoRuntimeForPreBootstrap() {
