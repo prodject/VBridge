@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	listenAddress = "127.0.0.1:41737"
-	stateDir      = "/Library/Application Support/VBridge"
+	listenAddress   = "127.0.0.1:41737"
+	stateDir        = "/Library/Application Support/VBridge"
 	routeStatePath = stateDir + "/active-route.json"
-	logPath       = "/Users/Shared/VBridge/vpn_tunnel.log"
+	logPath         = "/Users/Shared/VBridge/vpn_tunnel.log"
 )
 
 type tunnelStartConfiguration struct {
@@ -57,12 +57,12 @@ type seededTURN struct {
 }
 
 type activeTunnel struct {
-	device       *device.Device
-	proxy        *proxy.Proxy
+	device        *device.Device
+	proxy         *proxy.Proxy
 	interfaceName string
-	turnServerIP string
+	turnServerIP  string
 	defaultGateway string
-	routesApplied bool
+	routesApplied  bool
 }
 
 type routeState struct {
@@ -80,7 +80,8 @@ func main() {
 	setupLogging()
 	log.Printf("vbridge-helper starting on %s", listenAddress)
 	cleanupPersistedRoutes()
-	cleanupStaleUtunDefaultRoutes()
+	cleanupStaleVBridgeSplitRoutes()
+	repairDefaultGatewayIfMissing()
 
 	server := &helperServer{}
 	mux := http.NewServeMux()
@@ -391,9 +392,13 @@ func applyRoutes(interfaceName, turnServerIP, defaultGateway string) error {
 			return fmt.Errorf("add TURN host route: %w", err)
 		}
 	}
-	if err := runCommand("route", "add", "default", "-interface", interfaceName); err != nil {
+	if err := runCommand("route", "add", "-net", "0.0.0.0/1", "-interface", interfaceName); err != nil {
 		cleanupRoutes(interfaceName, turnServerIP)
-		return fmt.Errorf("add default tunnel route: %w", err)
+		return fmt.Errorf("add lower-half tunnel route: %w", err)
+	}
+	if err := runCommand("route", "add", "-net", "128.0.0.0/1", "-interface", interfaceName); err != nil {
+		cleanupRoutes(interfaceName, turnServerIP)
+		return fmt.Errorf("add upper-half tunnel route: %w", err)
 	}
 	return nil
 }
@@ -403,7 +408,8 @@ func cleanupRoutes(interfaceName, turnServerIP string) {
 		runCommand("route", "delete", "-host", turnServerIP)
 	}
 	if interfaceName != "" {
-		runCommand("route", "delete", "default", "-interface", interfaceName)
+		runCommand("route", "delete", "-net", "0.0.0.0/1", "-interface", interfaceName)
+		runCommand("route", "delete", "-net", "128.0.0.0/1", "-interface", interfaceName)
 	}
 }
 
@@ -448,13 +454,51 @@ func clearRouteState() {
 	}
 }
 
-func cleanupStaleUtunDefaultRoutes() {
+func cleanupStaleVBridgeSplitRoutes() {
 	for i := 0; i < 32; i++ {
-		runCommand("route", "delete", "default", "-interface", fmt.Sprintf("utun%d", i))
+		interfaceName := fmt.Sprintf("utun%d", i)
+		runCommand("route", "delete", "-net", "0.0.0.0/1", "-interface", interfaceName)
+		runCommand("route", "delete", "-net", "128.0.0.0/1", "-interface", interfaceName)
 	}
 }
 
 func currentDefaultGateway() (string, error) {
+	out, err := exec.Command("route", "-n", "get", "default").CombinedOutput()
+	if err != nil {
+		if router := dhcpRouter(); router != "" {
+			return router, nil
+		}
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "gateway:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "gateway:")), nil
+		}
+	}
+	if router := dhcpRouter(); router != "" {
+		return router, nil
+	}
+	return "", errors.New("gateway not found in route output or DHCP router options")
+}
+
+func repairDefaultGatewayIfMissing() {
+	if gateway, err := routeDefaultGateway(); err == nil && gateway != "" {
+		return
+	}
+	router := dhcpRouter()
+	if router == "" {
+		log.Printf("default gateway repair skipped: DHCP router not found")
+		return
+	}
+	if err := runCommand("route", "add", "default", router); err != nil {
+		log.Printf("default gateway repair failed via %s: %v", router, err)
+		return
+	}
+	log.Printf("default gateway repaired via DHCP router %s", router)
+}
+
+func routeDefaultGateway() (string, error) {
 	out, err := exec.Command("route", "-n", "get", "default").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
@@ -466,6 +510,20 @@ func currentDefaultGateway() (string, error) {
 		}
 	}
 	return "", errors.New("gateway not found in route output")
+}
+
+func dhcpRouter() string {
+	for _, interfaceName := range []string{"en0", "en1", "en2", "bridge100"} {
+		out, err := exec.Command("ipconfig", "getoption", interfaceName, "router").CombinedOutput()
+		if err != nil {
+			continue
+		}
+		router := strings.TrimSpace(string(out))
+		if net.ParseIP(router) != nil {
+			return router
+		}
+	}
+	return ""
 }
 
 func splitCIDR(address string) (string, int, error) {

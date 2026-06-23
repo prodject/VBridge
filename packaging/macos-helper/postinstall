@@ -9,8 +9,19 @@ mkdir -p /Users/Shared/VBridge
 chmod 755 /Users/Shared/VBridge
 
 for i in $(/usr/bin/jot 32 0); do
-  /sbin/route delete default -interface "utun${i}" >/dev/null 2>&1 || true
+  /sbin/route delete -net 0.0.0.0/1 -interface "utun${i}" >/dev/null 2>&1 || true
+  /sbin/route delete -net 128.0.0.0/1 -interface "utun${i}" >/dev/null 2>&1 || true
 done
+
+if ! /sbin/route -n get default 2>/dev/null | /usr/bin/grep -q "gateway:"; then
+  for iface in en0 en1 en2 bridge100; do
+    router="$(/usr/sbin/ipconfig getoption "$iface" router 2>/dev/null || true)"
+    if [ -n "$router" ]; then
+      /sbin/route add default "$router" >/dev/null 2>&1 || true
+      break
+    fi
+  done
+fi
 
 chown root:wheel "$HELPER"
 chmod 755 "$HELPER"
