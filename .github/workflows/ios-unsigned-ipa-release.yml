@@ -217,6 +217,67 @@ jobs:
             MARKETING_VERSION="$APP_VERSION" \
             CURRENT_PROJECT_VERSION="$APP_BUILD"
 
+      - name: Build macOS privileged helper
+        id: build_helper
+        run: |
+          set -euo pipefail
+
+          HELPER_BUILD_DIR="$GITHUB_WORKSPACE/build/vbridge-helper"
+          mkdir -p "$HELPER_BUILD_DIR"
+
+          (
+            cd wireguard-apple/Sources/WireGuardKitGo
+            GOOS=darwin GOARCH=arm64 go build \
+              -trimpath \
+              -ldflags "-s -w" \
+              -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-arm64" \
+              ./cmd/vbridge-helper
+            GOOS=darwin GOARCH=amd64 go build \
+              -trimpath \
+              -ldflags "-s -w" \
+              -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-amd64" \
+              ./cmd/vbridge-helper
+          )
+
+          lipo -create \
+            "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-arm64" \
+            "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-amd64" \
+            -output "$HELPER_BUILD_DIR/com.prodject.vbridge.helper"
+          /usr/bin/codesign --force --sign - --timestamp=none "$HELPER_BUILD_DIR/com.prodject.vbridge.helper"
+
+          echo "helper_path=$HELPER_BUILD_DIR/com.prodject.vbridge.helper" >> "$GITHUB_OUTPUT"
+
+      - name: Package macOS privileged helper
+        id: package_helper
+        run: |
+          set -euo pipefail
+
+          PKG_ROOT="$GITHUB_WORKSPACE/build/vbridge-helper-pkgroot"
+          PKG_SCRIPTS="$GITHUB_WORKSPACE/build/vbridge-helper-scripts"
+          HELPER_PKG_FILENAME="vbridge-${GITHUB_SHA}-${APP_VERSION}-helper.pkg"
+          HELPER_PKG_PATH="$GITHUB_WORKSPACE/$HELPER_PKG_FILENAME"
+
+          rm -rf "$PKG_ROOT" "$PKG_SCRIPTS"
+          mkdir -p "$PKG_ROOT/Library/PrivilegedHelperTools"
+          mkdir -p "$PKG_ROOT/Library/LaunchDaemons"
+          mkdir -p "$PKG_SCRIPTS"
+
+          ditto "${{ steps.build_helper.outputs.helper_path }}" "$PKG_ROOT/Library/PrivilegedHelperTools/com.prodject.vbridge.helper"
+          ditto "packaging/macos-helper/com.prodject.vbridge.helper.plist" "$PKG_ROOT/Library/LaunchDaemons/com.prodject.vbridge.helper.plist"
+          ditto "packaging/macos-helper/postinstall" "$PKG_SCRIPTS/postinstall"
+          chmod 755 "$PKG_SCRIPTS/postinstall"
+
+          pkgbuild \
+            --root "$PKG_ROOT" \
+            --scripts "$PKG_SCRIPTS" \
+            --identifier "com.prodject.vbridge.helper.pkg" \
+            --version "$APP_VERSION" \
+            --install-location "/" \
+            "$HELPER_PKG_PATH"
+
+          echo "helper_pkg_filename=$HELPER_PKG_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "helper_pkg_path=$HELPER_PKG_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Package macOS DMG
         id: package_macos
         run: |
@@ -227,6 +288,7 @@ jobs:
 
           DMG_ROOT="$(mktemp -d)"
           ditto "$APP_PATH" "$DMG_ROOT/VBridge.app"
+          ditto "${{ steps.package_helper.outputs.helper_pkg_path }}" "$DMG_ROOT/VBridge Helper.pkg"
 
           sign_nested_code() {
             local root="$1"
@@ -285,6 +347,13 @@ jobs:
           path: ${{ steps.package_macos.outputs.dmg_path }}
           if-no-files-found: error
 
+      - name: Upload macOS helper artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_helper.outputs.helper_pkg_filename }}
+          path: ${{ steps.package_helper.outputs.helper_pkg_path }}
+          if-no-files-found: error
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         env:
@@ -302,6 +371,8 @@ jobs:
             Build number: `${{ steps.package.outputs.app_build }}`
             Build target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
             Artifact: `${{ steps.package.outputs.ipa_filename }}`
+            macOS helper: `${{ steps.package_helper.outputs.helper_pkg_filename }}`
           files: |
             ${{ steps.package.outputs.ipa_path }}
             ${{ steps.package_macos.outputs.dmg_path }}
+            ${{ steps.package_helper.outputs.helper_pkg_path }}

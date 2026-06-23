@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+LABEL="com.prodject.vbridge.helper"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+HELPER="/Library/PrivilegedHelperTools/${LABEL}"
+
+mkdir -p /Users/Shared/VBridge
+chmod 755 /Users/Shared/VBridge
+
+chown root:wheel "$HELPER"
+chmod 755 "$HELPER"
+chown root:wheel "$PLIST"
+chmod 644 "$PLIST"
+
+/bin/launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
+/bin/launchctl bootstrap system "$PLIST"
+/bin/launchctl enable "system/${LABEL}" >/dev/null 2>&1 || true
+/bin/launchctl kickstart -k "system/${LABEL}" >/dev/null 2>&1 || true
+
+exit 0

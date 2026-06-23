@@ -451,7 +451,7 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
         let url = helperBaseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 8
+        request.timeoutInterval = path == "start" ? 180 : 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let encoder = JSONEncoder()
@@ -459,7 +459,7 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
-                SharedLogger.error("macOS privileged helper is not reachable at \(self.helperBaseURL.absoluteString): \(error.localizedDescription). The macOS backend layer is active, but a root helper service is required to create utun routes and DNS without NetworkExtension.")
+                SharedLogger.error("macOS privileged helper is not reachable at \(self.helperBaseURL.absoluteString): \(error.localizedDescription). Install VBridge Helper.pkg from the DMG and approve the administrator prompt, then try again.")
                 self.complete(onMain: completionHandler, false)
                 return
             }
