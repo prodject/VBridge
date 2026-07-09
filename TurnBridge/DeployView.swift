@@ -33,6 +33,13 @@ private struct DeployResponse: Decodable, Sendable {
     var serverConnected: Bool?
     var wdttInstalled: Bool?
     var readyToConnect: Bool?
+    var dtlsPort: Int?
+    var wgPort: Int?
+    var dns1: String?
+    var dns2: String?
+    var mainPassword: String?
+    var adminId: String?
+    var botToken: String?
 }
 
 struct DeployView: View {
@@ -263,6 +270,9 @@ struct DeployView: View {
                 currentAction = nil
                 output = response.output
                 updateStatusIndicators(response)
+                if action == .status {
+                    applyDiscoveredServerSettings(response)
+                }
                 resultTitle = response.ok ? "Deploy Complete" : "Deploy Failed"
                 resultMessage = response.message
                 showAlert = true
@@ -362,6 +372,43 @@ struct DeployView: View {
         serverConnected = response.serverConnected
         wdttInstalled = response.wdttInstalled
         readyToConnect = response.readyToConnect
+    }
+
+    private func applyDiscoveredServerSettings(_ response: DeployResponse) {
+        if let value = response.dtlsPort, isValidPort(value), value != dtlsPort {
+            dtlsPort = value
+            manualPorts = true
+        }
+        if let value = response.wgPort, isValidPort(value), value != wgPort {
+            wgPort = value
+            manualPorts = true
+        }
+        if dns1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.dns1) {
+            dns1 = value
+        }
+        if dns2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.dns2) {
+            dns2 = value
+        }
+        if mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
+            mainPassword = value
+        }
+        if adminId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.adminId) {
+            adminId = value
+        }
+        if botToken.isEmpty, let value = nonEmpty(response.botToken) {
+            botToken = value
+        }
+    }
+
+    private func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func isValidPort(_ value: Int) -> Bool {
+        (1...65535).contains(value)
     }
 
     private func clearStatusIndicators() {

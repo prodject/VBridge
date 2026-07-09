@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -44,12 +45,26 @@ type deployResponse struct {
 	ServerConnected bool   `json:"serverConnected"`
 	WDTTInstalled  bool   `json:"wdttInstalled"`
 	ReadyToConnect bool   `json:"readyToConnect"`
+	DTLSPort       int    `json:"dtlsPort,omitempty"`
+	WGPort         int    `json:"wgPort,omitempty"`
+	DNS1           string `json:"dns1,omitempty"`
+	DNS2           string `json:"dns2,omitempty"`
+	MainPassword   string `json:"mainPassword,omitempty"`
+	AdminID        string `json:"adminId,omitempty"`
+	BotToken       string `json:"botToken,omitempty"`
 }
 
 type deployStatusChecks struct {
 	ServerConnected bool
 	WDTTInstalled  bool
 	ReadyToConnect bool
+	DTLSPort       int
+	WGPort         int
+	DNS1           string
+	DNS2           string
+	MainPassword   string
+	AdminID        string
+	BotToken       string
 }
 
 //export VBridgeWGDeployServer
@@ -112,6 +127,13 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DTLSPort:       checks.DTLSPort,
+			WGPort:         checks.WGPort,
+			DNS1:           checks.DNS1,
+			DNS2:           checks.DNS2,
+			MainPassword:   checks.MainPassword,
+			AdminID:        checks.AdminID,
+			BotToken:       checks.BotToken,
 		}
 	}
 
@@ -151,6 +173,13 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DTLSPort:       checks.DTLSPort,
+			WGPort:         checks.WGPort,
+			DNS1:           checks.DNS1,
+			DNS2:           checks.DNS2,
+			MainPassword:   checks.MainPassword,
+			AdminID:        checks.AdminID,
+			BotToken:       checks.BotToken,
 		}
 	}
 
@@ -163,6 +192,13 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DTLSPort:       checks.DTLSPort,
+			WGPort:         checks.WGPort,
+			DNS1:           checks.DNS1,
+			DNS2:           checks.DNS2,
+			MainPassword:   checks.MainPassword,
+			AdminID:        checks.AdminID,
+			BotToken:       checks.BotToken,
 		}
 	}
 
@@ -174,6 +210,13 @@ func runDeploy(req deployRequest) deployResponse {
 		ServerConnected: checks.ServerConnected,
 		WDTTInstalled:  checks.WDTTInstalled,
 		ReadyToConnect: checks.ReadyToConnect,
+		DTLSPort:       checks.DTLSPort,
+		WGPort:         checks.WGPort,
+		DNS1:           checks.DNS1,
+		DNS2:           checks.DNS2,
+		MainPassword:   checks.MainPassword,
+		AdminID:        checks.AdminID,
+		BotToken:       checks.BotToken,
 	}
 }
 
@@ -327,6 +370,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		"if [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ]; then printf 'WDTT installed: yes\\n'; else printf 'WDTT installed: no\\n'; fi",
 		"if [ \"$service_active\" = \"1\" ] && [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ] && [ \"$iface_active\" = \"1\" ]; then printf 'Ready to connect: yes\\n'; else printf 'Ready to connect: no\\n'; fi",
 		"printf 'WDTT_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
+		"if [ -f /etc/systemd/system/wdtt.service ]; then sed -n 's/^ExecStart=//p' /etc/systemd/system/wdtt.service | tail -n 1 | sed 's/^/WDTT_EXECSTART|/'; fi",
 	}, "; ")
 
 	text, err := runSSHCommand(client, command, 20*time.Second)
@@ -336,6 +380,10 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 
 	checks := deployStatusChecks{ServerConnected: true}
 	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "WDTT_EXECSTART|") {
+			mergeDeployStatusConfig(&checks, parseWDTTExecStart(strings.TrimPrefix(line, "WDTT_EXECSTART|")))
+			continue
+		}
 		if !strings.HasPrefix(line, "WDTT_STATUS|") {
 			continue
 		}
@@ -351,6 +399,84 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 	}
 
 	return checks, text
+}
+
+func mergeDeployStatusConfig(dst *deployStatusChecks, src deployStatusChecks) {
+	if src.DTLSPort != 0 {
+		dst.DTLSPort = src.DTLSPort
+	}
+	if src.WGPort != 0 {
+		dst.WGPort = src.WGPort
+	}
+	if src.DNS1 != "" {
+		dst.DNS1 = src.DNS1
+	}
+	if src.DNS2 != "" {
+		dst.DNS2 = src.DNS2
+	}
+	if src.MainPassword != "" {
+		dst.MainPassword = src.MainPassword
+	}
+	if src.AdminID != "" {
+		dst.AdminID = src.AdminID
+	}
+	if src.BotToken != "" {
+		dst.BotToken = src.BotToken
+	}
+}
+
+func parseWDTTExecStart(execStart string) deployStatusChecks {
+	var checks deployStatusChecks
+	tokens := strings.Fields(execStart)
+	for i := 0; i < len(tokens); i++ {
+		if i+1 >= len(tokens) {
+			continue
+		}
+		value := tokens[i+1]
+		switch tokens[i] {
+		case "-listen":
+			checks.DTLSPort = parseDeployListenPort(value)
+			i++
+		case "-wg-port":
+			checks.WGPort = parseDeployPort(value)
+			i++
+		case "-dns":
+			dns := strings.SplitN(value, ",", 2)
+			checks.DNS1 = strings.TrimSpace(dns[0])
+			if len(dns) == 2 {
+				checks.DNS2 = strings.TrimSpace(dns[1])
+			}
+			i++
+		case "-password":
+			checks.MainPassword = value
+			i++
+		case "-admin":
+			checks.AdminID = value
+			i++
+		case "-bot-token":
+			checks.BotToken = value
+			i++
+		}
+	}
+	return checks
+}
+
+func parseDeployListenPort(value string) int {
+	if _, port, err := net.SplitHostPort(value); err == nil {
+		return parseDeployPort(port)
+	}
+	if idx := strings.LastIndex(value, ":"); idx >= 0 && idx+1 < len(value) {
+		return parseDeployPort(value[idx+1:])
+	}
+	return parseDeployPort(value)
+}
+
+func parseDeployPort(value string) int {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || port < 1 || port > 65535 {
+		return 0
+	}
+	return port
 }
 
 func rootDeployCommand(command, password string) string {
