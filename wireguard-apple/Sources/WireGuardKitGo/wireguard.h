@@ -42,6 +42,8 @@ extern char *VBridgeWGProbeVKCreds(
 extern void VBridgeWGSetLogFilePath(const char *path);
 extern void VBridgeWGSetTimezoneOffset(int offsetSeconds);
 extern char *VBridgeWGGetTURNServerIP(int32_t handle);
+extern char *VBridgeWGDeployServer(const char *jsonConfig);
+extern void VBridgeWGFreeCString(char *ptr);
 
 typedef void (*libxray_sockcallback)(uintptr_t fd, void* ctx);
 extern char *LibXrayCutGeoData(const char *datDir, const char *dstDir, const char *cutCodePath);
