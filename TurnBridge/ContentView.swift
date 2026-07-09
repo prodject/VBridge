@@ -322,6 +322,7 @@ struct ContentView: View {
     @State private var connectWatchdogTask: Task<Void, Never>?
     @State private var settingsSheet: SettingsSheet?
     @State private var showSplitTunnelSheet = false
+    @State private var showDeploySheet = false
     @StateObject private var captchaBridge = CaptchaBridge()
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
@@ -375,6 +376,11 @@ struct ContentView: View {
             .sheet(isPresented: $showSplitTunnelSheet) {
                 NavigationStack {
                     SplitTunnelSettingsView(showsDoneButton: true)
+                }
+            }
+            .sheet(isPresented: $showDeploySheet) {
+                NavigationStack {
+                    DeployView()
                 }
             }
             .sheet(item: $captchaBridge.activeRequest, onDismiss: {
@@ -741,6 +747,16 @@ struct ContentView: View {
                 }
             }) {
                 Image(systemName: "arrow.triangle.branch")
+                    .font(.title3)
+                    .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
+            }
+
+            Button(action: {
+                if vpnStatus == .disconnected {
+                    showDeploySheet = true
+                }
+            }) {
+                Image(systemName: "server.rack")
                     .font(.title3)
                     .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
             }

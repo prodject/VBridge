@@ -74,6 +74,13 @@ jobs:
           test -f wireguard-apple/Sources/WireGuardKitGo/out/libwg-go.a
           test -f wireguard-apple/Sources/WireGuardKitGo/out/wireguard-go-version.h
 
+      - name: Build WDTT deploy server assets
+        run: |
+          set -euo pipefail
+          ./script/build_wdtt_server_assets.sh
+          test -f TurnBridge/DeployAssets/wdtt-server-linux-amd64
+          test -f TurnBridge/DeployAssets/wdtt-server-linux-arm64
+
       - name: Build app
         run: |
           set -euo pipefail

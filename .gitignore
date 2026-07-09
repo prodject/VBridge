@@ -52,6 +52,9 @@ Carthage/Build/
 # WireGuard Specific
 wireguard-apple/Sources/WireGuardApp/Config/Developer.xcconfig
 
+# Generated deploy assets
+TurnBridge/DeployAssets/wdtt-server-linux-*
+
 # Unsigned build artifacts
 build_unsigned_ipa.sh
 my_quick_link.py
