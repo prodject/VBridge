@@ -74,7 +74,14 @@ struct DeployView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
-                Stepper("SSH Port: \(sshPort)", value: $sshPort, in: 1...65535)
+                TextField("SSH Port", value: $sshPort, format: .number)
+                    .keyboardType(.numberPad)
+
+                if !isSSHPortValid {
+                    Text("SSH port must be between 1 and 65535")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
             }
 
             Section(header: Text("DNS")) {
@@ -195,7 +202,7 @@ struct DeployView: View {
     }
 
     private var canConnect: Bool {
-        !isRunning && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+        !isRunning && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && isSSHPortValid
     }
 
     private var canInstall: Bool {
@@ -205,6 +212,10 @@ struct DeployView: View {
     private var isMainPasswordValid: Bool {
         let pattern = #"^[a-zA-Z0-9_.!?:#/-]+$"#
         return mainPassword.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private var isSSHPortValid: Bool {
+        (1...65535).contains(sshPort)
     }
 
     private func run(_ action: DeployAction) {
