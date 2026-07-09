@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import WireGuardKitGo
 
-private enum DeployAction: String {
+private enum DeployAction: String, Sendable {
     case install
     case uninstall
     case status
@@ -30,6 +30,9 @@ private struct DeployResponse: Decodable, Sendable {
     var status: String
     var message: String
     var output: String
+    var serverConnected: Bool?
+    var wdttInstalled: Bool?
+    var readyToConnect: Bool?
 }
 
 struct DeployView: View {
@@ -55,6 +58,10 @@ struct DeployView: View {
     @State private var resultMessage = ""
     @State private var output = ""
     @State private var showAlert = false
+    @State private var isCheckingServerStatus = false
+    @State private var serverConnected: Bool?
+    @State private var wdttInstalled: Bool?
+    @State private var readyToConnect: Bool?
 
     private let serverArchitectures = ["amd64", "arm64"]
 
@@ -81,6 +88,14 @@ struct DeployView: View {
                     Text("SSH port must be between 1 and 65535")
                         .font(.caption)
                         .foregroundColor(.red)
+                }
+            }
+
+            if hasSavedServerSettings {
+                Section(header: Text("Server Status")) {
+                    DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
+                    DeployStatusRow(title: "WDTT installed", value: wdttInstalled, isChecking: isCheckingServerStatus)
+                    DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
                 }
             }
 
@@ -191,6 +206,9 @@ struct DeployView: View {
         } message: {
             Text(resultMessage)
         }
+        .task {
+            await refreshSavedServerStatus()
+        }
     }
 
     private var effectiveDTLSPort: Int {
@@ -202,7 +220,11 @@ struct DeployView: View {
     }
 
     private var canConnect: Bool {
-        !isRunning && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && isSSHPortValid
+        !isRunning && !isCheckingServerStatus && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && isSSHPortValid
+    }
+
+    private var hasSavedServerSettings: Bool {
+        !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
     }
 
     private var canInstall: Bool {
@@ -240,6 +262,7 @@ struct DeployView: View {
                 isRunning = false
                 currentAction = nil
                 output = response.output
+                updateStatusIndicators(response)
                 resultTitle = response.ok ? "Deploy Complete" : "Deploy Failed"
                 resultMessage = response.message
                 showAlert = true
@@ -254,6 +277,27 @@ struct DeployView: View {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func refreshSavedServerStatus() async {
+        guard !isRunning, hasSavedServerSettings, isSSHPortValid else {
+            clearStatusIndicators()
+            return
+        }
+
+        let request: DeployRequest
+        do {
+            request = try makeRequest(.status)
+        } catch {
+            clearStatusIndicators()
+            return
+        }
+
+        isCheckingServerStatus = true
+        let response = await perform(request)
+        isCheckingServerStatus = false
+        updateStatusIndicators(response)
     }
 
     private func perform(_ request: DeployRequest) async -> DeployResponse {
@@ -284,7 +328,8 @@ struct DeployView: View {
     }
 
     private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
-        guard let scriptURL = Bundle.main.url(forResource: "wdtt-deploy", withExtension: "sh") else {
+        let scriptURL = Bundle.main.url(forResource: "wdtt-deploy", withExtension: "sh")
+        if action != .status, scriptURL == nil {
             throw DeployError.missingAsset("wdtt-deploy.sh")
         }
 
@@ -301,7 +346,7 @@ struct DeployView: View {
             user: user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "root" : user.trimmingCharacters(in: .whitespacesAndNewlines),
             password: password,
             port: sshPort,
-            deployScriptPath: scriptURL.path,
+            deployScriptPath: scriptURL?.path ?? "",
             serverBinaryPath: binaryURL?.path ?? "",
             mainPassword: mainPassword,
             adminId: adminId.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -311,6 +356,55 @@ struct DeployView: View {
             dns1: dns1.trimmingCharacters(in: .whitespacesAndNewlines),
             dns2: dns2.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    private func updateStatusIndicators(_ response: DeployResponse) {
+        serverConnected = response.serverConnected
+        wdttInstalled = response.wdttInstalled
+        readyToConnect = response.readyToConnect
+    }
+
+    private func clearStatusIndicators() {
+        serverConnected = nil
+        wdttInstalled = nil
+        readyToConnect = nil
+    }
+}
+
+private struct DeployStatusRow: View {
+    var title: String
+    var value: Bool?
+    var isChecking: Bool
+
+    var body: some View {
+        HStack {
+            statusIcon
+            Text(title)
+            Spacer()
+            if isChecking {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var statusIcon: some View {
+        Circle()
+            .fill(statusColor)
+            .frame(width: 10, height: 10)
+            .accessibilityHidden(true)
+    }
+
+    private var statusColor: Color {
+        guard !isChecking else { return .secondary }
+        switch value {
+        case .some(true):
+            return .green
+        case .some(false):
+            return .red
+        case .none:
+            return .secondary
+        }
     }
 }
 

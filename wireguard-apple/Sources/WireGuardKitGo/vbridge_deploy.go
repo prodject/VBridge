@@ -37,10 +37,19 @@ type deployRequest struct {
 }
 
 type deployResponse struct {
-	OK      bool   `json:"ok"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	Output  string `json:"output"`
+	OK             bool   `json:"ok"`
+	Status         string `json:"status"`
+	Message        string `json:"message"`
+	Output         string `json:"output"`
+	ServerConnected bool   `json:"serverConnected"`
+	WDTTInstalled  bool   `json:"wdttInstalled"`
+	ReadyToConnect bool   `json:"readyToConnect"`
+}
+
+type deployStatusChecks struct {
+	ServerConnected bool
+	WDTTInstalled  bool
+	ReadyToConnect bool
 }
 
 //export VBridgeWGDeployServer
@@ -92,28 +101,80 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.Action == "status" {
+		checks, text := checkDeployStatus(client)
+		appendOutput(req.Action, text)
+		return deployResponse{
+			OK:              true,
+			Status:          "success",
+			Message:         "WDTT status checked",
+			Output:          output.String(),
+			ServerConnected: checks.ServerConnected,
+			WDTTInstalled:  checks.WDTTInstalled,
+			ReadyToConnect: checks.ReadyToConnect,
+		}
+	}
+
 	if err := uploadDeployFile(client, req.DeployScript, "/tmp/vbridge-wdtt-deploy.sh", 0o755); err != nil {
-		return deployResponse{OK: false, Status: "error", Message: "deploy script upload failed: " + err.Error(), Output: output.String()}
+		return deployResponse{
+			OK:              false,
+			Status:          "error",
+			Message:         "deploy script upload failed: " + err.Error(),
+			Output:          output.String(),
+			ServerConnected: true,
+		}
 	}
 
 	if req.Action == "install" {
 		if err := uploadDeployFile(client, req.ServerBinary, "/tmp/wdtt-server", 0o755); err != nil {
-			return deployResponse{OK: false, Status: "error", Message: "server binary upload failed: " + err.Error(), Output: output.String()}
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "server binary upload failed: " + err.Error(),
+				Output:          output.String(),
+				ServerConnected: true,
+			}
 		}
 	}
 
 	command := req.remoteCommand()
 	text, err := runSSHCommand(client, rootDeployCommand(command, req.Password), 15*time.Minute)
 	appendOutput(req.Action, text)
+	checks, checkText := checkDeployStatus(client)
+	appendOutput("status", checkText)
 	if err != nil {
-		return deployResponse{OK: false, Status: "error", Message: "remote deploy failed: " + err.Error(), Output: output.String()}
+		return deployResponse{
+			OK:              false,
+			Status:          "error",
+			Message:         "remote deploy failed: " + err.Error(),
+			Output:          output.String(),
+			ServerConnected: checks.ServerConnected,
+			WDTTInstalled:  checks.WDTTInstalled,
+			ReadyToConnect: checks.ReadyToConnect,
+		}
 	}
 
 	if strings.Contains(text, "error:") || strings.Contains(text, "[✗]") {
-		return deployResponse{OK: false, Status: "error", Message: "remote deploy reported an error", Output: output.String()}
+		return deployResponse{
+			OK:              false,
+			Status:          "error",
+			Message:         "remote deploy reported an error",
+			Output:          output.String(),
+			ServerConnected: checks.ServerConnected,
+			WDTTInstalled:  checks.WDTTInstalled,
+			ReadyToConnect: checks.ReadyToConnect,
+		}
 	}
 
-	return deployResponse{OK: true, Status: "success", Message: "WDTT deploy completed", Output: output.String()}
+	return deployResponse{
+		OK:              true,
+		Status:          "success",
+		Message:         "WDTT deploy completed",
+		Output:          output.String(),
+		ServerConnected: checks.ServerConnected,
+		WDTTInstalled:  checks.WDTTInstalled,
+		ReadyToConnect: checks.ReadyToConnect,
+	}
 }
 
 func (r *deployRequest) normalize() {
@@ -158,7 +219,7 @@ func (r deployRequest) validate() error {
 	if r.WGPort < 1 || r.WGPort > 65535 {
 		return fmt.Errorf("invalid WireGuard port %d", r.WGPort)
 	}
-	if r.DeployScript == "" {
+	if r.Action != "status" && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
 	}
 	if r.Action == "install" && r.MainPassword == "" {
@@ -250,6 +311,46 @@ func deployDNSValue(dns1, dns2 string) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
+	command := strings.Join([]string{
+		"service_active=0",
+		"binary_installed=0",
+		"service_file=0",
+		"iface_active=0",
+		"systemctl is-active --quiet wdtt 2>/dev/null && service_active=1",
+		"[ -x /usr/local/bin/wdtt-server ] && binary_installed=1",
+		"[ -f /etc/systemd/system/wdtt.service ] && service_file=1",
+		"ip link show wdtt0 >/dev/null 2>&1 && iface_active=1",
+		"printf 'Server connected: yes\\n'",
+		"if [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ]; then printf 'WDTT installed: yes\\n'; else printf 'WDTT installed: no\\n'; fi",
+		"if [ \"$service_active\" = \"1\" ] && [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ] && [ \"$iface_active\" = \"1\" ]; then printf 'Ready to connect: yes\\n'; else printf 'Ready to connect: no\\n'; fi",
+		"printf 'WDTT_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
+	}, "; ")
+
+	text, err := runSSHCommand(client, command, 20*time.Second)
+	if err != nil {
+		return deployStatusChecks{ServerConnected: true}, text + "\nstatus check failed: " + err.Error()
+	}
+
+	checks := deployStatusChecks{ServerConnected: true}
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(line, "WDTT_STATUS|") {
+			continue
+		}
+		values := map[string]bool{}
+		for _, part := range strings.Split(strings.TrimPrefix(line, "WDTT_STATUS|"), "|") {
+			pair := strings.SplitN(part, "=", 2)
+			if len(pair) == 2 {
+				values[pair[0]] = pair[1] == "1"
+			}
+		}
+		checks.WDTTInstalled = values["binary_installed"] && values["service_file"]
+		checks.ReadyToConnect = checks.WDTTInstalled && values["service_active"] && values["iface_active"]
+	}
+
+	return checks, text
 }
 
 func rootDeployCommand(command, password string) string {
