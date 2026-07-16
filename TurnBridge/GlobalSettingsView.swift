@@ -39,8 +39,10 @@ enum SplitTunnelStorage {
     static let rulesKey = "splitTunnelRules"
     static let createListURL = "https://iplist.opencck.org/"
     static let githubCIDRSourceKey = "splitTunnelSource.githubCIDR"
+    static let githubIPSourceKey = "splitTunnelSource.githubIP"
     static let githubDomainSourceKey = "splitTunnelSource.githubDomain"
     static let githubCIDRRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/cidrwhitelist.txt"
+    static let githubIPRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/ipwhitelist.txt"
     static let githubDomainRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/whitelist.txt"
 
     static func load() -> SplitTunnelSettings {
@@ -396,7 +398,25 @@ struct SplitTunnelSettingsView: View {
                     )
                 }) {
                     VStack(alignment: .leading) {
-                        Text("Pull IP/CIDR from github")
+                        Text("Pull CIDR whitelist from GitHub")
+                        Text("github.com/hxehex/russia-mobile-internet-whitelist")
+                            .font(.caption2.monospaced())
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .disabled(isPullingGitHubList)
+
+                Button(action: {
+                    pullGitHubList(
+                        sourceKey: SplitTunnelStorage.githubIPSourceKey,
+                        urlString: SplitTunnelStorage.githubIPRawURL
+                    )
+                }) {
+                    VStack(alignment: .leading) {
+                        Text("Pull individual IP whitelist from GitHub")
+                        Text("Large list; use only when exact host routes are required")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                         Text("github.com/hxehex/russia-mobile-internet-whitelist")
                             .font(.caption2.monospaced())
                             .foregroundColor(.secondary)
@@ -411,7 +431,7 @@ struct SplitTunnelSettingsView: View {
                     )
                 }) {
                     VStack(alignment: .leading) {
-                        Text("Pull DOMAIN whitelist from github")
+                        Text("Pull domain whitelist from GitHub")
                         Text("github.com/hxehex/russia-mobile-internet-whitelist")
                             .font(.caption2.monospaced())
                             .foregroundColor(.secondary)

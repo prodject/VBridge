@@ -131,6 +131,9 @@ Available modes:
 * **Open domains and IPs through tunnel**: only matching traffic goes through the VPN tunnel.
 
 Lists can be edited manually, imported from local `.txt` files or remote text URLs, and exported as `vbridge-split-data.txt`.
+The settings screen can also refresh the domain, CIDR subnet, and optional individual-IP lists from
+[`hxehex/russia-mobile-internet-whitelist`](https://github.com/hxehex/russia-mobile-internet-whitelist).
+The individual-IP list is very large; prefer the CIDR list unless exact host routes are required.
 
 ## Widget and Shortcuts
 

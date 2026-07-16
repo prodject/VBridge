@@ -489,6 +489,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
         let isWDTT = transportMode == "wdtt"
+        let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 
@@ -502,7 +503,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             do {
                 let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
-                let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
                 applySplitTunnelConfiguration(splitTunnel, to: parsedConfiguration)
                 tunnelConfiguration = parsedConfiguration
                 wgUAPI = PacketTunnelSettingsGenerator(
@@ -627,7 +627,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     address: provision.address,
                     dns: provision.dns,
                     mtu: provision.mtu.map(String.init) ?? "1280",
-                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP
+                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
+                    splitTunnel: splitTunnel
                 )
             } else if let tunnelConfiguration = tunnelConfiguration {
                 networkSettings = PacketTunnelSettingsGenerator(
@@ -769,7 +770,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         address: String,
         dns: String,
         mtu: String,
-        tunnelRemoteAddress: String
+        tunnelRemoteAddress: String,
+        splitTunnel: SplitTunnelConfiguration
     ) -> NEPacketTunnelNetworkSettings {
         let parts = address.split(separator: "/", maxSplits: 1).map(String.init)
         let ip = parts.first ?? "192.168.102.3"
@@ -794,7 +796,87 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         } else {
             settings.mtu = NSNumber(value: 1280)
         }
+        applySplitTunnelConfiguration(splitTunnel, to: settings)
         return settings
+    }
+
+    private func applySplitTunnelConfiguration(
+        _ splitTunnel: SplitTunnelConfiguration,
+        to networkSettings: NEPacketTunnelNetworkSettings
+    ) {
+        guard splitTunnel.enabled, !splitTunnel.rules.isEmpty else {
+            SharedLogger.info("Split tunneling disabled for WDTT network settings", source: .tunnel)
+            return
+        }
+
+        let compiled = compileSplitTunnelRules(splitTunnel.rules)
+        let resolvedDomainRanges = resolveRanges(forDomains: compiled.exactDomains)
+        let concreteRanges = deduplicatedRanges(compiled.ipRanges + resolvedDomainRanges)
+        let ipv4Routes = concreteRanges.compactMap(makeIPv4Route)
+        let ipv6Routes = concreteRanges.compactMap(makeIPv6Route)
+        let runtimeMatchDomains = deduplicatedStrings(
+            compiled.exactDomains + compiled.wildcardDomains.map { String($0.dropFirst(2)) }
+        )
+
+        if splitTunnel.mode == .direct {
+            networkSettings.ipv4Settings?.excludedRoutes = deduplicatedIPv4Routes(
+                (networkSettings.ipv4Settings?.excludedRoutes ?? []) + ipv4Routes
+            )
+            networkSettings.ipv6Settings?.excludedRoutes = deduplicatedIPv6Routes(
+                (networkSettings.ipv6Settings?.excludedRoutes ?? []) + ipv6Routes
+            )
+            // Domain addresses are resolved before the default route is installed. Keep
+            // DNS on the physical interface so future resolutions can also bypass VPN.
+            networkSettings.dnsSettings?.matchDomains = nil
+        } else {
+            var includedIPv4 = ipv4Routes
+            var includedIPv6 = ipv6Routes
+            if let dnsSettings = networkSettings.dnsSettings {
+                for server in dnsSettings.servers {
+                    if let range = IPAddressRange(from: server) {
+                        if let route = makeIPv4Route(range) {
+                            includedIPv4.append(route)
+                        } else if let route = makeIPv6Route(range) {
+                            includedIPv6.append(route)
+                        }
+                    }
+                }
+                dnsSettings.matchDomains = runtimeMatchDomains.isEmpty ? nil : runtimeMatchDomains
+            }
+            networkSettings.ipv4Settings?.includedRoutes = deduplicatedIPv4Routes(includedIPv4)
+            networkSettings.ipv6Settings?.includedRoutes = deduplicatedIPv6Routes(includedIPv6)
+        }
+
+        SharedLogger.info(
+            "WDTT split tunneling applied mode=\(splitTunnel.mode.rawValue) rules=\(splitTunnel.rules.count) ipv4Routes=\(ipv4Routes.count) ipv6Routes=\(ipv6Routes.count) domains=\(runtimeMatchDomains.count)",
+            source: .tunnel
+        )
+    }
+
+    private func makeIPv4Route(_ range: IPAddressRange) -> NEIPv4Route? {
+        guard range.address is IPv4Address else { return nil }
+        return NEIPv4Route(
+            destinationAddress: "\(range.maskedAddress())",
+            subnetMask: "\(range.subnetMask())"
+        )
+    }
+
+    private func makeIPv6Route(_ range: IPAddressRange) -> NEIPv6Route? {
+        guard range.address is IPv6Address else { return nil }
+        return NEIPv6Route(
+            destinationAddress: "\(range.maskedAddress())",
+            networkPrefixLength: NSNumber(value: range.networkPrefixLength)
+        )
+    }
+
+    private func deduplicatedIPv4Routes(_ routes: [NEIPv4Route]) -> [NEIPv4Route] {
+        var seen = Set<String>()
+        return routes.filter { seen.insert("\($0.destinationAddress)/\($0.destinationSubnetMask)").inserted }
+    }
+
+    private func deduplicatedIPv6Routes(_ routes: [NEIPv6Route]) -> [NEIPv6Route] {
+        var seen = Set<String>()
+        return routes.filter { seen.insert("\($0.destinationAddress)/\($0.destinationNetworkPrefixLength)").inserted }
     }
 
     private func prefixToSubnet(_ prefix: Int) -> String {
