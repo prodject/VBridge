@@ -17,6 +17,7 @@ private let captchaRecoveryStorageKey = "captcha.recovery.request"
 private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.recovery.request.changed" as CFString)
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
+private let splitTunnelSynchronousDomainLimit = 64
 private let goRuntimeMemoryLimit = "24MiB"
 
 private func configureGoRuntimeMemoryBeforeFirstCall() {
@@ -212,29 +213,42 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             || interface.specialJunk5 != nil
     }
 
-    private func splitTunnelConfiguration(from providerConfiguration: [String: Any]) -> SplitTunnelConfiguration {
-        if let groupID = SharedLogger.appGroupID,
-           let defaults = UserDefaults(suiteName: groupID) {
-            let enabled = defaults.object(forKey: "splitTunnelEnabled") as? Bool ?? false
-            let mode = SplitTunnelMode(rawValue: defaults.string(forKey: "splitTunnelMode") ?? "") ?? .direct
-            let rules = defaults.stringArray(forKey: "splitTunnelRules") ?? []
-            if enabled || !rules.isEmpty || defaults.string(forKey: "splitTunnelMode") != nil {
-                return SplitTunnelConfiguration(enabled: enabled, mode: mode, rules: rules)
-            }
+    private func splitTunnelConfiguration() -> SplitTunnelConfiguration {
+        guard let groupID = SharedLogger.appGroupID,
+              let defaults = UserDefaults(suiteName: groupID) else {
+            SharedLogger.warning("Split tunneling disabled: App Group defaults unavailable", source: .tunnel)
+            return SplitTunnelConfiguration(enabled: false, mode: .direct, rules: [])
         }
 
-        let enabled = (providerConfiguration["splitTunnelEnabled"] as? Bool) ?? false
-        let mode = SplitTunnelMode(rawValue: (providerConfiguration["splitTunnelMode"] as? String) ?? "") ?? .direct
-        let rules = (providerConfiguration["splitTunnelRules"] as? [String]) ?? []
-        return SplitTunnelConfiguration(enabled: enabled, mode: mode, rules: rules)
+        let enabled = defaults.object(forKey: "splitTunnelEnabled") as? Bool ?? false
+        let mode = SplitTunnelMode(rawValue: defaults.string(forKey: "splitTunnelMode") ?? "") ?? .direct
+        guard enabled else {
+            return SplitTunnelConfiguration(enabled: false, mode: mode, rules: [])
+        }
+
+        return SplitTunnelConfiguration(
+            enabled: true,
+            mode: mode,
+            rules: defaults.stringArray(forKey: "splitTunnelRules") ?? []
+        )
+    }
+
+    private func rangesResolvedForSplitTunnel(_ compiled: CompiledSplitTunnelRules) -> [IPAddressRange] {
+        guard compiled.exactDomains.count <= splitTunnelSynchronousDomainLimit else {
+            SharedLogger.warning(
+                "Split tunneling skipped eager DNS resolution for large domain list (\(compiled.exactDomains.count) domains, limit=\(splitTunnelSynchronousDomainLimit)); applying IP/CIDR routes and DNS matching only",
+                source: .tunnel
+            )
+            return compiled.ipRanges
+        }
+        return deduplicatedRanges(compiled.ipRanges + resolveRanges(forDomains: compiled.exactDomains))
     }
 
     private func applySplitTunnelConfiguration(_ splitTunnel: SplitTunnelConfiguration, to tunnelConfiguration: TunnelConfiguration) {
         guard splitTunnel.enabled, !splitTunnel.rules.isEmpty else { return }
 
         let compiled = compileSplitTunnelRules(splitTunnel.rules)
-        let resolvedDomainRanges = resolveRanges(forDomains: compiled.exactDomains)
-        let concreteRanges = deduplicatedRanges(compiled.ipRanges + resolvedDomainRanges)
+        let concreteRanges = rangesResolvedForSplitTunnel(compiled)
 
         let runtimeMatchDomains = deduplicatedStrings(
             compiled.exactDomains + compiled.wildcardDomains.map { String($0.dropFirst(2)) }
@@ -489,7 +503,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
         let isWDTT = transportMode == "wdtt"
-        let splitTunnel = splitTunnelConfiguration(from: providerConfiguration)
+        let splitTunnel = splitTunnelConfiguration()
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 
@@ -810,8 +824,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let compiled = compileSplitTunnelRules(splitTunnel.rules)
-        let resolvedDomainRanges = resolveRanges(forDomains: compiled.exactDomains)
-        let concreteRanges = deduplicatedRanges(compiled.ipRanges + resolvedDomainRanges)
+        let concreteRanges = rangesResolvedForSplitTunnel(compiled)
         let ipv4Routes = concreteRanges.compactMap(makeIPv4Route)
         let ipv6Routes = concreteRanges.compactMap(makeIPv6Route)
         let runtimeMatchDomains = deduplicatedStrings(

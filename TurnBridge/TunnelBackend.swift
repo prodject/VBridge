@@ -23,13 +23,6 @@ struct TunnelStartConfiguration: Codable {
     }
 
     var providerConfiguration: [String: Any] {
-        let splitDefaults: UserDefaults = {
-            if let groupID = SharedLogger.appGroupID,
-               let defaults = UserDefaults(suiteName: groupID) {
-                return defaults
-            }
-            return .standard
-        }()
         var configuration: [String: Any] = [
             "wgQuickConfig": normalizedWgQuickConfig,
             "vkLink": vkLink,
@@ -45,10 +38,7 @@ struct TunnelStartConfiguration: Codable {
             "wrapKeyHex": wrapKeyHex,
             "wdttPassword": wdttPassword,
             "wdttClientKey": wdttClientKey,
-            "wdttServerKey": wdttServerKey,
-            "splitTunnelEnabled": splitDefaults.object(forKey: "splitTunnelEnabled") as? Bool ?? false,
-            "splitTunnelMode": splitDefaults.string(forKey: "splitTunnelMode") ?? "direct",
-            "splitTunnelRules": splitDefaults.stringArray(forKey: "splitTunnelRules") ?? []
+            "wdttServerKey": wdttServerKey
         ]
 
         if let seededTURN {

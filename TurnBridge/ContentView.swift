@@ -352,7 +352,7 @@ struct ContentView: View {
     @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
     @State private var preBootstrapCaptchaContinuation: CheckedContinuation<PreBootstrapCaptchaResult, Never>?
 
-    private let connectWatchdogTimeout: UInt64 = 180
+    private let connectWatchdogTimeout: UInt64 = 45
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
     private static let vbridgeType = UTType(filenameExtension: "vbridge", conformingTo: .data)
     private static let importFileTypes: [UTType] = [
@@ -994,7 +994,6 @@ struct ContentView: View {
                     }
                 }
             }
-            startConnectWatchdog()
         }
     }
 
@@ -1004,6 +1003,7 @@ struct ContentView: View {
         configuredThreadCount: Int,
         seededTURN: SeededTURNCredentials?
     ) {
+        startConnectWatchdog()
         app.turnOnTunnel(
             vkLink: profile.vkLink,
             peerAddr: profile.peerAddr,
@@ -2501,8 +2501,11 @@ struct ContentView: View {
 
                 SharedLogger.error("Connection timeout while waiting for tunnel readiness")
                 isPreparingTunnelStart = false
+                connectionStartedAt = nil
+                resetSpeedTelemetry()
                 app.turnOffTunnel()
                 vpnStatus = .disconnected
+                endLiveActivity(immediate: true)
                 presentConnectionIssue(
                     title: "Connection Timeout",
                     message: "Tunnel startup timed out (\(connectWatchdogTimeout)s). Check Logs and Captcha flow, then try again."
