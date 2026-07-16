@@ -9,7 +9,7 @@ struct LogView: View {
     @State private var autoScroll = true
     @State private var showFilters = false
     @State private var monitoringTask: Task<Void, Never>? = nil
-    @State private var lastSnapshot = ""
+    @State private var lastRawLines: [String] = []
 
     var filteredEntries: [LogEntry] {
         entries.filter { entry in
@@ -55,7 +55,6 @@ struct LogView: View {
             }
         }
         .onAppear {
-            loadLogs()
             startMonitoring()
         }
         .onDisappear {
@@ -64,11 +63,13 @@ struct LogView: View {
     }
 
     private func startMonitoring() {
+        stopMonitoring()
         monitoringTask = Task {
+            await loadLogs()
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(nanoseconds: 300_000_000)
-                    loadLogs()
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    await loadLogs()
                 } catch {
                     break
                 }
@@ -81,15 +82,30 @@ struct LogView: View {
         monitoringTask = nil
     }
 
-    private func loadLogs() {
-        let rawLines = SharedLogger.readLogs()
-        let snapshot = "\(rawLines.count)|\(rawLines.last ?? "")"
-        guard snapshot != lastSnapshot else { return }
+    @MainActor
+    private func loadLogs() async {
+        // File I/O and parsing must not run on the UI actor. In particular,
+        // parsing the whole 500 KB rolling log every 300 ms made scrolling
+        // noticeably stall on devices.
+        let rawLines = await Task.detached(priority: .utility) {
+            SharedLogger.readLogs()
+        }.value
+        guard !Task.isCancelled, rawLines != lastRawLines else { return }
 
-        lastSnapshot = snapshot
-        entries = rawLines
-            .compactMap(LogEntry.parse)
-            .reversed()
+        if rawLines.count >= lastRawLines.count,
+           Array(rawLines.prefix(lastRawLines.count)) == lastRawLines {
+            let appendedLines = Array(rawLines.dropFirst(lastRawLines.count))
+            let appendedEntries = await Task.detached(priority: .utility) {
+                Array(appendedLines.compactMap(LogEntry.parse).reversed())
+            }.value
+            entries.insert(contentsOf: appendedEntries, at: 0)
+        } else {
+            // The file was cleared or rotated; rebuild only in that case.
+            entries = await Task.detached(priority: .utility) {
+                Array(rawLines.compactMap(LogEntry.parse).reversed())
+            }.value
+        }
+        lastRawLines = rawLines
     }
 
     private var newestEntryID: Int? {

@@ -146,7 +146,11 @@ enum TunnelBackendFactory {
 }
 
 final class NetworkExtensionTunnelBackend: TunnelBackend {
+    private var startupRecoveryWorkItem: DispatchWorkItem?
+
     func start(_ configuration: TunnelStartConfiguration, completionHandler: @escaping (Bool) -> Void) {
+        startupRecoveryWorkItem?.cancel()
+        startupRecoveryWorkItem = nil
         SharedLogger.info("Connecting... mode=\(configuration.transportMode.rawValue), peer=\(configuration.peerAddr), listen=\(configuration.listenAddr), n=\(configuration.nValue)")
         if configuration.transportMode == .wdtt {
             SharedLogger.info("WDTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.wdttPassword.isEmpty), primaryHashLen=\(configuration.wdttClientKey.count), extraHashesLen=\(configuration.wdttServerKey.count)")
@@ -240,6 +244,8 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
     }
 
     func stop() {
+        startupRecoveryWorkItem?.cancel()
+        startupRecoveryWorkItem = nil
         SharedLogger.info("Disconnecting...")
         NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
             if let error {
@@ -364,16 +370,39 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            guard session.status == .disconnected else { return }
+        startupRecoveryWorkItem?.cancel()
+        let recoveryCheck = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let status = session.status
+            guard status != .connected else { return }
+            guard !SharedLogger.didTunnelProviderStart else {
+                SharedLogger.debug(
+                    "Tunnel provider launched; skipping startup recovery (status=\(status.rawValue))"
+                )
+                return
+            }
             SharedLogger.warning(
-                "Tunnel returned to disconnected after start; providerStarted=\(SharedLogger.didTunnelProviderStart); recreating VPN manager once"
+                "Tunnel provider did not launch (status=\(status.rawValue)); recreating VPN manager once"
             )
-            self.recreateAndStartTunnel(
-                protocolConfiguration: recoveryConfiguration,
-                providerBundleIdentifier: providerBundleIdentifier
-            )
+            if status == .connecting || status == .reasserting || status == .disconnecting {
+                session.stopVPNTunnel()
+            }
+
+            // Give neagent a moment to release the stale session before its
+            // manager is removed from preferences. The recreated start is
+            // explicitly marked as a recovery attempt, so this cannot loop.
+            let recreate = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.recreateAndStartTunnel(
+                    protocolConfiguration: recoveryConfiguration,
+                    providerBundleIdentifier: providerBundleIdentifier
+                )
+            }
+            self.startupRecoveryWorkItem = recreate
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: recreate)
         }
+        startupRecoveryWorkItem = recoveryCheck
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0, execute: recoveryCheck)
     }
 
     private func recreateAndStartTunnel(
