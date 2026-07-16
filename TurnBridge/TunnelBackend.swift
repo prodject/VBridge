@@ -372,6 +372,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         }
 
         do {
+            SharedLogger.prepareForTunnelProviderLaunch()
             SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue)")
             try session.startTunnel()
             schedulePostStartDiagnosticIfNeeded(
@@ -421,9 +422,14 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-            guard session.status == .disconnected else { return }
-            SharedLogger.warning("Tunnel returned to disconnected after start; recreating VPN manager once")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            guard session.status != .connected else { return }
+            guard !SharedLogger.didTunnelProviderStart else {
+                SharedLogger.debug("Tunnel provider launched; skipping VPN manager recovery")
+                return
+            }
+            SharedLogger.warning("Tunnel provider did not launch (status=\(session.status.rawValue)); recreating VPN manager once")
+            session.stopVPNTunnel()
             self.recreateAndStartTunnel(
                 protocolConfiguration: recoveryConfiguration,
                 providerBundleIdentifier: providerBundleIdentifier

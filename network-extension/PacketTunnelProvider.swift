@@ -497,6 +497,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        SharedLogger.markTunnelProviderStarted()
         NSLog("START TUNNEL CALLED")
         configureGoRuntimeMemoryBeforeFirstCall()
         sharedLogger.log("START TUNNEL CALLED")

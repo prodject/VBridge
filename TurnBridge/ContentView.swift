@@ -1377,7 +1377,7 @@ struct ContentView: View {
         logMonitoringTask = Task {
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(nanoseconds: 300_000_000)
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
                     await MainActor.run {
                         let signature = widgetRefreshSignature()
                         if signature != lastWidgetRefreshSignature {
@@ -1526,8 +1526,7 @@ struct ContentView: View {
             content.phase.rawValue,
             content.progressText ?? "",
             content.relayIP ?? "",
-            content.estimatedRemainingSeconds.map(String.init) ?? "",
-            ISO8601DateFormatter().string(from: content.updatedAt)
+            content.estimatedRemainingSeconds.map(String.init) ?? ""
         ].joined(separator: "|")
     }
 
@@ -1573,28 +1572,14 @@ struct ContentView: View {
     }
 
     private func latestConnectionProgressFromLogs() -> (active: Int, total: Int)? {
-        for line in SharedLogger.readLogs().reversed() {
-            guard let range = line.range(of: "Connected workers ") else { continue }
-            let suffix = line[range.upperBound...]
-            let value = suffix.split(separator: " ").first.map(String.init) ?? String(suffix)
-            let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-            guard parts.count == 2, let active = Int(parts[0]), let total = Int(parts[1]) else { continue }
-            return (active, total)
-        }
-        return nil
+        guard let content = VBridgeLiveActivityStore.load()?.content,
+              let active = content.activeConnections,
+              let total = content.totalConnections else { return nil }
+        return (active, total)
     }
 
     private func latestRelayIPFromLogs() -> String? {
-        for line in SharedLogger.readLogs().reversed() {
-            guard let range = line.range(of: "relayed-address=") else { continue }
-            let suffix = line[range.upperBound...]
-            let value = String(suffix).split(separator: " ").first.map(String.init) ?? String(suffix)
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return trimmed
-            }
-        }
-        return nil
+        VBridgeLiveActivityStore.load()?.content.relayIP
     }
 
     private func estimatedRemainingSeconds(

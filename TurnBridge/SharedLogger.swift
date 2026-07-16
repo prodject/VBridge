@@ -217,6 +217,29 @@ public struct SharedLogger {
         return documents.appendingPathComponent("vpn_tunnel.log")
     }
 
+    private static var tunnelProviderLaunchMarkerURL: URL? {
+        guard let groupID = appGroupID,
+              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
+            return nil
+        }
+        return container.appendingPathComponent("tunnel-provider-started.marker")
+    }
+
+    static func prepareForTunnelProviderLaunch() {
+        guard let url = tunnelProviderLaunchMarkerURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    static func markTunnelProviderStarted() {
+        guard let url = tunnelProviderLaunchMarkerURL else { return }
+        try? String(Date().timeIntervalSince1970).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static var didTunnelProviderStart: Bool {
+        guard let url = tunnelProviderLaunchMarkerURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
 #if os(macOS) || targetEnvironment(macCatalyst)
     private static var macOSSharedLogFileURL: URL? {
         URL(fileURLWithPath: "/Users/Shared/VBridge", isDirectory: true)
