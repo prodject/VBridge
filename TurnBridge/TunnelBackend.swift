@@ -1,5 +1,6 @@
 import Foundation
 import NetworkExtension
+import Combine
 
 struct TunnelStartConfiguration: Codable {
     var vkLink: String
@@ -96,7 +97,21 @@ protocol TunnelBackend {
     func stop()
 }
 
-enum VBridgeTunnelManagerStore {
+final class VBridgeTunnelManagerStore: ObservableObject {
+    static let shared = VBridgeTunnelManagerStore()
+
+    @Published private(set) var status: NEVPNStatus = .disconnected
+    private(set) var manager: NETunnelProviderManager?
+    private var statusObserver: NSObjectProtocol?
+
+    private init() {}
+
+    deinit {
+        if let statusObserver {
+            NotificationCenter.default.removeObserver(statusObserver)
+        }
+    }
+
     static var providerBundleIdentifier: String {
         let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
         if let plugInsURL = Bundle.main.builtInPlugInsURL {
@@ -133,6 +148,54 @@ enum VBridgeTunnelManagerStore {
             }
         } ?? matching.first
     }
+
+    func load(completion: @escaping (NETunnelProviderManager?) -> Void) {
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            DispatchQueue.main.async {
+                if let error {
+                    SharedLogger.error("Failed to load tunnel preferences: \(error.localizedDescription)")
+                    completion(nil)
+                    return
+                }
+                let matching = Self.matchingManagers(in: managers ?? [])
+                if matching.count > 1 {
+                    SharedLogger.warning("Found \(matching.count) VBridge VPN managers; using one preferred session")
+                }
+                let selected = Self.preferredManager(in: matching)
+                if let selected {
+                    self.adopt(selected)
+                }
+                completion(selected)
+            }
+        }
+    }
+
+    func adopt(_ manager: NETunnelProviderManager) {
+        if self.manager === manager { return }
+        if let statusObserver {
+            NotificationCenter.default.removeObserver(statusObserver)
+        }
+        self.manager = manager
+        status = manager.connection.status
+        statusObserver = NotificationCenter.default.addObserver(
+            forName: .NEVPNStatusDidChange,
+            object: manager.connection,
+            queue: .main
+        ) { [weak self, weak manager] _ in
+            guard let self, let manager, self.manager === manager else { return }
+            self.status = manager.connection.status
+        }
+    }
+
+    func clear(_ manager: NETunnelProviderManager? = nil) {
+        if let manager, self.manager !== manager { return }
+        if let statusObserver {
+            NotificationCenter.default.removeObserver(statusObserver)
+        }
+        statusObserver = nil
+        self.manager = nil
+        status = .disconnected
+    }
 }
 
 enum TunnelBackendFactory {
@@ -146,6 +209,7 @@ enum TunnelBackendFactory {
 }
 
 final class NetworkExtensionTunnelBackend: TunnelBackend {
+    private let managerStore = VBridgeTunnelManagerStore.shared
     private var startupRecoveryWorkItem: DispatchWorkItem?
 
     func start(_ configuration: TunnelStartConfiguration, completionHandler: @escaping (Bool) -> Void) {
@@ -160,16 +224,8 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         let providerBundleIdentifier = VBridgeTunnelManagerStore.providerBundleIdentifier
         SharedLogger.debug("Packet tunnel provider id: app=\(currentAppBundleId), provider=\(providerBundleIdentifier)")
 
-        NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
-            if let error {
-                NSLog("Error (loadAllFromPreferences): \(error)")
-                SharedLogger.error("Failed to load tunnel preferences: \(error.localizedDescription)")
-                completionHandler(false)
-                return
-            }
-
-            let matchingManagers = VBridgeTunnelManagerStore.matchingManagers(in: tunnelManagersInSettings ?? [])
-            let preExistingTunnelManager = matchingManagers.first
+        managerStore.load { loadedManager in
+            let preExistingTunnelManager = loadedManager
             let tunnelManager = preExistingTunnelManager ?? NETunnelProviderManager()
             SharedLogger.debug("Using \(preExistingTunnelManager != nil ? "existing" : "new") tunnel manager")
 
@@ -226,6 +282,8 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
                         SharedLogger.warning("ProviderBundleID loaded = nil protocol")
                     }
 
+                    self.managerStore.adopt(tunnelManager)
+
                     guard let session = tunnelManager.connection as? NETunnelProviderSession else {
                         SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
                         completionHandler(false)
@@ -247,31 +305,23 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         startupRecoveryWorkItem?.cancel()
         startupRecoveryWorkItem = nil
         SharedLogger.info("Disconnecting...")
-        NETunnelProviderManager.loadAllFromPreferences { tunnelManagersInSettings, error in
-            if let error {
-                NSLog("Error (loadAllFromPreferences): \(error)")
-                SharedLogger.error("Failed to load tunnel preferences: \(error.localizedDescription)")
-                return
-            }
-            let matchingManagers = VBridgeTunnelManagerStore.matchingManagers(in: tunnelManagersInSettings ?? [])
-            guard !matchingManagers.isEmpty else {
+        let stopManager: (NETunnelProviderManager?) -> Void = { manager in
+            guard let manager else {
                 SharedLogger.warning("No tunnel manager found")
                 return
             }
-            var stoppedAny = false
-            for manager in matchingManagers {
-                switch manager.connection.status {
-                case .connected, .connecting, .reasserting:
-                    stoppedAny = true
-                    SharedLogger.info("Stopping VBridge tunnel session...")
-                    manager.connection.stopVPNTunnel()
-                default:
-                    break
-                }
-            }
-            if !stoppedAny {
+            switch manager.connection.status {
+            case .connected, .connecting, .reasserting:
+                SharedLogger.info("Stopping VBridge tunnel session...")
+                manager.connection.stopVPNTunnel()
+            default:
                 SharedLogger.warning("VBridge tunnel not in active state, nothing to stop")
             }
+        }
+        if let manager = managerStore.manager {
+            stopManager(manager)
+        } else {
+            managerStore.load(completion: stopManager)
         }
     }
 
@@ -423,6 +473,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             }
 
             self.removeManagers(matchingManagers) {
+                self.managerStore.clear()
                 let manager = NETunnelProviderManager()
                 manager.protocolConfiguration = protocolConfiguration
                 manager.localizedDescription = "VBridge"
@@ -441,6 +492,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
                             SharedLogger.error("recreated tunnelManager.connection is not NETunnelProviderSession")
                             return
                         }
+                        self.managerStore.adopt(manager)
                         self.startTunnelSessionAfterPolicySettle(
                             session,
                             retriesRemaining: 0,

@@ -306,6 +306,7 @@ private enum PreBootstrapProbeResult {
 
 struct ContentView: View {
     var app: VBridge
+    @ObservedObject private var tunnelManagerStore = VBridgeTunnelManagerStore.shared
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
@@ -331,7 +332,6 @@ struct ContentView: View {
     @State private var isCheckingUpdate = false
     @State private var isUserInitiatedDisconnect = false
     @State private var hasLoadedInitialStatus = false
-    @State private var vpnStatusRefreshGeneration = 0
     @State private var connectionProgressText: String?
     @State private var downloadSpeedMbps: Double?
     @State private var uploadSpeedMbps: Double?
@@ -457,10 +457,10 @@ struct ContentView: View {
                 pendingShortcutActionTask?.cancel()
                 pendingShortcutActionTask = nil
             }
-            .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { _ in
-                // Status notifications are system-wide and may belong to another or a
-                // stale NEVPNConnection. Always reload our own manager before updating UI.
-                refreshVBridgeStatus()
+            .onReceive(tunnelManagerStore.$status) { status in
+                // The store observes only its retained manager's connection,
+                // so unrelated and stale system VPN notifications are ignored.
+                applyVPNStatus(status)
             }
             .alert(alertTitle, isPresented: $showingAlert) {
                 Button("OK", role: .cancel) { }
@@ -1284,23 +1284,10 @@ struct ContentView: View {
     }
 
     private func refreshVBridgeStatus(markInitialLoadComplete: Bool = false) {
-        vpnStatusRefreshGeneration += 1
-        let refreshGeneration = vpnStatusRefreshGeneration
         let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
-        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+        tunnelManagerStore.load { _ in
             DispatchQueue.main.async {
-                guard refreshGeneration == self.vpnStatusRefreshGeneration else { return }
-                if let error {
-                    SharedLogger.warning("Failed to refresh VBridge VPN status: \(error.localizedDescription)")
-                    if shouldCompleteInitialLoad {
-                        self.hasLoadedInitialStatus = true
-                        self.schedulePendingShortcutActionConsumption()
-                    }
-                    return
-                }
-                let currentStatus = VBridgeTunnelManagerStore
-                    .preferredManager(in: managers ?? [])?
-                    .connection.status ?? .disconnected
+                let currentStatus = self.tunnelManagerStore.status
                 if self.isPreparingTunnelStart,
                    self.vpnStatus == .connecting,
                    currentStatus == .disconnected {
@@ -2182,31 +2169,24 @@ struct ContentView: View {
 
     private func sampleRuntimeTransferBytes() async -> (downloadBytes: UInt64, uploadBytes: UInt64)? {
         return await withCheckedContinuation { continuation in
-            NETunnelProviderManager.loadAllFromPreferences { managers, error in
-                guard error == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession,
+                  session.status == .connected else {
+                continuation.resume(returning: nil)
+                return
+            }
 
-                guard let manager = VBridgeTunnelManagerStore.preferredManager(in: managers ?? []),
-                      let session = manager.connection as? NETunnelProviderSession,
-                      session.status == .connected else {
+            guard (try? session.sendProviderMessage(Data([0]), responseHandler: { response in
+                guard let response,
+                      let settings = String(data: response, encoding: .utf8),
+                      let totals = runtimeTransferBytes(from: settings) else {
                     continuation.resume(returning: nil)
                     return
                 }
-
-                guard (try? session.sendProviderMessage(Data([0]), responseHandler: { response in
-                    guard let response,
-                          let settings = String(data: response, encoding: .utf8),
-                          let totals = runtimeTransferBytes(from: settings) else {
-                        continuation.resume(returning: nil)
-                        return
-                    }
-                    continuation.resume(returning: totals)
-                })) != nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
+                continuation.resume(returning: totals)
+            })) != nil else {
+                continuation.resume(returning: nil)
+                return
             }
         }
     }
