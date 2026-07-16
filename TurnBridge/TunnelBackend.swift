@@ -194,54 +194,46 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
                 SharedLogger.info("Using seeded TURN credentials: addr=\(seededTURN.address)")
             }
 
-            self.stopActiveManagers(matchingManagers) { stoppedCleanly in
-                guard stoppedCleanly else {
-                    SharedLogger.error("Timed out waiting for the previous VBridge tunnel to stop")
+            tunnelManager.protocolConfiguration = protocolConfiguration
+            tunnelManager.localizedDescription = "VBridge"
+            tunnelManager.isEnabled = true
+            tunnelManager.saveToPreferences { error in
+                if let error {
+                    NSLog("Error (saveToPreferences): \(error)")
+                    SharedLogger.error("Failed to save tunnel preferences: \(error.localizedDescription)")
                     completionHandler(false)
                     return
                 }
 
-                tunnelManager.protocolConfiguration = protocolConfiguration
-                tunnelManager.localizedDescription = "VBridge"
-                tunnelManager.isEnabled = true
-                tunnelManager.saveToPreferences { error in
+                tunnelManager.loadFromPreferences { error in
                     if let error {
-                        NSLog("Error (saveToPreferences): \(error)")
-                        SharedLogger.error("Failed to save tunnel preferences: \(error.localizedDescription)")
+                        NSLog("Error (loadFromPreferences): \(error)")
+                        SharedLogger.error("Failed to reload tunnel preferences: \(error.localizedDescription)")
                         completionHandler(false)
                         return
                     }
 
-                    tunnelManager.loadFromPreferences { error in
-                        if let error {
-                            NSLog("Error (loadFromPreferences): \(error)")
-                            SharedLogger.error("Failed to reload tunnel preferences: \(error.localizedDescription)")
-                            completionHandler(false)
-                            return
-                        }
-
-                        if let proto = tunnelManager.protocolConfiguration as? NETunnelProviderProtocol {
-                            let loadedProviderBundleID = proto.providerBundleIdentifier ?? "nil"
-                            NSLog("ProviderBundleID loaded = \(loadedProviderBundleID)")
-                            SharedLogger.info("ProviderBundleID loaded = \(loadedProviderBundleID)")
-                        } else {
-                            NSLog("ProviderBundleID loaded = nil protocol")
-                            SharedLogger.warning("ProviderBundleID loaded = nil protocol")
-                        }
-
-                        guard let session = tunnelManager.connection as? NETunnelProviderSession else {
-                            SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
-                            completionHandler(false)
-                            return
-                        }
-                        self.startTunnelSessionAfterPolicySettle(
-                            session,
-                            retriesRemaining: 5,
-                            recoveryConfiguration: protocolConfiguration,
-                            providerBundleIdentifier: providerBundleIdentifier,
-                            completionHandler: completionHandler
-                        )
+                    if let proto = tunnelManager.protocolConfiguration as? NETunnelProviderProtocol {
+                        let loadedProviderBundleID = proto.providerBundleIdentifier ?? "nil"
+                        NSLog("ProviderBundleID loaded = \(loadedProviderBundleID)")
+                        SharedLogger.info("ProviderBundleID loaded = \(loadedProviderBundleID)")
+                    } else {
+                        NSLog("ProviderBundleID loaded = nil protocol")
+                        SharedLogger.warning("ProviderBundleID loaded = nil protocol")
                     }
+
+                    guard let session = tunnelManager.connection as? NETunnelProviderSession else {
+                        SharedLogger.error("tunnelManager.connection is not NETunnelProviderSession")
+                        completionHandler(false)
+                        return
+                    }
+                    self.startTunnelSessionAfterPolicySettle(
+                        session,
+                        retriesRemaining: 5,
+                        recoveryConfiguration: protocolConfiguration,
+                        providerBundleIdentifier: providerBundleIdentifier,
+                        completionHandler: completionHandler
+                    )
                 }
             }
         }
@@ -274,56 +266,6 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             if !stoppedAny {
                 SharedLogger.warning("VBridge tunnel not in active state, nothing to stop")
             }
-        }
-    }
-
-    private func stopActiveManagers(
-        _ managers: [NETunnelProviderManager],
-        completion: @escaping (Bool) -> Void
-    ) {
-        let activeConnections = managers.map(\.connection).filter {
-            switch $0.status {
-            case .connected, .connecting, .reasserting, .disconnecting:
-                return true
-            default:
-                return false
-            }
-        }
-        guard !activeConnections.isEmpty else {
-            completion(true)
-            return
-        }
-
-        SharedLogger.info("Stopping \(activeConnections.count) active VBridge session(s) before reconnect")
-        for connection in activeConnections where connection.status != .disconnecting {
-            connection.stopVPNTunnel()
-        }
-        waitUntilDisconnected(activeConnections, attemptsRemaining: 40, completion: completion)
-    }
-
-    private func waitUntilDisconnected(
-        _ connections: [NEVPNConnection],
-        attemptsRemaining: Int,
-        completion: @escaping (Bool) -> Void
-    ) {
-        let allStopped = connections.allSatisfy {
-            $0.status == .disconnected || $0.status == .invalid
-        }
-        if allStopped {
-            SharedLogger.debug("Previous VBridge session stopped; continuing startup")
-            completion(true)
-            return
-        }
-        guard attemptsRemaining > 0 else {
-            completion(false)
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            self.waitUntilDisconnected(
-                connections,
-                attemptsRemaining: attemptsRemaining - 1,
-                completion: completion
-            )
         }
     }
 
@@ -422,14 +364,11 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
-            guard session.status != .connected else { return }
-            guard !SharedLogger.didTunnelProviderStart else {
-                SharedLogger.debug("Tunnel provider launched; skipping VPN manager recovery")
-                return
-            }
-            SharedLogger.warning("Tunnel provider did not launch (status=\(session.status.rawValue)); recreating VPN manager once")
-            session.stopVPNTunnel()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            guard session.status == .disconnected else { return }
+            SharedLogger.warning(
+                "Tunnel returned to disconnected after start; providerStarted=\(SharedLogger.didTunnelProviderStart); recreating VPN manager once"
+            )
             self.recreateAndStartTunnel(
                 protocolConfiguration: recoveryConfiguration,
                 providerBundleIdentifier: providerBundleIdentifier
