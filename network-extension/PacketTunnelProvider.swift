@@ -570,6 +570,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self = self else { return }
+            let bootstrapStartedAt = Date()
+            SharedLogger.info("Starting VK/TURN bootstrap runtime", source: .tunnel)
             let handle = proxyConfigJSON.withCString {
                 VBridgeWGStartVKBootstrap(UnsafeMutablePointer(mutating: $0))
             }
@@ -579,22 +581,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             }
             self.vbridgeTunnelHandle = handle
+            SharedLogger.info("VK/TURN bootstrap runtime started; waiting for readiness", source: .tunnel)
 
             var networkSettings: NEPacketTunnelNetworkSettings
             var effectiveUAPI = wgUAPI
             let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
+            let bootstrapElapsed = Int(Date().timeIntervalSince(bootstrapStartedAt) * 1000)
             guard ready == 1 else {
                 VBridgeWGTurnOff(handle)
                 self.vbridgeTunnelHandle = -1
                 if ready == 0 {
-                    SharedLogger.error("VK/TURN bootstrap timed out", source: .tunnel)
+                    SharedLogger.error("VK/TURN bootstrap timed out after \(bootstrapElapsed)ms", source: .tunnel)
                 } else {
-                    SharedLogger.error("VK/TURN bootstrap failed: \(ready)", source: .tunnel)
+                    SharedLogger.error("VK/TURN bootstrap failed after \(bootstrapElapsed)ms: \(ready)", source: .tunnel)
                 }
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                 return
             }
-            SharedLogger.info("VK/TURN bootstrap ready", source: .tunnel)
+            SharedLogger.info("VK/TURN bootstrap ready after \(bootstrapElapsed)ms", source: .tunnel)
 
             let turnServerIP = self.currentTURNServerIP(handle: handle)
             if turnServerIP.isEmpty {
@@ -605,16 +609,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             if isWDTT {
                 SharedLogger.info("WDTT waiting for WRAP-A GETCONF provision", source: .tunnel)
+                let provisionStartedAt = Date()
                 guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 30000),
                       let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.uapi.isEmpty else {
                     VBridgeWGTurnOff(handle)
                     self.vbridgeTunnelHandle = -1
-                    SharedLogger.error("WDTT provision failed", source: .tunnel)
+                    let elapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                    SharedLogger.error("WDTT provision failed or timed out after \(elapsed)ms", source: .tunnel)
                     completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                     return
                 }
-                SharedLogger.info("WDTT provision received: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
+                let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                SharedLogger.info("WDTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 effectiveUAPI = provision.uapi
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
@@ -635,10 +642,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             DispatchQueue.main.async {
+                SharedLogger.info("Applying packet tunnel network settings", source: .tunnel)
                 self.setTunnelNetworkSettings(networkSettings) { error in
                     if let error = error {
                         VBridgeWGTurnOff(handle)
                         self.vbridgeTunnelHandle = -1
+                        SharedLogger.error("Failed to apply packet tunnel network settings: \(error.localizedDescription)", source: .tunnel)
                         completionHandler(error)
                         return
                     }
@@ -662,6 +671,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         return
                     }
                     SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                    SharedLogger.info("Packet tunnel startup completed; reporting Connected to iOS", source: .tunnel)
                     completionHandler(nil)
                 }
             }

@@ -320,6 +320,7 @@ struct ContentView: View {
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var connectWatchdogTask: Task<Void, Never>?
+    @State private var isPreparingTunnelStart = false
     @State private var settingsSheet: SettingsSheet?
     @State private var showSplitTunnelSheet = false
     @State private var showDeploySheet = false
@@ -329,6 +330,7 @@ struct ContentView: View {
     @State private var isCheckingUpdate = false
     @State private var isUserInitiatedDisconnect = false
     @State private var hasLoadedInitialStatus = false
+    @State private var vpnStatusRefreshGeneration = 0
     @State private var connectionProgressText: String?
     @State private var downloadSpeedMbps: Double?
     @State private var uploadSpeedMbps: Double?
@@ -442,6 +444,7 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
+                    refreshVBridgeStatus()
                     schedulePendingShortcutActionConsumption()
                 }
             }
@@ -453,43 +456,10 @@ struct ContentView: View {
                 pendingShortcutActionTask?.cancel()
                 pendingShortcutActionTask = nil
             }
-            .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { notification in
-                if let connection = notification.object as? NEVPNConnection {
-                    let newStatus = connection.status
-                    let statusName: String = {
-                        switch newStatus {
-                        case .connected:     return "Connected"
-                        case .connecting:    return "Connecting"
-                        case .disconnected:  return "Disconnected"
-                        case .disconnecting: return "Disconnecting"
-                        case .reasserting:   return "Reasserting"
-                        case .invalid:       return "Invalid"
-                        @unknown default:    return "Unknown"
-                        }
-                    }()
-                    SharedLogger.info("VPN status: \(statusName)")
-                    withAnimation { self.vpnStatus = newStatus }
-                    refreshConnectionProgress()
-                    syncLiveActivityState(for: newStatus)
-                    refreshWidgetTimelines()
-                    if newStatus == .connected {
-                        isUserInitiatedDisconnect = false
-                        captchaRecoveryRestartCount = 0
-                        clearCaptchaRecoveryRequest()
-                        UserNotificationDispatcher.shared.clearConnectionIssueNotification()
-                    } else if newStatus == .disconnected, isUserInitiatedDisconnect {
-                        isUserInitiatedDisconnect = false
-                        captchaRecoveryRestartCount = 0
-                        clearCaptchaRecoveryRequest()
-                        UserNotificationDispatcher.shared.clearConnectionIssueNotification()
-                        endLiveActivity(immediate: true)
-                    } else if newStatus == .disconnected {
-                        handleCaptchaRecoveryIfNeeded()
-                    }
-                    if newStatus != .connecting {
-                        cancelConnectWatchdog()
-                    }
-                }
+            .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { _ in
+                // Status notifications are system-wide and may belong to another or a
+                // stale NEVPNConnection. Always reload our own manager before updating UI.
+                refreshVBridgeStatus()
             }
             .alert(alertTitle, isPresented: $showingAlert) {
                 Button("OK", role: .cancel) { }
@@ -954,6 +924,7 @@ struct ContentView: View {
     private func toggleTunnel(resetCaptchaRecoveryState: Bool = true) {
         if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
             SharedLogger.info("User requested stop (status: \(vpnStatus.rawValue))")
+            isPreparingTunnelStart = false
             isUserInitiatedDisconnect = true
             cancelConnectWatchdog()
             resetSpeedTelemetry()
@@ -986,6 +957,7 @@ struct ContentView: View {
             resetSpeedTelemetry()
             let configuredThreadCount = max(profile.nValue, 1)
             vpnStatus = .connecting
+            isPreparingTunnelStart = true
             connectionStartedAt = Date()
             refreshConnectionProgress()
             beginLiveActivity(for: profile, targetWorkers: configuredThreadCount)
@@ -997,6 +969,7 @@ struct ContentView: View {
                     let seededTURN = try await prepareSeededTURNIfNeeded(for: profile)
                     await MainActor.run {
                         guard vpnStatus == .connecting else { return }
+                        isPreparingTunnelStart = false
                         startConfiguredTunnel(
                             profile: profile,
                             listenAddr: effectiveListenAddr,
@@ -1006,6 +979,7 @@ struct ContentView: View {
                     }
                 } catch {
                     await MainActor.run {
+                        isPreparingTunnelStart = false
                         cancelConnectWatchdog()
                         resetSpeedTelemetry()
                         vpnStatus = .disconnected
@@ -1295,11 +1269,35 @@ struct ContentView: View {
     }
 
     private func checkInitialStatus() {
-        NETunnelProviderManager.loadAllFromPreferences { managers, _ in
+        refreshVBridgeStatus(markInitialLoadComplete: true)
+    }
+
+    private func refreshVBridgeStatus(markInitialLoadComplete: Bool = false) {
+        vpnStatusRefreshGeneration += 1
+        let refreshGeneration = vpnStatusRefreshGeneration
+        let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
             DispatchQueue.main.async {
-                let currentStatus = managers?.first?.connection.status ?? .disconnected
+                guard refreshGeneration == self.vpnStatusRefreshGeneration else { return }
+                if let error {
+                    SharedLogger.warning("Failed to refresh VBridge VPN status: \(error.localizedDescription)")
+                    if shouldCompleteInitialLoad {
+                        self.hasLoadedInitialStatus = true
+                        self.schedulePendingShortcutActionConsumption()
+                    }
+                    return
+                }
+                let currentStatus = VBridgeTunnelManagerStore
+                    .preferredManager(in: managers ?? [])?
+                    .connection.status ?? .disconnected
+                if self.isPreparingTunnelStart,
+                   self.vpnStatus == .connecting,
+                   currentStatus == .disconnected {
+                    SharedLogger.debug("Ignoring disconnected manager status while preparing tunnel startup")
+                    return
+                }
                 let selectedProfileName = self.store.selectedProfile?.name ?? "VBridge"
-                self.vpnStatus = currentStatus
+                self.applyVPNStatus(currentStatus)
                 if currentStatus == .connected, let snapshot = VBridgeLiveActivityStore.load() {
                     self.downloadSpeedMbps = snapshot.content.downloadSpeedMbps
                     self.uploadSpeedMbps = snapshot.content.uploadSpeedMbps
@@ -1307,16 +1305,59 @@ struct ContentView: View {
                         self.currentConnectivityPings = pingSamples.map(ConnectionPingSample.init(shared:))
                     }
                 }
-                self.syncLiveActivityState(
-                    profileName: selectedProfileName,
-                    phase: self.liveActivityPhase(for: currentStatus)
-                )
-                self.hasLoadedInitialStatus = true
-                self.refreshConnectionProgress()
-                self.refreshWidgetTimelines()
-                self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
-                self.schedulePendingShortcutActionConsumption()
+                if shouldCompleteInitialLoad {
+                    self.syncLiveActivityState(
+                        profileName: selectedProfileName,
+                        phase: self.liveActivityPhase(for: currentStatus)
+                    )
+                    self.hasLoadedInitialStatus = true
+                    self.refreshConnectionProgress()
+                    self.refreshWidgetTimelines()
+                    self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
+                    self.schedulePendingShortcutActionConsumption()
+                }
             }
+        }
+    }
+
+    private func applyVPNStatus(_ newStatus: NEVPNStatus) {
+        let previousStatus = vpnStatus
+        guard previousStatus != newStatus else { return }
+
+        let statusName: String = {
+            switch newStatus {
+            case .connected:     return "Connected"
+            case .connecting:    return "Connecting"
+            case .disconnected:  return "Disconnected"
+            case .disconnecting: return "Disconnecting"
+            case .reasserting:   return "Reasserting"
+            case .invalid:       return "Invalid"
+            @unknown default:    return "Unknown"
+            }
+        }()
+        SharedLogger.info("VPN status: \(statusName)")
+        withAnimation { vpnStatus = newStatus }
+        refreshConnectionProgress()
+        syncLiveActivityState(for: newStatus)
+        refreshWidgetTimelines()
+
+        if newStatus == .connected {
+            isUserInitiatedDisconnect = false
+            captchaRecoveryRestartCount = 0
+            clearCaptchaRecoveryRequest()
+            UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+        } else if newStatus == .disconnected, isUserInitiatedDisconnect {
+            isUserInitiatedDisconnect = false
+            captchaRecoveryRestartCount = 0
+            clearCaptchaRecoveryRequest()
+            UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+            endLiveActivity(immediate: true)
+        } else if newStatus == .disconnected,
+                  previousStatus == .connecting || previousStatus == .reasserting {
+            handleCaptchaRecoveryIfNeeded()
+        }
+        if newStatus != .connecting && newStatus != .reasserting {
+            cancelConnectWatchdog()
         }
     }
 
@@ -2151,7 +2192,7 @@ struct ContentView: View {
                     return
                 }
 
-                guard let manager = managers?.first,
+                guard let manager = VBridgeTunnelManagerStore.preferredManager(in: managers ?? []),
                       let session = manager.connection as? NETunnelProviderSession,
                       session.status == .connected else {
                     continuation.resume(returning: nil)
@@ -2448,6 +2489,7 @@ struct ContentView: View {
                 guard vpnStatus == .connecting else { return }
 
                 SharedLogger.error("Connection timeout while waiting for tunnel readiness")
+                isPreparingTunnelStart = false
                 app.turnOffTunnel()
                 vpnStatus = .disconnected
                 presentConnectionIssue(
