@@ -45,34 +45,39 @@ enum SplitTunnelStorage {
     static let githubIPRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/ipwhitelist.txt"
     static let githubDomainRawURL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/whitelist.txt"
 
+    private struct Metadata: Codable {
+        var enabled: Bool
+        var mode: SplitTunnelMode
+        var ruleCount: Int
+    }
+
+    private static let metadataFileName = "split-tunnel-metadata.json"
+    private static let rulesFileName = "split-tunnel-rules.txt"
+    private static let migrationLock = NSLock()
+
     static func load() -> SplitTunnelSettings {
-        let defaults = preferredDefaults()
-        let enabled = defaults.object(forKey: enabledKey) as? Bool ?? false
-        let mode = SplitTunnelMode(rawValue: defaults.string(forKey: modeKey) ?? "") ?? .direct
-        let rules = defaults.stringArray(forKey: rulesKey) ?? []
-        let settings = SplitTunnelSettings(enabled: enabled, mode: mode, rules: deduplicatedRules(rules))
-
-        if defaults !== UserDefaults.standard,
-           settings.rules.isEmpty,
-           defaults.object(forKey: enabledKey) == nil,
-           defaults.string(forKey: modeKey) == nil,
-           let migrated = legacySettingsFromStandardDefaults() {
-            save(migrated)
-            return migrated
-        }
-
-        return settings
+        migrateLegacyStorageIfNeeded()
+        let metadata = loadMetadata()
+        return SplitTunnelSettings(
+            enabled: metadata.enabled,
+            mode: metadata.mode,
+            rules: loadRules(from: rulesFileURL())
+        )
     }
 
     static func save(_ settings: SplitTunnelSettings) {
         let normalizedRules = deduplicatedRules(settings.rules)
-        let defaultsList = destinationDefaults()
+        writeRules(normalizedRules, to: rulesFileURL())
+        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: normalizedRules.count))
+    }
 
-        for defaults in defaultsList {
-            defaults.set(settings.enabled, forKey: enabledKey)
-            defaults.set(settings.mode.rawValue, forKey: modeKey)
-            defaults.set(normalizedRules, forKey: rulesKey)
-        }
+    static func saveConfiguration(_ settings: SplitTunnelSettings) {
+        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: settings.rules.count))
+    }
+
+    static func ruleCountSummary() -> String {
+        let count = loadMetadata().ruleCount
+        return count == 1 ? "1 rule" : "\(count) rules"
     }
 
     static func ruleCountSummary(_ settings: SplitTunnelSettings) -> String {
@@ -101,18 +106,15 @@ enum SplitTunnelStorage {
         with incomingRules: [String],
         into settings: inout SplitTunnelSettings
     ) {
-        let defaultsList = destinationDefaults()
-        let previousRules = preferredDefaults().stringArray(forKey: sourceKey) ?? []
+        let sourceURL = sourceRulesFileURL(for: sourceKey)
+        let previousRules = loadRules(from: sourceURL)
         let previousRuleSet = Set(deduplicatedRules(previousRules))
         let filteredExisting = settings.rules.filter { !previousRuleSet.contains($0) }
         let normalizedIncoming = deduplicatedRules(incomingRules)
 
         settings.rules = deduplicatedRules(filteredExisting + normalizedIncoming)
         save(settings)
-
-        for defaults in defaultsList {
-            defaults.set(normalizedIncoming, forKey: sourceKey)
-        }
+        writeRules(normalizedIncoming, to: sourceURL)
     }
 
     static func removeRule(at offsets: IndexSet, from settings: inout SplitTunnelSettings) {
@@ -272,34 +274,89 @@ enum SplitTunnelStorage {
         return result
     }
 
-    private static func preferredDefaults() -> UserDefaults {
+    static func migrateLegacyStorageIfNeeded() {
+        migrationLock.lock()
+        defer { migrationLock.unlock() }
+        guard !FileManager.default.fileExists(atPath: metadataFileURL().path) else { return }
+
+        let sharedDefaults = SharedLogger.appGroupID.flatMap { UserDefaults(suiteName: $0) }
+        let candidates = [sharedDefaults, UserDefaults.standard].compactMap { $0 }
+        let source = candidates.first {
+            $0.object(forKey: enabledKey) != nil ||
+            $0.object(forKey: modeKey) != nil ||
+            $0.object(forKey: rulesKey) != nil
+        }
+
+        let enabled = source?.object(forKey: enabledKey) as? Bool ?? false
+        let mode = SplitTunnelMode(rawValue: source?.string(forKey: modeKey) ?? "") ?? .direct
+        let rules = source?.stringArray(forKey: rulesKey) ?? []
+        writeRules(rules, to: rulesFileURL())
+        writeMetadata(Metadata(enabled: enabled, mode: mode, ruleCount: rules.count))
+
+        for sourceKey in [githubCIDRSourceKey, githubIPSourceKey, githubDomainSourceKey] {
+            let sourceRules = source?.stringArray(forKey: sourceKey) ?? []
+            if !sourceRules.isEmpty {
+                writeRules(sourceRules, to: sourceRulesFileURL(for: sourceKey))
+            }
+        }
+
+        let obsoleteKeys = [enabledKey, modeKey, rulesKey, githubCIDRSourceKey, githubIPSourceKey, githubDomainSourceKey]
+        for defaults in candidates {
+            for key in obsoleteKeys {
+                defaults.removeObject(forKey: key)
+            }
+            defaults.synchronize()
+        }
+    }
+
+    private static func storageDirectoryURL() -> URL {
         if let groupID = SharedLogger.appGroupID,
-           let sharedDefaults = UserDefaults(suiteName: groupID) {
-            return sharedDefaults
+           let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
+            return container
         }
-        return UserDefaults.standard
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
-    private static func destinationDefaults() -> [UserDefaults] {
-        let shared = preferredDefaults()
-        if shared === UserDefaults.standard {
-            return [UserDefaults.standard]
-        }
-        return [shared, UserDefaults.standard]
+    private static func metadataFileURL() -> URL {
+        storageDirectoryURL().appendingPathComponent(metadataFileName)
     }
 
-    private static func legacySettingsFromStandardDefaults() -> SplitTunnelSettings? {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: enabledKey) != nil
-            || defaults.string(forKey: modeKey) != nil
-            || defaults.stringArray(forKey: rulesKey) != nil else {
-            return nil
-        }
+    private static func rulesFileURL() -> URL {
+        storageDirectoryURL().appendingPathComponent(rulesFileName)
+    }
 
-        let enabled = defaults.object(forKey: enabledKey) as? Bool ?? false
-        let mode = SplitTunnelMode(rawValue: defaults.string(forKey: modeKey) ?? "") ?? .direct
-        let rules = deduplicatedRules(defaults.stringArray(forKey: rulesKey) ?? [])
-        return SplitTunnelSettings(enabled: enabled, mode: mode, rules: rules)
+    private static func sourceRulesFileURL(for sourceKey: String) -> URL {
+        let name: String
+        switch sourceKey {
+        case githubCIDRSourceKey: name = "split-tunnel-source-cidr.txt"
+        case githubIPSourceKey: name = "split-tunnel-source-ip.txt"
+        case githubDomainSourceKey: name = "split-tunnel-source-domain.txt"
+        default: name = "split-tunnel-source-custom.txt"
+        }
+        return storageDirectoryURL().appendingPathComponent(name)
+    }
+
+    private static func loadMetadata() -> Metadata {
+        guard let data = try? Data(contentsOf: metadataFileURL()),
+              let metadata = try? JSONDecoder().decode(Metadata.self, from: data) else {
+            return Metadata(enabled: false, mode: .direct, ruleCount: 0)
+        }
+        return metadata
+    }
+
+    private static func writeMetadata(_ metadata: Metadata) {
+        guard let data = try? JSONEncoder().encode(metadata) else { return }
+        try? data.write(to: metadataFileURL(), options: .atomic)
+    }
+
+    private static func loadRules(from url: URL) -> [String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else { return [] }
+        return text.components(separatedBy: .newlines).filter { !$0.isEmpty }
+    }
+
+    private static func writeRules(_ rules: [String], to url: URL) {
+        let text = rules.joined(separator: "\n")
+        try? text.write(to: url, atomically: true, encoding: .utf8)
     }
 }
 
@@ -479,7 +536,7 @@ struct SplitTunnelSettingsView: View {
             get: { settings.enabled },
             set: { newValue in
                 settings.enabled = newValue
-                SplitTunnelStorage.save(settings)
+                SplitTunnelStorage.saveConfiguration(settings)
             }
         )
     }
@@ -489,7 +546,7 @@ struct SplitTunnelSettingsView: View {
             get: { settings.mode },
             set: { newValue in
                 settings.mode = newValue
-                SplitTunnelStorage.save(settings)
+                SplitTunnelStorage.saveConfiguration(settings)
             }
         )
     }
@@ -792,7 +849,7 @@ struct GlobalSettingsView: View {
                 NavigationLink(destination: SplitTunnelSettingsView()) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Split-Tunneling")
-                        Text(SplitTunnelStorage.ruleCountSummary(SplitTunnelStorage.load()))
+                        Text(SplitTunnelStorage.ruleCountSummary())
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

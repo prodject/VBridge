@@ -14,6 +14,7 @@ struct VBridge: App {
     private let tunnelBackend = TunnelBackendFactory.make()
 
     init() {
+        SplitTunnelStorage.migrateLegacyStorageIfNeeded()
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
 #if !targetEnvironment(macCatalyst)
         if #available(iOS 16.0, *) {

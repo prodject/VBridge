@@ -18,6 +18,8 @@ private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: 
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
 private let splitTunnelSynchronousDomainLimit = 64
+private let splitTunnelMetadataFileName = "split-tunnel-metadata.json"
+private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 
 private func configureGoRuntimeMemoryBeforeFirstCall() {
@@ -132,6 +134,12 @@ private struct SplitTunnelConfiguration {
     let rules: [String]
 }
 
+private struct SplitTunnelMetadata: Decodable {
+    let enabled: Bool
+    let mode: String
+    let ruleCount: Int
+}
+
 private struct CompiledSplitTunnelRules {
     var ipRanges: [IPAddressRange]
     var exactDomains: [String]
@@ -215,21 +223,32 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func splitTunnelConfiguration() -> SplitTunnelConfiguration {
         guard let groupID = SharedLogger.appGroupID,
-              let defaults = UserDefaults(suiteName: groupID) else {
-            SharedLogger.warning("Split tunneling disabled: App Group defaults unavailable", source: .tunnel)
+              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
+            SharedLogger.warning("Split tunneling disabled: App Group container unavailable", source: .tunnel)
             return SplitTunnelConfiguration(enabled: false, mode: .direct, rules: [])
         }
 
-        let enabled = defaults.object(forKey: "splitTunnelEnabled") as? Bool ?? false
-        let mode = SplitTunnelMode(rawValue: defaults.string(forKey: "splitTunnelMode") ?? "") ?? .direct
-        guard enabled else {
+        let metadataURL = container.appendingPathComponent(splitTunnelMetadataFileName)
+        guard let metadataData = try? Data(contentsOf: metadataURL),
+              let metadata = try? JSONDecoder().decode(SplitTunnelMetadata.self, from: metadataData) else {
+            return SplitTunnelConfiguration(enabled: false, mode: .direct, rules: [])
+        }
+
+        let mode = SplitTunnelMode(rawValue: metadata.mode) ?? .direct
+        guard metadata.enabled, metadata.ruleCount > 0 else {
+            return SplitTunnelConfiguration(enabled: false, mode: mode, rules: [])
+        }
+
+        let rulesURL = container.appendingPathComponent(splitTunnelRulesFileName)
+        guard let rulesText = try? String(contentsOf: rulesURL, encoding: .utf8) else {
+            SharedLogger.warning("Split tunneling disabled: rules file unavailable", source: .tunnel)
             return SplitTunnelConfiguration(enabled: false, mode: mode, rules: [])
         }
 
         return SplitTunnelConfiguration(
             enabled: true,
             mode: mode,
-            rules: defaults.stringArray(forKey: "splitTunnelRules") ?? []
+            rules: rulesText.components(separatedBy: .newlines).filter { !$0.isEmpty }
         )
     }
 
