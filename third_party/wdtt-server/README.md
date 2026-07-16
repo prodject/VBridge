@@ -3,7 +3,7 @@
 This directory contains the Linux WDTT server sources imported from:
 
 - Repository: https://github.com/amurcanov/proxy-turn-vk-android
-- Commit: `c01fadd7d810cfb9d53598005f900674449a928e`
+- Commit: `8b26530dfe90ff9b6aa3880ba2c1f070e21e2d3a`
 - Upstream path: `app/src/main/assets/linux-server`
 - License: GNU GPL v3.0
 

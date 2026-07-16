@@ -1,5 +1,3 @@
-
-
 package main
 
 import (
@@ -44,7 +42,7 @@ type Database struct {
 
 var (
 	db      *Database
-	dbMutex sync.Mutex
+	dbMutex sync.RWMutex // Изменено на RWMutex для параллельного чтения данных
 	dbFile  string
 )
 
