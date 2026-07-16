@@ -300,6 +300,7 @@ private enum PreBootstrapCaptchaResult {
 private enum PreBootstrapProbeResult {
     case ok(SeededTURNCredentials)
     case captcha(url: String, sid: String, ts: Double, attempt: Double, token1: String, clientID: String, isRateLimit: Bool)
+    case callUnavailable(code: Int, message: String)
     case error(String)
 }
 
@@ -1111,6 +1112,10 @@ struct ContentView: View {
                     throw preBootstrapError("Captcha was dismissed before WDTT pre-bootstrap completed.")
                 }
 
+            case .callUnavailable(let code, let message):
+                SharedLogger.error("WDTT pre-bootstrap: VK call unavailable code=\(code): \(message)")
+                throw preBootstrapError("VK returns error: \(message)")
+
             case .error(let message):
                 throw preBootstrapError("WDTT pre-bootstrap probe failed: \(message)")
             }
@@ -1203,6 +1208,12 @@ struct ContentView: View {
                     isRateLimit: dict["is_rate_limit"] as? Bool ?? false
                 )
             default:
+                if (dict["call_unavailable"] as? Bool) == true {
+                    return .callUnavailable(
+                        code: dict["code"] as? Int ?? 0,
+                        message: dict["message"] as? String ?? "Call is unavailable"
+                    )
+                }
                 return .error(dict["message"] as? String ?? "unknown probe error")
             }
         }.value

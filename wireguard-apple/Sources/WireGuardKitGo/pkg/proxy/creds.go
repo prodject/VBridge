@@ -126,6 +126,20 @@ func (e *CaptchaRequiredError) Error() string {
 	return fmt.Sprintf("captcha required: %s", e.ImageURL)
 }
 
+// CallUnavailableError is a non-retryable VK error about the call or join
+// link itself. Retrying another client ID or solving a captcha cannot fix it.
+type CallUnavailableError struct {
+	Code    int
+	Message string
+}
+
+func (e *CallUnavailableError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("call unavailable: %s (VK error %d)", e.Message, e.Code)
+	}
+	return fmt.Sprintf("call unavailable (VK error %d)", e.Code)
+}
+
 // TURNCreds holds TURN server credentials.
 //
 // Address vs Addresses: VK's vchat.joinConversationByLink response includes
@@ -193,6 +207,10 @@ func GetVKCreds(linkID string, captchaSolver CaptchaSolver, solvedCaptchaSID, so
 		if err == nil {
 			log.Printf("vk: success via VK Calls captcha-free path")
 			return creds, nil
+		}
+		if unavailable, ok := err.(*CallUnavailableError); ok {
+			log.Printf("vk: VK Calls path — call unavailable (VK error %d: %s), not falling back", unavailable.Code, unavailable.Message)
+			return nil, err
 		}
 		log.Printf("vk: VK Calls path failed, falling back to legacy: %v", err)
 	}
@@ -290,6 +308,9 @@ func GetVKCreds(linkID string, captchaSolver CaptchaSolver, solvedCaptchaSID, so
 			}
 			// If it's a CaptchaRequiredError (needs WebView), return immediately — don't try other client_ids
 			if _, isCaptcha := err.(*CaptchaRequiredError); isCaptcha {
+				return nil, err
+			}
+			if _, isCallUnavailable := err.(*CallUnavailableError); isCallUnavailable {
 				return nil, err
 			}
 			log.Printf("vk: failed with client_id=%s: %v", vc.ClientID, err)
@@ -619,6 +640,11 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 			log.Printf("vk: WebView captcha solver returned answer (%d chars), retrying", len(answer))
 			step2Data = buildCaptchaRetry(currentSID, answer, currentTs, currentAttempt)
 			continue
+		}
+
+		if fatal := fatalCallError(resp); fatal != nil {
+			log.Printf("vk: step2 call unavailable (VK error %d: %s) — not retrying", fatal.Code, fatal.Message)
+			return nil, fatal
 		}
 
 		token2, err = extractStr(resp, "response", "token")
@@ -2775,6 +2801,25 @@ func (cp *credPool) countWithCredsLocked() int {
 		}
 	}
 	return n
+}
+
+// fatalCallError recognizes VK responses that describe a permanently invalid
+// call/link rather than a transient network or captcha condition.
+func fatalCallError(resp map[string]interface{}) *CallUnavailableError {
+	errObj, ok := resp["error"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	codeValue, _ := errObj["error_code"].(float64)
+	code := int(codeValue)
+	switch {
+	case code == 951, code == 954:
+	case code >= 9000 && code <= 9999:
+	default:
+		return nil
+	}
+	message, _ := errObj["error_msg"].(string)
+	return &CallUnavailableError{Code: code, Message: message}
 }
 
 // extractCaptcha checks if a VK API response contains error code 14 (captcha required).

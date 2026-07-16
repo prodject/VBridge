@@ -143,12 +143,12 @@ func decodeWrapKey(useWrap bool, hexStr string) ([]byte, error) {
 
 // ProxyConfig is the JSON config passed from Swift.
 type ProxyConfig struct {
-	VKLink              string            `json:"vk_link"`
-	PeerAddr            string            `json:"peer_addr"`
-	TurnServer          string            `json:"turn_server,omitempty"`
-	TurnPort            string            `json:"turn_port,omitempty"`
-	UseDTLS             bool              `json:"use_dtls"`
-	UseUDP              bool              `json:"use_udp"`
+	VKLink     string `json:"vk_link"`
+	PeerAddr   string `json:"peer_addr"`
+	TurnServer string `json:"turn_server,omitempty"`
+	TurnPort   string `json:"turn_port,omitempty"`
+	UseDTLS    bool   `json:"use_dtls"`
+	UseUDP     bool   `json:"use_udp"`
 	// UseWrap enables the WRAP layer between DTLS and TURN ChannelData
 	// (see proxy.Config.UseWrap and pkg/proxy/wrap.go). Requires the
 	// peer server to be running cacggghp/vk-turn-proxy with matching
@@ -156,17 +156,17 @@ type ProxyConfig struct {
 	//
 	// NOTE 2026-05-20: WRAP no longer escapes VK's content classifier;
 	// new code should set UseSrtp instead (see proxy.Config.UseSrtp).
-	UseWrap             bool              `json:"use_wrap"`
+	UseWrap bool `json:"use_wrap"`
 	// WrapKeyHex is the 64-character hex encoding of the 32-byte
 	// ChaCha20 shared key. Required when UseWrap is true and must
 	// match the server's -wrap-key value exactly.
-	WrapKeyHex          string            `json:"wrap_key_hex"`
+	WrapKeyHex string `json:"wrap_key_hex"`
 	// UseSrtp enables the DTLS+SRTP transport (see pkg/proxy/srtpwrap
 	// and proxy.Config.UseSrtp). Requires the peer server to be running
 	// anton48/vk-turn-proxy add-server-srtp-layer with the -srtp flag.
-	UseSrtp             bool              `json:"use_srtp"`
-	NumConns                int `json:"num_conns,omitempty"`
-	CredPoolCooldownSeconds int `json:"cred_pool_cooldown_seconds,omitempty"`
+	UseSrtp                 bool `json:"use_srtp"`
+	NumConns                int  `json:"num_conns,omitempty"`
+	CredPoolCooldownSeconds int  `json:"cred_pool_cooldown_seconds,omitempty"`
 	// VKHostIPs is a hostname→[]IP map pre-resolved by the main app
 	// before startVPNTunnel. The extension can't resolve VK hosts on
 	// its own (no usable DNS context until setTunnelNetworkSettings,
@@ -212,13 +212,13 @@ type ProxyConfig struct {
 	DeviceID string `json:"device_id,omitempty"`
 }
 
-//export VBridgeWGTurnOnWithTURN
-//
 // Legacy single-call entry point: starts VK bootstrap AND attaches WireGuard
 // in one synchronous step. Retained so existing callers keep working while
 // PacketTunnelProvider is migrated to the split flow (VBridgeWGStartVKBootstrap +
 // VBridgeWGWaitBootstrapReady + VBridgeWGAttachWireGuard), after which this export can be
 // deleted.
+//
+//export VBridgeWGTurnOnWithTURN
 func VBridgeWGTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON *C.char) C.int32_t {
 	goSettings := C.GoString(settings)
 	goProxyJSON := C.GoString(proxyConfigJSON)
@@ -329,8 +329,6 @@ func VBridgeWGTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON 
 // VBridgeWGTurnOff / VBridgeWGPause / VBridgeWGResume / VBridgeWGSetConfig / VBridgeWGGetStats work on handles
 // from either the legacy or split flow — they just look up tunnelEntry.
 
-//export VBridgeWGStartVKBootstrap
-//
 // Starts VK bootstrap (API call, TURN allocation, DTLS handshake) in a
 // background goroutine. Does NOT create a TUN device. Returns a tunnel
 // handle immediately, or -1 on immediate config-parse failure.
@@ -340,6 +338,8 @@ func VBridgeWGTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON 
 // expires, error=-1 on fatal failure before any conn came up. Captcha
 // flows remain internal to Proxy — the bootstrap stays "not ready" until
 // captcha is solved AND the first conn completes.
+//
+//export VBridgeWGStartVKBootstrap
 func VBridgeWGStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 	goProxyJSON := C.GoString(proxyConfigJSON)
 
@@ -440,15 +440,16 @@ func VBridgeWGStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 	return C.int32_t(id)
 }
 
-//export VBridgeWGWaitBootstrapReady
-//
 // Blocks up to timeoutMs waiting for VK bootstrap to report ready. Returns:
-//   1  → first conn established a live DTLS+TURN session
-//   0  → timeout (bootstrap still in progress; try again or give up)
-//  -1  → fatal error before any conn came up, or tunnel handle not found
+//
+//	 1  → first conn established a live DTLS+TURN session
+//	 0  → timeout (bootstrap still in progress; try again or give up)
+//	-1  → fatal error before any conn came up, or tunnel handle not found
 //
 // Safe to call multiple times; the internal signal is replayed so later
 // callers see the same outcome.
+//
+//export VBridgeWGWaitBootstrapReady
 func VBridgeWGWaitBootstrapReady(tunnelHandle C.int32_t, timeoutMs C.int32_t) C.int32_t {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -477,8 +478,6 @@ func VBridgeWGWaitBootstrapReady(tunnelHandle C.int32_t, timeoutMs C.int32_t) C.
 	return -1
 }
 
-//export VBridgeWGAttachWireGuard
-//
 // Attaches a WireGuard device to an already-bootstrapped proxy. The caller
 // is expected to have observed VBridgeWGWaitBootstrapReady return 1 first (so the
 // first TURN conn is live). Creates the TUN from tunFd, wires it to a
@@ -486,6 +485,8 @@ func VBridgeWGWaitBootstrapReady(tunnelHandle C.int32_t, timeoutMs C.int32_t) C.
 //
 // Returns 1 on success, -1 if tunnel handle not found, -2 if a device is
 // already attached, or a negative code in -3..-6 for each setup step.
+//
+//export VBridgeWGAttachWireGuard
 func VBridgeWGAttachWireGuard(tunnelHandle C.int32_t, wgConfigSettings *C.char, tunFd C.int32_t) C.int32_t {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -657,8 +658,6 @@ func VBridgeWGGetTURNServerIP(tunnelHandle C.int32_t) *C.char {
 	return C.CString(entry.proxy.TURNServerIP())
 }
 
-//export VBridgeWGWaitWrapAProvision
-//
 // For the SRTP-WRAP-A mode (use_wrap_a=true): blocks up to timeoutMs for the
 // server to mint our WireGuard config via GETCONF over the WRAP-A transport,
 // then returns it as JSON:
@@ -671,6 +670,8 @@ func VBridgeWGGetTURNServerIP(tunnelHandle C.int32_t) *C.char {
 // address/dns/mtu to build the NEPacketTunnelNetworkSettings and passes "uapi"
 // to VBridgeWGAttachWireGuard. Returns "" on timeout / error / when the tunnel is not
 // in WRAP-A mode. Call this AFTER VBridgeWGWaitBootstrapReady returns 1.
+//
+//export VBridgeWGWaitWrapAProvision
 func VBridgeWGWaitWrapAProvision(tunnelHandle C.int32_t, timeoutMs C.int32_t) *C.char {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -776,8 +777,6 @@ func VBridgeWGWakeHealthCheck(tunnelHandle C.int32_t) {
 	entry.proxy.WakeHealthCheck()
 }
 
-//export VBridgeWGPathChanged
-//
 // Pre-emptive saturation marking on iOS network-path change. Called
 // from Swift's NWPathMonitor pathUpdateHandler after dedup. For each
 // pool slot with active>0 OR lastUsedAt within ~10 min, marks the slot
@@ -795,6 +794,8 @@ func VBridgeWGWakeHealthCheck(tunnelHandle C.int32_t) {
 //
 // See evaluated_alternatives_pre_emptive_refresh.md for the empirical
 // disproof of the Refresh(0) approach.
+//
+//export VBridgeWGPathChanged
 func VBridgeWGPathChanged(tunnelHandle C.int32_t) {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -808,8 +809,6 @@ func VBridgeWGPathChanged(tunnelHandle C.int32_t) {
 	entry.proxy.OnPathChange()
 }
 
-//export VBridgeWGPathInTransition
-//
 // Pause-only path event handler. Called from Swift's NWPathMonitor on
 // satisfied events with iface=other (which empirically means our own TUN
 // device becoming os-default during the brief recursive-routing window
@@ -827,6 +826,8 @@ func VBridgeWGPathChanged(tunnelHandle C.int32_t) {
 //
 // See Proxy.OnPathTransition + credPool.ExtendPauseAcquireForTransition
 // for full rationale.
+//
+//export VBridgeWGPathInTransition
 func VBridgeWGPathInTransition(tunnelHandle C.int32_t) {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -840,8 +841,6 @@ func VBridgeWGPathInTransition(tunnelHandle C.int32_t) {
 	entry.proxy.OnPathTransition()
 }
 
-//export VBridgeWGLogPathSnapshot
-//
 // Triggers a one-shot pathstats log line. Called by Swift's NWPathMonitor
 // handler on every path transition so transient interfaces (e.g. cellular
 // briefly visited during a wifi-cellular-wifi handover) appear in the
@@ -849,6 +848,8 @@ func VBridgeWGPathInTransition(tunnelHandle C.int32_t) {
 // state per minute and misses sub-minute transitions. The label argument
 // is appended to "pathstats <label>" so the caller can mark each snapshot
 // (e.g. "wifi-satisfied", "cellular-satisfied").
+//
+//export VBridgeWGLogPathSnapshot
 func VBridgeWGLogPathSnapshot(tunnelHandle C.int32_t, label *C.char) {
 	id := int32(tunnelHandle)
 	tunnelsMu.Lock()
@@ -903,19 +904,21 @@ func VBridgeWGRefreshCaptchaURL(tunnelHandle C.int32_t) *C.char {
 // app still has full network, avoids the deadlock.
 //
 // Inputs (all C strings; "" / 0 mean "not provided"):
-//   linkID, vkHostIPsJSON         — required
-//   savedSID, savedKey, savedTs,
-//   savedAttempt, savedToken1,
-//   savedClientID                 — set on retry after the user solved
-//                                   the captcha in a WebView; the entire
-//                                   tuple is reused as-is to retry step2.
+//
+//	linkID, vkHostIPsJSON         — required
+//	savedSID, savedKey, savedTs,
+//	savedAttempt, savedToken1,
+//	savedClientID                 — set on retry after the user solved
+//	                                the captcha in a WebView; the entire
+//	                                tuple is reused as-is to retry step2.
 //
 // Returns a malloc'd C string with one of these JSON shapes; caller frees:
-//   {"status":"ok","success_token":"...","saved_token1":"...","client_id":"...",
-//    "turn_address":"host:port","turn_username":"...","turn_password":"..."}
-//   {"status":"captcha","captcha_url":"...","sid":"...","ts":...,
-//    "attempt":...,"token1":"...","client_id":"...","is_rate_limit":false}
-//   {"status":"error","message":"..."}
+//
+//	{"status":"ok","success_token":"...","saved_token1":"...","client_id":"...",
+//	 "turn_address":"host:port","turn_username":"...","turn_password":"..."}
+//	{"status":"captcha","captcha_url":"...","sid":"...","ts":...,
+//	 "attempt":...,"token1":"...","client_id":"...","is_rate_limit":false}
+//	{"status":"error","message":"..."}
 //
 //export VBridgeWGProbeVKCreds
 func VBridgeWGProbeVKCreds(linkID, vkHostIPsJSON, savedSID, savedKey, savedToken1, savedClientID *C.char, savedTs, savedAttempt C.double) *C.char {
@@ -949,6 +952,11 @@ func VBridgeWGProbeVKCreds(linkID, vkHostIPsJSON, savedSID, savedKey, savedToken
 			resp["token1"] = cerr.Token1
 			resp["client_id"] = cerr.ClientID
 			resp["is_rate_limit"] = cerr.IsRateLimit
+		} else if unavailable, ok := err.(*proxy.CallUnavailableError); ok {
+			resp["status"] = "error"
+			resp["message"] = unavailable.Message
+			resp["call_unavailable"] = true
+			resp["code"] = unavailable.Code
 		} else {
 			resp["status"] = "error"
 			resp["message"] = err.Error()
