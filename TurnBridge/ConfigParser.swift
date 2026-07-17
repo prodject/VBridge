@@ -45,6 +45,24 @@ struct WDTTConfigImport {
     }
 }
 
+struct DeploySettingsLink: Codable {
+    let version: Int
+    let nonce: UUID
+    let host: String
+    let user: String
+    let password: String
+    let sshPort: Int
+    let dns1: String
+    let dns2: String
+    let mainPassword: String
+    let adminId: String
+    let botToken: String
+    let manualPorts: Bool
+    let dtlsPort: Int
+    let wgPort: Int
+    let serverArch: String
+}
+
 enum ConfigParseError: LocalizedError {
     case emptyString
     case invalidScheme
@@ -76,8 +94,49 @@ enum ConfigParseError: LocalizedError {
 
 struct ConfigParser {
     static let scheme = "vbridge://"
+    static let deploySettingsScheme = "vbridge://server/"
     static let legacySchemes = ["turnbridge://"]
     static let wdttScheme = "wdtt://"
+
+    static func exportDeploySettings(_ settings: DeploySettingsLink) throws -> String {
+        let data = try JSONEncoder().encode(settings)
+        let payload = data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return deploySettingsScheme + payload
+    }
+
+    static func parseDeploySettings(from string: String) throws -> DeploySettingsLink {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix(deploySettingsScheme) else {
+            throw ConfigParseError.invalidScheme
+        }
+        var payload = String(trimmed.dropFirst(deploySettingsScheme.count))
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let padding = (4 - payload.count % 4) % 4
+        payload += String(repeating: "=", count: padding)
+        guard let data = Data(base64Encoded: payload) else {
+            throw ConfigParseError.invalidBase64
+        }
+        do {
+            let settings = try JSONDecoder().decode(DeploySettingsLink.self, from: data)
+            guard settings.version == 1,
+                  !settings.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  (1...65535).contains(settings.sshPort),
+                  (1...65535).contains(settings.dtlsPort),
+                  (1...65535).contains(settings.wgPort),
+                  ["amd64", "arm64"].contains(settings.serverArch) else {
+                throw ConfigParseError.invalidJSON("Unsupported or invalid server settings.")
+            }
+            return settings
+        } catch let error as ConfigParseError {
+            throw error
+        } catch {
+            throw ConfigParseError.invalidJSON(error.localizedDescription)
+        }
+    }
     
     static func parse(from string: String) throws -> TurnConfigImport {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)

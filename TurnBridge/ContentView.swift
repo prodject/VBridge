@@ -427,6 +427,9 @@ struct ContentView: View {
                 .ignoresSafeArea()
             }
             .onOpenURL { url in
+                if handleDeploySettingsURL(url) {
+                    return
+                }
                 if handleWidgetURL(url) {
                     return
                 }
@@ -1470,10 +1473,25 @@ struct ContentView: View {
         case "disconnect":
             PendingShortcutActionStore.store(.disconnect)
         default:
-            break
+            return false
         }
 
         schedulePendingShortcutActionConsumption()
+        return true
+    }
+
+    private func handleDeploySettingsURL(_ url: URL) -> Bool {
+        guard url.absoluteString.lowercased().hasPrefix(ConfigParser.deploySettingsScheme) else {
+            return false
+        }
+        do {
+            applyDeploySettings(try ConfigParser.parseDeploySettings(from: url.absoluteString))
+            SharedLogger.info("Server deploy settings imported from URL")
+            showAlert(title: "Server Imported", message: "Deploy server settings were saved.")
+        } catch {
+            SharedLogger.error("Server settings URL import failed: \(error.localizedDescription)")
+            showAlert(title: "Import Error", message: error.localizedDescription)
+        }
         return true
     }
 
@@ -2300,8 +2318,18 @@ struct ContentView: View {
 
         SharedLogger.debug("Parsing clipboard config (\(clipboardString.count) chars)")
         do {
+            let trimmed = clipboardString.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix(ConfigParser.deploySettingsScheme) {
+                applyDeploySettings(try ConfigParser.parseDeploySettings(from: trimmed))
+                SharedLogger.info("Server deploy settings imported from clipboard")
+                withAnimation { showImportModal = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showAlert(title: "Server Imported", message: "Deploy server settings were saved.")
+                }
+                return
+            }
             let importedProfile: VPNProfile
-            if clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix(ConfigParser.wdttScheme) {
+            if trimmed.lowercased().hasPrefix(ConfigParser.wdttScheme) {
                 importedProfile = profile(fromWDTT: try ConfigParser.parseWDTT(from: clipboardString), fallbackName: "WDTT")
             } else {
                 importedProfile = profile(fromTurnConfig: try ConfigParser.parse(from: clipboardString), fallbackName: "Profile")
@@ -2320,6 +2348,23 @@ struct ContentView: View {
                 showAlert(title: "Error", message: error.localizedDescription)
             }
         }
+    }
+
+    private func applyDeploySettings(_ settings: DeploySettingsLink) {
+        let defaults = UserDefaults.standard
+        defaults.set(settings.host, forKey: "deploy.host")
+        defaults.set(settings.user, forKey: "deploy.user")
+        defaults.set(settings.password, forKey: "deploy.password")
+        defaults.set(settings.sshPort, forKey: "deploy.sshPort")
+        defaults.set(settings.dns1, forKey: "deploy.dns1")
+        defaults.set(settings.dns2, forKey: "deploy.dns2")
+        defaults.set(settings.mainPassword, forKey: "deploy.mainPassword")
+        defaults.set(settings.adminId, forKey: "deploy.adminId")
+        defaults.set(settings.botToken, forKey: "deploy.botToken")
+        defaults.set(settings.manualPorts, forKey: "deploy.manualPorts")
+        defaults.set(settings.dtlsPort, forKey: "deploy.dtlsPort")
+        defaults.set(settings.wgPort, forKey: "deploy.wgPort")
+        defaults.set(settings.serverArch, forKey: "deploy.serverArch")
     }
 
     private func importFromFilePicker() {

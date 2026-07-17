@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import WireGuardKitGo
 
 private enum DeployAction: String, Sendable {
@@ -67,6 +68,7 @@ struct DeployView: View {
     @State private var output = ""
     @State private var showAlert = false
     @State private var showCleanupConfirmation = false
+    @State private var showExportConfirmation = false
     @State private var isCheckingServerStatus = false
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
@@ -161,6 +163,13 @@ struct DeployView: View {
 
             Section {
                 Button {
+                    showExportConfirmation = true
+                } label: {
+                    Label("Export Server", systemImage: "link.badge.plus")
+                }
+                .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
+
+                Button {
                     run(.install)
                 } label: {
                     Label(isRunning && currentAction == .install ? "Installing..." : "Install", systemImage: "icloud.and.arrow.up")
@@ -233,6 +242,18 @@ struct DeployView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The server database will be backed up. Devices bound to individual passwords are preserved; only unbound device records are removed.")
+        }
+        .confirmationDialog(
+            "Export server settings?",
+            isPresented: $showExportConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Copy Link") {
+                exportServerSettings()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The link contains the SSH password, WDTT password, and Telegram credentials. Share it only through a trusted private channel.")
         }
         .task {
             await refreshSavedServerStatus()
@@ -308,6 +329,35 @@ struct DeployView: View {
                 }
             }
         }
+    }
+
+    private func exportServerSettings() {
+        let settings = DeploySettingsLink(
+            version: 1,
+            nonce: UUID(),
+            host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+            user: user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "root" : user.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password,
+            sshPort: sshPort,
+            dns1: dns1,
+            dns2: dns2,
+            mainPassword: mainPassword,
+            adminId: adminId,
+            botToken: botToken,
+            manualPorts: manualPorts,
+            dtlsPort: dtlsPort,
+            wgPort: wgPort,
+            serverArch: serverArch
+        )
+        do {
+            UIPasteboard.general.string = try ConfigParser.exportDeploySettings(settings)
+            resultTitle = "Server Exported"
+            resultMessage = "The private server settings link was copied to the clipboard."
+        } catch {
+            resultTitle = "Export Failed"
+            resultMessage = error.localizedDescription
+        }
+        showAlert = true
     }
 
     @MainActor
