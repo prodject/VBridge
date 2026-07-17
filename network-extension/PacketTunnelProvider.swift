@@ -221,7 +221,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             || interface.specialJunk5 != nil
     }
 
-    private func splitTunnelConfiguration() -> SplitTunnelConfiguration {
+    private func splitTunnelConfiguration(
+        providerConfiguration: [String: Any]
+    ) -> SplitTunnelConfiguration {
+        if let enabled = providerConfiguration["splitTunnelEnabled"] as? Bool,
+           let modeValue = providerConfiguration["splitTunnelMode"] as? String,
+           let rules = providerConfiguration["splitTunnelRules"] as? [String] {
+            let mode = SplitTunnelMode(rawValue: modeValue) ?? .direct
+            SharedLogger.info(
+                "Split tunneling configuration received from app: enabled=\(enabled) mode=\(mode.rawValue) rules=\(rules.count)",
+                source: .tunnel
+            )
+            return SplitTunnelConfiguration(
+                enabled: enabled && !rules.isEmpty,
+                mode: mode,
+                rules: rules
+            )
+        }
+
         guard let groupID = SharedLogger.appGroupID,
               let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
             SharedLogger.warning("Split tunneling disabled: App Group container unavailable", source: .tunnel)
@@ -523,7 +540,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
         let isWDTT = transportMode == "wdtt"
-        let splitTunnel = splitTunnelConfiguration()
+        let splitTunnel = splitTunnelConfiguration(providerConfiguration: providerConfiguration)
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 

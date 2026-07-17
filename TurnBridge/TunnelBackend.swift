@@ -24,6 +24,7 @@ struct TunnelStartConfiguration: Codable {
     }
 
     var providerConfiguration: [String: Any] {
+        let splitTunnel = SplitTunnelStorage.load()
         var configuration: [String: Any] = [
             "wgQuickConfig": normalizedWgQuickConfig,
             "vkLink": vkLink,
@@ -39,7 +40,14 @@ struct TunnelStartConfiguration: Codable {
             "wrapKeyHex": wrapKeyHex,
             "wdttPassword": wdttPassword,
             "wdttClientKey": wdttClientKey,
-            "wdttServerKey": wdttServerKey
+            "wdttServerKey": wdttServerKey,
+            // PacketTunnel cannot read the app's Application Support directory,
+            // and sideloaded builds often have no App Group entitlement. Pass the
+            // current snapshot through NetworkExtension preferences so both signed
+            // and sideloaded installations apply the same routing policy.
+            "splitTunnelEnabled": splitTunnel.enabled,
+            "splitTunnelMode": splitTunnel.mode.rawValue,
+            "splitTunnelRules": splitTunnel.rules
         ]
 
         if let seededTURN {
