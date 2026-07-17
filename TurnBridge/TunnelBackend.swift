@@ -386,6 +386,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             // save -> reload -> settle -> startVPNTunnel sequence removes a
             // device-dependent lifecycle difference.
             try session.startVPNTunnel()
+            scheduleProviderLaunchProbe(session)
             schedulePostStartDiagnosticIfNeeded(
                 session: session,
                 providerBundleIdentifier: providerBundleIdentifier,
@@ -402,6 +403,28 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             NSLog("Error (startTunnel): \(error)")
             SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
             completionHandler(false)
+        }
+    }
+
+    private func scheduleProviderLaunchProbe(_ session: NETunnelProviderSession) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            let message = Data("vbridge_provider_probe".utf8)
+            do {
+                try session.sendProviderMessage(message) { response in
+                    DispatchQueue.main.async {
+                        guard let response,
+                              let text = String(data: response, encoding: .utf8),
+                              !text.isEmpty else {
+                            SharedLogger.warning("Packet tunnel provider probe returned no response")
+                            return
+                        }
+                        SharedLogger.info("Packet tunnel provider probe: \(text)")
+                    }
+                }
+                SharedLogger.debug("Packet tunnel provider probe requested")
+            } catch {
+                SharedLogger.error("Packet tunnel provider probe failed: \(error.localizedDescription)")
+            }
         }
     }
 

@@ -352,7 +352,11 @@ struct ContentView: View {
     @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
     @State private var preBootstrapCaptchaContinuation: CheckedContinuation<PreBootstrapCaptchaResult, Never>?
 
-    private let connectWatchdogTimeout: UInt64 = 45
+    // PacketTunnelProvider may spend up to 120s in VK/TURN bootstrap and
+    // another 30s waiting for WDTT provisioning. Keep the UI watchdog beyond
+    // the provider's own bounded startup sequence instead of terminating a
+    // legitimate .connecting session early.
+    private let connectWatchdogTimeout: UInt64 = 160
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
     private static let vbridgeType = UTType(filenameExtension: "vbridge", conformingTo: .data)
     private static let importFileTypes: [UTType] = [

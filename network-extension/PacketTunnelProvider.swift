@@ -994,6 +994,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         guard let completionHandler = completionHandler else { return }
 
+        if messageData == Data("vbridge_provider_probe".utf8) {
+            let response = "alive handle=\(vbridgeTunnelHandle)"
+            completionHandler(Data(response.utf8))
+            return
+        }
+
         sharedLogger.log("handleAppMessage: received \(messageData.count) bytes")
         if messageData.count == 1, messageData[0] == 0 {
             sharedLogger.log("handleAppMessage: runtime configuration requested")
