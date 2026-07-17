@@ -199,6 +199,60 @@ jobs:
           path: ${{ steps.package.outputs.ipa_path }}
           if-no-files-found: error
 
+      - name: Package sideload-compatible IPA
+        id: package_sideload
+        run: |
+          set -euo pipefail
+
+          PACKAGE_ROOT="$(mktemp -d)"
+          mkdir -p "$PACKAGE_ROOT/Payload"
+          ditto "${{ steps.package.outputs.app_path }}" "$PACKAGE_ROOT/Payload/VBridge.app"
+
+          APP_PATH="$PACKAGE_ROOT/Payload/VBridge.app"
+          TUNNEL_PATH="$APP_PATH/PlugIns/PacketTunnel.appex"
+          WIDGET_PATH="$APP_PATH/PlugIns/VBridgeWidgetExtension.appex"
+          test -d "$TUNNEL_PATH"
+
+          # Sideload signers commonly fail to provision the App Group or to
+          # rewrite every embedded extension consistently. Keep a second IPA
+          # with only the packet tunnel and its mandatory entitlement.
+          rm -rf "$WIDGET_PATH"
+
+          sign_nested_code() {
+            local root="$1"
+            if [ -d "$root/Frameworks" ]; then
+              while IFS= read -r framework; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$framework"
+              done < <(find "$root/Frameworks" -type d -name "*.framework")
+              while IFS= read -r dylib; do
+                /usr/bin/codesign --force --sign - --timestamp=none "$dylib"
+              done < <(find "$root/Frameworks" -type f -name "*.dylib")
+            fi
+          }
+
+          sign_nested_code "$TUNNEL_PATH"
+          /usr/bin/codesign --force --sign - --timestamp=none \
+            --entitlements packaging/ios-sideload/tunnel.entitlements \
+            "$TUNNEL_PATH"
+          sign_nested_code "$APP_PATH"
+          /usr/bin/codesign --force --sign - --timestamp=none \
+            --entitlements packaging/ios-sideload/app.entitlements \
+            "$APP_PATH"
+
+          SIDELOAD_IPA_FILENAME="vbridge-${GITHUB_SHA}-${{ steps.package.outputs.app_version }}-sideload.ipa"
+          SIDELOAD_IPA_PATH="$GITHUB_WORKSPACE/$SIDELOAD_IPA_FILENAME"
+          (cd "$PACKAGE_ROOT" && ditto -c -k --sequesterRsrc --keepParent Payload "$SIDELOAD_IPA_PATH")
+
+          echo "sideload_ipa_filename=$SIDELOAD_IPA_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "sideload_ipa_path=$SIDELOAD_IPA_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sideload-compatible artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_sideload.outputs.sideload_ipa_filename }}
+          path: ${{ steps.package_sideload.outputs.sideload_ipa_path }}
+          if-no-files-found: error
+
       - name: Prebuild WireGuard Go bridge for macOS
         run: |
           set -euo pipefail
@@ -384,8 +438,10 @@ jobs:
             Build number: `${{ steps.package.outputs.app_build }}`
             Build target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
             Artifact: `${{ steps.package.outputs.ipa_filename }}`
+            Sideload artifact (no Widget/App Group): `${{ steps.package_sideload.outputs.sideload_ipa_filename }}`
             macOS helper: `${{ steps.package_helper.outputs.helper_pkg_filename }}`
           files: |
             ${{ steps.package.outputs.ipa_path }}
+            ${{ steps.package_sideload.outputs.sideload_ipa_path }}
             ${{ steps.package_macos.outputs.dmg_path }}
             ${{ steps.package_helper.outputs.helper_pkg_path }}
