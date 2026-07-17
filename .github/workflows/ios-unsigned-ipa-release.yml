@@ -16,7 +16,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-release:
+  prepare-version:
+    runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
+      app_build: ${{ steps.version.outputs.app_build }}
+    steps:
+      - name: Compute CI app version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MAJOR_VERSION="2"
+          LATEST_VERSION="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 100 \
+              --json name,tagName \
+              --jq '[.[] | [(.name | capture("^VBridge (?<version>'"$MAJOR_VERSION"'\\.[0-9]+)$")? | .version), (.tagName | capture("^vbridge-(?<version>'"$MAJOR_VERSION"'\\.[0-9]+)-")? | .version)] | .[]] | map(select(. != null)) | unique | sort_by(split(".")[1] | tonumber) | last // "'"$MAJOR_VERSION"'.0"'
+          )"
+          LATEST_MINOR="${LATEST_VERSION#${MAJOR_VERSION}.}"
+          NEXT_MINOR="$((LATEST_MINOR + 1))"
+          APP_VERSION="${MAJOR_VERSION}.${NEXT_MINOR}"
+          APP_BUILD="${MAJOR_VERSION}${NEXT_MINOR}0"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_build=$APP_BUILD" >> "$GITHUB_OUTPUT"
+
+  build-ios:
+    needs: prepare-version
     runs-on: macos-26
     timeout-minutes: 90
 
@@ -27,6 +55,8 @@ jobs:
       XCODE_SDK: iphoneos
       IPHONEOS_DEPLOYMENT_TARGET: "26.0"
       MACOSX_DEPLOYMENT_TARGET: "26.0"
+      APP_VERSION: ${{ needs.prepare-version.outputs.app_version }}
+      APP_BUILD: ${{ needs.prepare-version.outputs.app_build }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,27 +78,6 @@ jobs:
         run: |
           xcodebuild -version
           go version
-
-      - name: Compute CI app version
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          MAJOR_VERSION="2"
-          LATEST_VERSION="$(
-            gh release list \
-              --repo "$GITHUB_REPOSITORY" \
-              --limit 100 \
-              --json name,tagName \
-              --jq '[.[] | [(.name | capture("^VBridge (?<version>'"$MAJOR_VERSION"'\\.[0-9]+)$")? | .version), (.tagName | capture("^vbridge-(?<version>'"$MAJOR_VERSION"'\\.[0-9]+)-")? | .version)] | .[]] | map(select(. != null)) | unique | sort_by(split(".")[1] | tonumber) | last // "'"$MAJOR_VERSION"'.0"'
-          )"
-          LATEST_MINOR="${LATEST_VERSION#${MAJOR_VERSION}.}"
-          NEXT_MINOR="$((LATEST_MINOR + 1))"
-          APP_VERSION="${MAJOR_VERSION}.${NEXT_MINOR}"
-          APP_BUILD="${MAJOR_VERSION}${NEXT_MINOR}0"
-          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
-          echo "APP_BUILD=$APP_BUILD" >> "$GITHUB_ENV"
-          echo "CI app version: $APP_VERSION ($APP_BUILD), previous: $LATEST_VERSION"
 
       - name: Prebuild WireGuard Go bridge
         run: |
@@ -198,6 +207,57 @@ jobs:
           name: ${{ steps.package.outputs.ipa_filename }}
           path: ${{ steps.package.outputs.ipa_path }}
           if-no-files-found: error
+
+      - name: Publish IPA release immediately
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: vbridge-${{ steps.package.outputs.app_version }}-${{ github.sha }}
+          name: VBridge ${{ steps.package.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Automated build for commit `${{ github.sha }}`.
+
+            App version: `${{ steps.package.outputs.app_version }}`
+            Build number: `${{ steps.package.outputs.app_build }}`
+            iOS target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
+            IPA: `${{ steps.package.outputs.ipa_filename }}`
+            macOS artifacts are attached when the parallel macOS build finishes.
+          files: ${{ steps.package.outputs.ipa_path }}
+
+  build-macos:
+    needs: prepare-version
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      XCODE_PROJECT: TurnBridge.xcodeproj
+      XCODE_CONFIGURATION: Release
+      MACOSX_DEPLOYMENT_TARGET: "26.0"
+      APP_VERSION: ${{ needs.prepare-version.outputs.app_version }}
+      APP_BUILD: ${{ needs.prepare-version.outputs.app_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: wireguard-apple/Sources/WireGuardKitGo/go.sum
+
+      - name: Cache WireGuard Go bridge
+        uses: actions/cache@v4
+        with:
+          path: wireguard-apple/Sources/WireGuardKitGo/out
+          key: wireguard-go-bridge-macos-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
+
+      - name: Build WDTT deploy server assets
+        run: |
+          set -euo pipefail
+          ./script/build_wdtt_server_assets.sh
 
       - name: Prebuild WireGuard Go bridge for macOS
         run: |
@@ -367,25 +427,22 @@ jobs:
           path: ${{ steps.package_helper.outputs.helper_pkg_path }}
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Attach macOS artifacts to IPA release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: vbridge-${{ steps.package.outputs.app_version }}-${{ github.sha }}
-          name: VBridge ${{ steps.package.outputs.app_version }}
-          target_commitish: ${{ github.sha }}
-          prerelease: true
-          generate_release_notes: false
-          body: |
-            Automated unsigned IPA build for commit `${{ github.sha }}`.
-
-            App version: `${{ steps.package.outputs.app_version }}`
-            Build number: `${{ steps.package.outputs.app_build }}`
-            Build target: iOS ${{ env.IPHONEOS_DEPLOYMENT_TARGET }}
-            Artifact: `${{ steps.package.outputs.ipa_filename }}`
-            macOS helper: `${{ steps.package_helper.outputs.helper_pkg_filename }}`
-          files: |
-            ${{ steps.package.outputs.ipa_path }}
-            ${{ steps.package_macos.outputs.dmg_path }}
-            ${{ steps.package_helper.outputs.helper_pkg_path }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="vbridge-${APP_VERSION}-${GITHUB_SHA}"
+          for attempt in {1..60}; do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" \
+                "${{ steps.package_macos.outputs.dmg_path }}" \
+                "${{ steps.package_helper.outputs.helper_pkg_path }}" \
+                --repo "$GITHUB_REPOSITORY" \
+                --clobber
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "IPA release $TAG was not created within 10 minutes" >&2
+          exit 1
