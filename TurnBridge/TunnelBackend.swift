@@ -231,7 +231,15 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
 
             let protocolConfiguration = NETunnelProviderProtocol()
             protocolConfiguration.providerBundleIdentifier = providerBundleIdentifier
-            protocolConfiguration.serverAddress = configuration.peerAddr.components(separatedBy: ":").first ?? configuration.peerAddr
+            // Match the stable reference startup flow: use the already
+            // resolved TURN relay as NE's server address when available.
+            // iOS treats this address specially while bringing the provider
+            // up, so pointing it at the actual bootstrap relay avoids an
+            // unnecessary difference between the saved policy and the first
+            // packets emitted by the extension.
+            protocolConfiguration.serverAddress = Self.serverHost(
+                from: configuration.seededTURN?.address ?? configuration.peerAddr
+            )
             protocolConfiguration.providerConfiguration = configuration.providerConfiguration
 
             let defaults = UserDefaults.standard
@@ -372,7 +380,12 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         do {
             SharedLogger.prepareForTunnelProviderLaunch()
             SharedLogger.info("Starting tunnel session... status=\(session.status.rawValue)")
-            try session.startTunnel()
+            // Use the same public NEVPNConnection entry point as the stable
+            // reference implementation. NETunnelProviderSession.startTunnel
+            // ultimately starts the same provider, but keeping the exact
+            // save -> reload -> settle -> startVPNTunnel sequence removes a
+            // device-dependent lifecycle difference.
+            try session.startVPNTunnel()
             schedulePostStartDiagnosticIfNeeded(
                 session: session,
                 providerBundleIdentifier: providerBundleIdentifier,
@@ -390,6 +403,19 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             SharedLogger.error("Failed to start tunnel: \(error.localizedDescription)")
             completionHandler(false)
         }
+    }
+
+    private static func serverHost(from address: String) -> String {
+        if address.hasPrefix("["), let closingBracket = address.firstIndex(of: "]") {
+            return String(address[address.index(after: address.startIndex)..<closingBracket])
+        }
+        let colonCount = address.reduce(into: 0) { count, character in
+            if character == ":" { count += 1 }
+        }
+        if colonCount == 1, let colon = address.lastIndex(of: ":") {
+            return String(address[..<colon])
+        }
+        return address
     }
 
     private func schedulePostStartDiagnosticIfNeeded(
