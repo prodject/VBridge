@@ -6,6 +6,7 @@ private enum DeployAction: String, Sendable {
     case install
     case uninstall
     case status
+    case cleanupDevices = "cleanup_devices"
 }
 
 private struct DeployRequest: Encodable, Sendable {
@@ -65,6 +66,7 @@ struct DeployView: View {
     @State private var resultMessage = ""
     @State private var output = ""
     @State private var showAlert = false
+    @State private var showCleanupConfirmation = false
     @State private var isCheckingServerStatus = false
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
@@ -173,6 +175,13 @@ struct DeployView: View {
                 .disabled(!canConnect)
 
                 Button(role: .destructive) {
+                    showCleanupConfirmation = true
+                } label: {
+                    Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
+                }
+                .disabled(!canConnect)
+
+                Button(role: .destructive) {
                     run(.uninstall)
                 } label: {
                     Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
@@ -212,6 +221,18 @@ struct DeployView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(resultMessage)
+        }
+        .confirmationDialog(
+            "Clean orphan WDTT devices?",
+            isPresented: $showCleanupConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clean Orphan Devices", role: .destructive) {
+                run(.cleanupDevices)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The server database will be backed up. Devices bound to individual passwords are preserved; only unbound device records are removed.")
         }
         .task {
             await refreshSavedServerStatus()
@@ -339,7 +360,7 @@ struct DeployView: View {
 
     private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
         let scriptURL = Bundle.main.url(forResource: "wdtt-deploy", withExtension: "sh")
-        if action != .status, scriptURL == nil {
+        if action == .install || action == .uninstall, scriptURL == nil {
             throw DeployError.missingAsset("wdtt-deploy.sh")
         }
 

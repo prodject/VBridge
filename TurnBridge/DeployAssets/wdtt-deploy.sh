@@ -112,15 +112,15 @@ install_prerequisites() {
 
     case "$PKG_MGR" in
         apt)
-            pkg_install ca-certificates iproute2 iptables nftables procps psmisc || \
+            pkg_install ca-certificates iproute2 iptables nftables procps psmisc jq || \
                 log_warn "Часть apt-пакетов не установилась, продолжаю с доступными утилитами"
             ;;
         dnf|yum)
-            pkg_install ca-certificates iproute iptables nftables procps-ng psmisc || \
+            pkg_install ca-certificates iproute iptables nftables procps-ng psmisc jq || \
                 log_warn "Часть rpm-пакетов не установилась, продолжаю с доступными утилитами"
             ;;
         pacman)
-            pkg_install ca-certificates iproute2 iptables nftables procps-ng psmisc || \
+            pkg_install ca-certificates iproute2 iptables nftables procps-ng psmisc jq || \
                 log_warn "Часть pacman-пакетов не установилась, продолжаю с доступными утилитами"
             ;;
     esac

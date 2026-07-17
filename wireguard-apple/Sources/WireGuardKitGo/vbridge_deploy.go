@@ -137,6 +137,30 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.Action == "cleanup_devices" {
+		text, commandErr := runSSHCommand(
+			client,
+			rootDeployCommand(cleanupOrphanDevicesCommand(), req.Password),
+			2*time.Minute,
+		)
+		appendOutput("cleanup devices", text)
+		checks, checkText := checkDeployStatus(client)
+		appendOutput("status", checkText)
+		if commandErr != nil {
+			return deployResponse{
+				OK: false, Status: "error",
+				Message: "device cleanup failed: " + commandErr.Error(),
+				Output: output.String(), ServerConnected: true,
+				WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect,
+			}
+		}
+		return deployResponse{
+			OK: true, Status: "success", Message: "Orphan WDTT devices cleaned",
+			Output: output.String(), ServerConnected: true,
+			WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect,
+		}
+	}
+
 	if err := uploadDeployFile(client, req.DeployScript, "/tmp/vbridge-wdtt-deploy.sh", 0o755); err != nil {
 		return deployResponse{
 			OK:              false,
@@ -244,7 +268,7 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
-	if r.Action != "install" && r.Action != "uninstall" && r.Action != "status" {
+	if r.Action != "install" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" {
 		return fmt.Errorf("unsupported deploy action %q", r.Action)
 	}
 	if r.Host == "" {
@@ -262,7 +286,7 @@ func (r deployRequest) validate() error {
 	if r.WGPort < 1 || r.WGPort > 65535 {
 		return fmt.Errorf("invalid WireGuard port %d", r.WGPort)
 	}
-	if r.Action != "status" && r.DeployScript == "" {
+	if (r.Action == "install" || r.Action == "uninstall") && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
 	}
 	if r.Action == "install" && r.MainPassword == "" {
@@ -272,6 +296,28 @@ func (r deployRequest) validate() error {
 		return errors.New("server binary path is empty")
 	}
 	return nil
+}
+
+func cleanupOrphanDevicesCommand() string {
+	return strings.Join([]string{
+		"set -euo pipefail",
+		"db=/etc/wdtt/passwords.json",
+		"test -f \"$db\"",
+		"command -v jq >/dev/null 2>&1 || { echo 'error: jq is required'; exit 1; }",
+		"backup=\"${db}.backup-$(date +%Y%m%d-%H%M%S)\"",
+		"systemctl stop wdtt",
+		"trap 'systemctl start wdtt >/dev/null 2>&1 || true' EXIT",
+		"cp -p \"$db\" \"$backup\"",
+		"before=$(jq '.devices | length' \"$db\")",
+		"jq '[.passwords[].device_id | select(. != \"\")] as $keep | .devices |= with_entries(select(.key as $id | $keep | index($id)))' \"$db\" > \"${db}.tmp\"",
+		"chown --reference=\"$db\" \"${db}.tmp\" 2>/dev/null || true",
+		"chmod --reference=\"$db\" \"${db}.tmp\" 2>/dev/null || chmod 600 \"${db}.tmp\"",
+		"mv \"${db}.tmp\" \"$db\"",
+		"after=$(jq '.devices | length' \"$db\")",
+		"systemctl start wdtt",
+		"trap - EXIT",
+		"printf 'Devices before: %s\\nDevices after: %s\\nBackup: %s\\n' \"$before\" \"$after\" \"$backup\"",
+	}, "; ")
 }
 
 func dialDeploySSH(req deployRequest) (*ssh.Client, error) {

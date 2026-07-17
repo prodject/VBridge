@@ -56,6 +56,7 @@ enum SplitTunnelStorage {
     private static let migrationLock = NSLock()
 
     static func load() -> SplitTunnelSettings {
+        ensureStorageDirectoryExists()
         migrateLegacyStorageIfNeeded()
         let metadata = loadMetadata()
         return SplitTunnelSettings(
@@ -317,6 +318,13 @@ enum SplitTunnelStorage {
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
+    private static func ensureStorageDirectoryExists() {
+        try? FileManager.default.createDirectory(
+            at: storageDirectoryURL(),
+            withIntermediateDirectories: true
+        )
+    }
+
     private static func metadataFileURL() -> URL {
         storageDirectoryURL().appendingPathComponent(metadataFileName)
     }
@@ -345,6 +353,7 @@ enum SplitTunnelStorage {
     }
 
     private static func writeMetadata(_ metadata: Metadata) {
+        ensureStorageDirectoryExists()
         guard let data = try? JSONEncoder().encode(metadata) else { return }
         try? data.write(to: metadataFileURL(), options: .atomic)
     }
@@ -355,6 +364,7 @@ enum SplitTunnelStorage {
     }
 
     private static func writeRules(_ rules: [String], to url: URL) {
+        ensureStorageDirectoryExists()
         let text = rules.joined(separator: "\n")
         try? text.write(to: url, atomically: true, encoding: .utf8)
     }
