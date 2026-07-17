@@ -224,9 +224,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func splitTunnelConfiguration(
         providerConfiguration: [String: Any]
     ) -> SplitTunnelConfiguration {
+        let inlineRules: [String]?
+        if let compressedRules = providerConfiguration["splitTunnelRulesLZFSE"] as? Data,
+           let decompressedRules = try? (compressedRules as NSData).decompressed(using: .lzfse),
+           let rulesText = String(data: decompressedRules as Data, encoding: .utf8) {
+            inlineRules = rulesText.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        } else {
+            // Backward compatibility with the first inline-rules build.
+            inlineRules = providerConfiguration["splitTunnelRules"] as? [String]
+        }
+
         if let enabled = providerConfiguration["splitTunnelEnabled"] as? Bool,
            let modeValue = providerConfiguration["splitTunnelMode"] as? String,
-           let rules = providerConfiguration["splitTunnelRules"] as? [String] {
+           let rules = inlineRules {
             let mode = SplitTunnelMode(rawValue: modeValue) ?? .direct
             SharedLogger.info(
                 "Split tunneling configuration received from app: enabled=\(enabled) mode=\(mode.rawValue) rules=\(rules.count)",

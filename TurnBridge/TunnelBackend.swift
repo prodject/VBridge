@@ -47,8 +47,13 @@ struct TunnelStartConfiguration: Codable {
             // and sideloaded installations apply the same routing policy.
             "splitTunnelEnabled": splitTunnel.enabled,
             "splitTunnelMode": splitTunnel.mode.rawValue,
-            "splitTunnelRules": splitTunnel.rules
+            "splitTunnelRuleCount": splitTunnel.rules.count
         ]
+
+        if let rulesData = splitTunnel.rules.joined(separator: "\n").data(using: .utf8),
+           let compressedRules = try? (rulesData as NSData).compressed(using: .lzfse) {
+            configuration["splitTunnelRulesLZFSE"] = compressedRules
+        }
 
         if let seededTURN {
             configuration["seededTURN"] = seededTURN.providerConfiguration
