@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# Version calculation reads the latest published release. Serialize runs so
+# two close pushes cannot both calculate and publish the same next version.
+concurrency:
+  group: vbridge-release-main
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     runs-on: macos-26
