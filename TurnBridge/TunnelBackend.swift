@@ -446,6 +446,19 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             return
         }
 
+        // The launch marker is shared through the App Group. Re-signed IPA
+        // installations may legitimately run the packet tunnel without an
+        // accessible App Group (the reference client falls back to os_log in
+        // that situation). Without shared storage, a missing marker proves
+        // nothing; killing a .connecting session here interrupts a provider
+        // that may already be bootstrapping successfully.
+        guard SharedLogger.isTunnelProviderLaunchMarkerAvailable else {
+            SharedLogger.warning(
+                "Tunnel startup recovery disabled: App Group launch marker unavailable"
+            )
+            return
+        }
+
         startupRecoveryWorkItem?.cancel()
         let recoveryCheck = DispatchWorkItem { [weak self] in
             guard let self else { return }

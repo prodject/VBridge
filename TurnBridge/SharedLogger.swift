@@ -225,6 +225,10 @@ public struct SharedLogger {
         return container.appendingPathComponent("tunnel-provider-started.marker")
     }
 
+    static var isTunnelProviderLaunchMarkerAvailable: Bool {
+        tunnelProviderLaunchMarkerURL != nil
+    }
+
     static func prepareForTunnelProviderLaunch() {
         guard let url = tunnelProviderLaunchMarkerURL else { return }
         try? FileManager.default.removeItem(at: url)
