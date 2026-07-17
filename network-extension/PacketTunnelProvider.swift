@@ -780,7 +780,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             defaults.synchronize()
             return value
         }
-        return UUID().uuidString
+
+        // Sideloaded builds commonly lose the App Group entitlement even though
+        // the packet-tunnel extension itself is allowed to run.  The extension
+        // still owns a persistent preferences container, so use it as the
+        // fallback.  Returning a fresh UUID here used to register a new WDTT
+        // device on every connection attempt and could eventually exhaust the
+        // server's WireGuard address pool, which is reported as NOCONF.
+        let defaults = UserDefaults.standard
+        if let existing = defaults.string(forKey: key), !existing.isEmpty {
+            return existing
+        }
+        let value = UUID().uuidString
+        defaults.set(value, forKey: key)
+        return value
     }
 
     private func waitForWrapAProvision(handle: Int32, timeoutMs: Int32) -> String? {
