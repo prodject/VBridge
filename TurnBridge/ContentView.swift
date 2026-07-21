@@ -946,7 +946,11 @@ struct ContentView: View {
                 relayIP: latestRelayIPFromLogs()
             )
             app.turnOffTunnel()
+#if targetEnvironment(macCatalyst)
+            applyVPNStatus(.disconnected)
+#else
             vpnStatus = .disconnecting
+#endif
         } else {
             guard let profile = store.selectedProfile else { return }
             if resetCaptchaRecoveryState {
@@ -1028,7 +1032,11 @@ struct ContentView: View {
             wdttServerKey: profile.wdttServerKey,
             seededTURN: seededTURN
         ) { isSuccess in
-            if !isSuccess {
+            if isSuccess {
+#if targetEnvironment(macCatalyst)
+                applyVPNStatus(.connected)
+#endif
+            } else {
                 cancelConnectWatchdog()
                 resetSpeedTelemetry()
                 vpnStatus = .disconnected
@@ -2591,16 +2599,17 @@ struct ContentView: View {
         isDownloadingUpdate = true
         defer { isDownloadingUpdate = false }
 
-        SharedLogger.info("[Update] Downloading IPA: \(info.ipaURL.absoluteString)")
+        SharedLogger.info("[Update] Downloading \(info.assetKind): \(info.assetURL.absoluteString)")
         do {
-            let (temporaryURL, response) = try await URLSession.shared.download(from: info.ipaURL)
+            let (temporaryURL, response) = try await URLSession.shared.download(from: info.assetURL)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                showAlert(title: "Update Error", message: "Failed to download update IPA.")
+                showAlert(title: "Update Error", message: "Failed to download update \(info.assetKind).")
                 return
             }
 
             let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let fileName = info.ipaFileName.isEmpty ? "VBridge-\(info.latestVersion).ipa" : info.ipaFileName
+            let fallbackExtension = info.assetKind.lowercased()
+            let fileName = info.assetFileName.isEmpty ? "VBridge-\(info.latestVersion).\(fallbackExtension)" : info.assetFileName
             let destination = docs.appendingPathComponent(fileName)
 
             if FileManager.default.fileExists(atPath: destination.path) {
@@ -2608,13 +2617,13 @@ struct ContentView: View {
             }
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
 
-            SharedLogger.info("[Update] IPA saved to: \(destination.path)")
+            SharedLogger.info("[Update] \(info.assetKind) saved to: \(destination.path)")
             showAlert(
                 title: "Update Downloaded",
-                message: "IPA downloaded to Files: \(fileName)"
+                message: "\(info.assetKind) downloaded to Files: \(fileName)"
             )
         } catch {
-            SharedLogger.error("[Update] IPA download failed: \(error.localizedDescription)")
+            SharedLogger.error("[Update] \(info.assetKind) download failed: \(error.localizedDescription)")
             showAlert(title: "Update Error", message: "Download failed: \(error.localizedDescription)")
         }
     }

@@ -1959,7 +1959,14 @@ func (p *Proxy) runConnection(sessCtx context.Context, linkID string, readyCh ch
 // relay/serverAddress mismatch is harmless. See
 // evaluated_alternatives_turn_endpoint_rotation.md.
 func (p *Proxy) resolveTURNAddr(connIdx int, allowCaptchaBlock bool) (string, *TURNCreds, int, error) {
-	return p.credPool.get(connIdx, allowCaptchaBlock)
+	addr, creds, slot, err := p.credPool.get(connIdx, allowCaptchaBlock)
+	if err != nil {
+		return "", nil, slot, err
+	}
+	if host, _, splitErr := net.SplitHostPort(addr); splitErr == nil && host != "" {
+		p.turnServerIP.Store(host)
+	}
+	return addr, creds, slot, nil
 }
 
 // fetchFreshCreds is the pool's underlying VK fetcher. It wraps GetVKCreds

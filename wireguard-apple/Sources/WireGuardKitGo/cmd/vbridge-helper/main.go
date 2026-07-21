@@ -252,14 +252,14 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 		return nil, err
 	}
 
-	turnServerIP = p.TURNServerIP()
-	if turnServerIP == "" {
-		return nil, errors.New("TURN server IP is empty after bootstrap")
-	}
-
 	provision, err := p.WaitWrapAProvision(30 * time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("wait WDTT provision: %w", err)
+	}
+
+	turnServerIP = p.TURNServerIP()
+	if turnServerIP == "" {
+		return nil, errors.New("TURN server IP is empty after WRAP-A provision")
 	}
 
 	mtu := provision.MTU

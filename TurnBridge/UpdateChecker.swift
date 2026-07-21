@@ -3,8 +3,9 @@ import Foundation
 struct UpdateInfo: Equatable {
     let latestVersion: String
     let releaseURL: URL
-    let ipaURL: URL
-    let ipaFileName: String
+    let assetURL: URL
+    let assetFileName: String
+    let assetKind: String
 }
 
 enum UpdateChecker {
@@ -39,8 +40,9 @@ enum UpdateChecker {
             return UpdateInfo(
                 latestVersion: latest.version.display,
                 releaseURL: latest.url,
-                ipaURL: latest.ipa.url,
-                ipaFileName: latest.ipa.name
+                assetURL: latest.asset.url,
+                assetFileName: latest.asset.name,
+                assetKind: updateAssetKind
             )
         } catch {
             SharedLogger.warning("[Update] Check failed: \(error.localizedDescription)")
@@ -48,24 +50,40 @@ enum UpdateChecker {
         }
     }
 
-    private static func latestRelease(from releases: [GitHubRelease]) -> (version: Version, url: URL, ipa: GitHubAsset)? {
-        var best: (version: Version, url: URL, ipa: GitHubAsset)?
+    private static var updateAssetKind: String {
+#if targetEnvironment(macCatalyst)
+        return "DMG"
+#else
+        return "IPA"
+#endif
+    }
+
+    private static var updateAssetExtension: String {
+#if targetEnvironment(macCatalyst)
+        return ".dmg"
+#else
+        return ".ipa"
+#endif
+    }
+
+    private static func latestRelease(from releases: [GitHubRelease]) -> (version: Version, url: URL, asset: GitHubAsset)? {
+        var best: (version: Version, url: URL, asset: GitHubAsset)?
 
         for release in releases where !release.draft {
             guard let url = URL(string: release.htmlURL) else { continue }
             let candidates = [release.tagName, release.name ?? ""]
             guard let version = candidates.compactMap(parseVersion).max() else { continue }
-            guard let ipa = release.assets.first(where: { $0.name.lowercased().hasSuffix(".ipa") }),
-                  URL(string: ipa.browserDownloadURL) != nil else {
+            guard let asset = release.assets.first(where: { $0.name.lowercased().hasSuffix(updateAssetExtension) }),
+                  URL(string: asset.browserDownloadURL) != nil else {
                 continue
             }
 
             if let existing = best {
                 if version > existing.version {
-                    best = (version, url, ipa)
+                    best = (version, url, asset)
                 }
             } else {
-                best = (version, url, ipa)
+                best = (version, url, asset)
             }
         }
 
