@@ -467,7 +467,11 @@ struct ContentView: View {
             .onReceive(tunnelManagerStore.$status) { status in
                 // The store observes only its retained manager's connection,
                 // so unrelated and stale system VPN notifications are ignored.
+#if targetEnvironment(macCatalyst)
+                _ = status
+#else
                 applyVPNStatus(status)
+#endif
             }
             .alert(alertTitle, isPresented: $showingAlert) {
                 Button("OK", role: .cancel) { }
@@ -1299,6 +1303,15 @@ struct ContentView: View {
     }
 
     private func refreshVBridgeStatus(markInitialLoadComplete: Bool = false) {
+#if targetEnvironment(macCatalyst)
+        if markInitialLoadComplete || !hasLoadedInitialStatus {
+            hasLoadedInitialStatus = true
+            refreshConnectionProgress()
+            refreshWidgetTimelines()
+            lastWidgetRefreshSignature = widgetRefreshSignature()
+            schedulePendingShortcutActionConsumption()
+        }
+#else
         let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
         tunnelManagerStore.load { _ in
             DispatchQueue.main.async {
@@ -1331,6 +1344,7 @@ struct ContentView: View {
                 }
             }
         }
+#endif
     }
 
     private func applyVPNStatus(_ newStatus: NEVPNStatus) {
