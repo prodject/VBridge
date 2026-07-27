@@ -268,8 +268,17 @@ struct DeployView: View {
         .task {
             await refreshSavedServerStatus()
         }
-        .sheet(item: $shareLogsURL) { url in
-            ActivityView(items: [url])
+        .sheet(isPresented: Binding(
+            get: { shareLogsURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    shareLogsURL = nil
+                }
+            }
+        )) {
+            if let url = shareLogsURL {
+                ActivityView(items: [url])
+            }
         }
     }
 
