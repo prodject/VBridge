@@ -1009,10 +1009,55 @@ var (
 	logFileMu   sync.Mutex
 	logFilePath string
 	logChan     chan string
+	logDropMu   sync.Mutex
+	logDrops    int
 )
 
+func writeLogLineDirect(line string) {
+	logFileMu.Lock()
+	p := logFilePath
+	logFileMu.Unlock()
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString(line)
+	_ = f.Close()
+}
+
+func queueLogLine(line string) {
+	select {
+	case logChan <- line:
+		return
+	default:
+	}
+
+	// Under bursty runtime logging the old non-blocking send silently dropped
+	// the exact proxy/runtime lines we need for post-mortem diagnosis. Preserve
+	// the overflowing line via a direct append and keep a lightweight counter so
+	// the export shows that async logging was saturated.
+	writeLogLineDirect(line)
+
+	logDropMu.Lock()
+	logDrops++
+	drops := logDrops
+	logDropMu.Unlock()
+
+	if drops == 1 || drops%100 == 0 {
+		now := time.Now()
+		if goTZ != nil {
+			now = now.In(goTZ)
+		}
+		ts := now.Format("15:04:05.000000")
+		writeLogLineDirect(fmt.Sprintf("[Go] %s log-writer overflow: %d lines fell back to direct append\n", ts, drops))
+	}
+}
+
 func startLogWriter() {
-	logChan = make(chan string, 512)
+	logChan = make(chan string, 4096)
 	go func() {
 		// Buffer messages locally until logFilePath is set by Swift via
 		// VBridgeWGSetLogFilePath. Without this, init()-time log calls (the
@@ -1147,11 +1192,7 @@ func (osLogWriter) Write(p []byte) (int, error) {
 	}
 	ts := now.Format("15:04:05.000000")
 	line := fmt.Sprintf("[Go] %s %s\n", ts, s)
-	// Non-blocking send to async writer; drop if buffer full (never block caller)
-	select {
-	case logChan <- line:
-	default:
-	}
+	queueLogLine(line)
 	return len(p), nil
 }
 

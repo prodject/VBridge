@@ -7,6 +7,7 @@ private enum DeployAction: String, Sendable {
     case install
     case uninstall
     case status
+    case exportLogs = "export_logs"
     case cleanupDevices = "cleanup_devices"
 }
 
@@ -69,6 +70,8 @@ struct DeployView: View {
     @State private var showAlert = false
     @State private var showCleanupConfirmation = false
     @State private var showExportConfirmation = false
+    @State private var exportedLogsURL: URL?
+    @State private var shareLogsURL: URL?
     @State private var isCheckingServerStatus = false
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
@@ -107,6 +110,13 @@ struct DeployView: View {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "WDTT installed", value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
+
+                    Button {
+                        run(.exportLogs)
+                    } label: {
+                        Label(isRunning && currentAction == .exportLogs ? "Exporting Logs..." : "Export Logs", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(!canConnect)
                 }
             }
 
@@ -258,6 +268,9 @@ struct DeployView: View {
         .task {
             await refreshSavedServerStatus()
         }
+        .sheet(item: $shareLogsURL) { url in
+            ActivityView(items: [url])
+        }
     }
 
     private var effectiveDTLSPort: Int {
@@ -314,6 +327,11 @@ struct DeployView: View {
                 updateStatusIndicators(response)
                 if action == .status {
                     applyDiscoveredServerSettings(response)
+                }
+                if action == .exportLogs, response.ok,
+                   let url = writeExportedLogsFile(contents: response.output) {
+                    exportedLogsURL = url
+                    shareLogsURL = url
                 }
                 resultTitle = response.ok ? "Deploy Complete" : "Deploy Failed"
                 resultMessage = response.message
@@ -487,6 +505,28 @@ struct DeployView: View {
         wdttInstalled = nil
         readyToConnect = nil
     }
+
+    private func writeExportedLogsFile(contents: String) -> URL? {
+        guard !contents.isEmpty else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let stamp = formatter.string(from: Date())
+        let safeHost = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let filename = "wdtt-server-logs-\(safeHost.isEmpty ? "server" : safeHost)-\(stamp).log"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            SharedLogger.error("Failed to write exported server logs: \(error.localizedDescription)")
+            resultTitle = "Export Failed"
+            resultMessage = "Failed to prepare the exported server log file."
+            showAlert = true
+            return nil
+        }
+    }
 }
 
 private struct DeployStatusRow: View {
@@ -544,4 +584,14 @@ private enum DeployError: LocalizedError {
             return "Deploy bridge returned an invalid response: \(String(value.prefix(160)))"
         }
     }
+}
+
+private struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

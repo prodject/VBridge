@@ -137,6 +137,52 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.Action == "export_logs" {
+		checks, text := checkDeployStatus(client)
+		appendOutput("status", text)
+
+		logText, commandErr := runSSHCommand(
+			client,
+			rootDeployCommand(exportServerLogsCommand(), req.Password),
+			45*time.Second,
+		)
+		appendOutput("export logs", logText)
+		if commandErr != nil {
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "server log export failed: " + commandErr.Error(),
+				Output:          output.String(),
+				ServerConnected: true,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+				DTLSPort:        checks.DTLSPort,
+				WGPort:          checks.WGPort,
+				DNS1:            checks.DNS1,
+				DNS2:            checks.DNS2,
+				MainPassword:    checks.MainPassword,
+				AdminID:         checks.AdminID,
+				BotToken:        checks.BotToken,
+			}
+		}
+		return deployResponse{
+			OK:              true,
+			Status:          "success",
+			Message:         "Server logs exported",
+			Output:          output.String(),
+			ServerConnected: true,
+			WDTTInstalled:   checks.WDTTInstalled,
+			ReadyToConnect:  checks.ReadyToConnect,
+			DTLSPort:        checks.DTLSPort,
+			WGPort:          checks.WGPort,
+			DNS1:            checks.DNS1,
+			DNS2:            checks.DNS2,
+			MainPassword:    checks.MainPassword,
+			AdminID:         checks.AdminID,
+			BotToken:        checks.BotToken,
+		}
+	}
+
 	if req.Action == "cleanup_devices" {
 		text, commandErr := runSSHCommand(
 			client,
@@ -268,7 +314,7 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
-	if r.Action != "install" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" {
+	if r.Action != "install" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" && r.Action != "export_logs" {
 		return fmt.Errorf("unsupported deploy action %q", r.Action)
 	}
 	if r.Host == "" {
@@ -317,6 +363,25 @@ func cleanupOrphanDevicesCommand() string {
 		"systemctl start wdtt",
 		"trap - EXIT",
 		"printf 'Devices before: %s\\nDevices after: %s\\nBackup: %s\\n' \"$before\" \"$after\" \"$backup\"",
+	}, "; ")
+}
+
+func exportServerLogsCommand() string {
+	return strings.Join([]string{
+		"set -eu",
+		"echo '===== wdtt service ====='",
+		"systemctl status wdtt --no-pager -n 50 2>&1 || true",
+		"echo",
+		"echo '===== wdtt journal (current boot) ====='",
+		"journalctl -u wdtt --no-pager -b -n 400 2>&1 || true",
+		"echo",
+		"echo '===== wdtt install log ====='",
+		"if [ -f /var/log/wdtt-install.log ]; then tail -n 200 /var/log/wdtt-install.log 2>&1; else echo 'wdtt-install.log not found'; fi",
+		"echo",
+		"echo '===== kernel/network hints ====='",
+		"ip addr show wdtt0 2>&1 || true",
+		"echo",
+		"ss -lunp | grep -E '(:56000|:56001|wdtt)' 2>&1 || true",
 	}, "; ")
 }
 
