@@ -110,13 +110,6 @@ struct DeployView: View {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "WDTT installed", value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
-
-                    Button {
-                        run(.exportLogs)
-                    } label: {
-                        Label(isRunning && currentAction == .exportLogs ? "Exporting Logs..." : "Export Logs", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(!canConnect)
                 }
             }
 
@@ -178,6 +171,13 @@ struct DeployView: View {
                     Label("Export Server", systemImage: "link.badge.plus")
                 }
                 .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
+
+                Button {
+                    run(.exportLogs)
+                } label: {
+                    Label(isRunning && currentAction == .exportLogs ? "Exporting Logs..." : "Export Logs", systemImage: "square.and.arrow.up")
+                }
+                .disabled(!canConnect)
 
                 Button {
                     run(.install)
