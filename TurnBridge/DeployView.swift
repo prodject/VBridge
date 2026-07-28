@@ -5,6 +5,7 @@ import WireGuardKitGo
 
 private enum DeployAction: String, Sendable {
     case install
+    case reinstall
     case uninstall
     case status
     case exportLogs = "export_logs"
@@ -70,6 +71,7 @@ struct DeployView: View {
     @State private var showAlert = false
     @State private var showCleanupConfirmation = false
     @State private var showExportConfirmation = false
+    @State private var showReinstallConfirmation = false
     @State private var exportedLogsURL: URL?
     @State private var shareLogsURL: URL?
     @State private var isCheckingServerStatus = false
@@ -91,9 +93,7 @@ struct DeployView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
-                SecureField("SSH Password", text: $password)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                secretField("SSH Password", text: $password)
 
                 TextField("SSH Port", value: $sshPort, format: .number)
                     .keyboardType(.numberPad)
@@ -126,9 +126,7 @@ struct DeployView: View {
             }
 
             Section(header: Text("Secrets")) {
-                SecureField("WDTT Main Password", text: $mainPassword)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                secretField("WDTT Main Password", text: $mainPassword)
 
                 if !mainPassword.isEmpty && !isMainPasswordValid {
                     Text("Allowed: letters, digits, and _ . ! ? : # - /")
@@ -136,22 +134,31 @@ struct DeployView: View {
                         .foregroundColor(.red)
                 }
 
-                TextField("Telegram Admin ID", text: $adminId)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.numberPad)
+                copyableTextField("Telegram Admin ID", text: $adminId, keyboardType: .numberPad)
 
-                SecureField("Telegram Bot Token", text: $botToken)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                secretField("Telegram Bot Token", text: $botToken)
             }
 
             Section(header: Text("Ports")) {
                 Toggle("Manual port control", isOn: $manualPorts)
 
                 if manualPorts {
-                    Stepper("DTLS Port: \(dtlsPort)", value: $dtlsPort, in: 1...65535)
-                    Stepper("WireGuard Port: \(wgPort)", value: $wgPort, in: 1...65535)
+                    TextField("DTLS Port", value: $dtlsPort, format: .number)
+                        .keyboardType(.numberPad)
+                    TextField("WireGuard Port", value: $wgPort, format: .number)
+                        .keyboardType(.numberPad)
+
+                    if !isValidPort(dtlsPort) {
+                        Text("DTLS port must be between 1 and 65535")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+
+                    if !isValidPort(wgPort) {
+                        Text("WireGuard port must be between 1 and 65535")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
                 }
             }
 
@@ -199,6 +206,13 @@ struct DeployView: View {
                     Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
                 }
                 .disabled(!canConnect)
+
+                Button(role: .destructive) {
+                    showReinstallConfirmation = true
+                } label: {
+                    Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(!canInstall)
 
                 Button(role: .destructive) {
                     run(.uninstall)
@@ -265,6 +279,18 @@ struct DeployView: View {
         } message: {
             Text("The link contains the SSH password, WDTT password, and Telegram credentials. Share it only through a trusted private channel.")
         }
+        .confirmationDialog(
+            "Reinstall WDTT on the server?",
+            isPresented: $showReinstallConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reinstall", role: .destructive) {
+                run(.reinstall)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The app will uninstall WDTT from the server and then install it again using the current Deploy settings, including ports, DNS, and saved secrets.")
+        }
         .task {
             await refreshSavedServerStatus()
         }
@@ -299,7 +325,7 @@ struct DeployView: View {
     }
 
     private var canInstall: Bool {
-        canConnect && isMainPasswordValid
+        canConnect && isMainPasswordValid && isValidPort(effectiveDTLSPort) && isValidPort(effectiveWGPort)
     }
 
     private var isMainPasswordValid: Bool {
@@ -313,6 +339,11 @@ struct DeployView: View {
 
     private func run(_ action: DeployAction) {
         guard !isRunning else { return }
+        if action == .reinstall {
+            runReinstall()
+            return
+        }
+
         let request: DeployRequest
         do {
             request = try makeRequest(action)
@@ -353,6 +384,83 @@ struct DeployView: View {
                 }
                 if !response.output.isEmpty {
                     SharedLogger.info("WDTT deploy output:\n\(response.output)")
+                }
+            }
+        }
+    }
+
+    private func runReinstall() {
+        let uninstallRequest: DeployRequest
+        let installRequest: DeployRequest
+        do {
+            uninstallRequest = try makeRequest(.uninstall)
+            installRequest = try makeRequest(.install)
+        } catch {
+            resultTitle = "Reinstall Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
+            return
+        }
+
+        isRunning = true
+        currentAction = .reinstall
+        output = ""
+
+        Task {
+            let uninstallResponse = await perform(uninstallRequest)
+            var combinedOutput = "== reinstall: uninstall ==\n"
+            if uninstallResponse.output.isEmpty {
+                combinedOutput += uninstallResponse.message
+            } else {
+                combinedOutput += uninstallResponse.output
+            }
+            if !combinedOutput.hasSuffix("\n") {
+                combinedOutput += "\n"
+            }
+
+            guard uninstallResponse.ok else {
+                await MainActor.run {
+                    isRunning = false
+                    currentAction = nil
+                    output = combinedOutput
+                    updateStatusIndicators(uninstallResponse)
+                    resultTitle = "Reinstall Failed"
+                    resultMessage = "Uninstall step failed: \(uninstallResponse.message)"
+                    showAlert = true
+                    SharedLogger.error("WDTT reinstall failed during uninstall: \(uninstallResponse.message)")
+                    if !combinedOutput.isEmpty {
+                        SharedLogger.info("WDTT reinstall output:\n\(combinedOutput)")
+                    }
+                }
+                return
+            }
+
+            let installResponse = await perform(installRequest)
+            combinedOutput += "== reinstall: install ==\n"
+            if installResponse.output.isEmpty {
+                combinedOutput += installResponse.message
+            } else {
+                combinedOutput += installResponse.output
+            }
+
+            await MainActor.run {
+                isRunning = false
+                currentAction = nil
+                output = combinedOutput
+                updateStatusIndicators(installResponse)
+                if installResponse.ok {
+                    applyDiscoveredServerSettings(installResponse)
+                    resultTitle = "Reinstall Complete"
+                    resultMessage = "WDTT was reinstalled with the current Deploy settings."
+                    SharedLogger.info("WDTT reinstall completed")
+                } else {
+                    resultTitle = "Reinstall Failed"
+                    resultMessage = "Install step failed: \(installResponse.message)"
+                    SharedLogger.error("WDTT reinstall failed during install: \(installResponse.message)")
+                }
+                showAlert = true
+                if !combinedOutput.isEmpty {
+                    SharedLogger.info("WDTT reinstall output:\n\(combinedOutput)")
                 }
             }
         }
@@ -513,6 +621,43 @@ struct DeployView: View {
         serverConnected = nil
         wdttInstalled = nil
         readyToConnect = nil
+    }
+
+    @ViewBuilder
+    private func secretField(_ title: String, text: Binding<String>) -> some View {
+        HStack(spacing: 12) {
+            SecureField(title, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            copyButton(for: text.wrappedValue)
+        }
+    }
+
+    @ViewBuilder
+    private func copyableTextField(_ title: String, text: Binding<String>, keyboardType: UIKeyboardType = .default) -> some View {
+        HStack(spacing: 12) {
+            TextField(title, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(keyboardType)
+
+            copyButton(for: text.wrappedValue)
+        }
+    }
+
+    @ViewBuilder
+    private func copyButton(for value: String) -> some View {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        Button {
+            UIPasteboard.general.string = value
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.body)
+        }
+        .buttonStyle(.borderless)
+        .disabled(trimmedValue.isEmpty)
+        .accessibilityLabel("Copy")
     }
 
     private func writeExportedLogsFile(contents: String) -> URL? {
