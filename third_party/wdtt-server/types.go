@@ -23,6 +23,7 @@ type ClientDevice struct {
 }
 
 type PasswordEntry struct {
+	Label         string `json:"label,omitempty"`
 	DeviceID      string `json:"device_id"`
 	ExpiresAt     int64  `json:"expires_at"`
 	DownBytes     int64  `json:"down_bytes"`

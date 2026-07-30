@@ -78,6 +78,19 @@ func stripVkUrl(url string) string {
 	return strings.TrimSpace(url)
 }
 
+func normalizePasswordLabel(raw string) string {
+	label := strings.TrimSpace(raw)
+	if label == "" {
+		return ""
+	}
+	label = strings.Join(strings.Fields(label), " ")
+	runes := []rune(label)
+	if len(runes) > 48 {
+		label = strings.TrimSpace(string(runes[:48]))
+	}
+	return label
+}
+
 type wrapKeyEntry struct {
 	id  string
 	key []byte
@@ -342,11 +355,13 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 	client := &http.Client{Timeout: 65 * time.Second}
 
 	var waitingForDays bool
+	var waitingForLabel bool
 	var waitingForPorts bool
 	var waitingForHash bool
 	var targetPassword string
 
 	var tempDays int
+	var tempLabel string
 	var tempPorts string
 
 	for {
@@ -405,6 +420,9 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 						continue
 					}
 					txt := fmt.Sprintf("🔑 *Пароль:* `%s`\n", pass)
+					if entry.Label != "" {
+						txt += fmt.Sprintf("🏷 *Метка:* %s\n", entry.Label)
+					}
 					if entry.VkHash != "" {
 						pts := strings.Split(entry.Ports, ",")
 						if len(pts) < 3 {
@@ -596,7 +614,22 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 					continue
 				}
 				tempDays = days
+				waitingForLabel = true
+				sendTelegram(token, adminID, "🏷 Введите название/маркировку для пароля:\n\n_Например: iPhone, MacBook, Test, Dad_\n_Или отправьте `-`, чтобы создать без метки._", nil)
+				continue
+			}
 
+			if waitingForLabel {
+				label := normalizePasswordLabel(cmd)
+				if cmd != "-" && label == "" {
+					sendTelegram(token, adminID, "❌ Метка не должна быть пустой. Введите название или отправьте `-`.", nil)
+					continue
+				}
+				waitingForLabel = false
+				tempLabel = ""
+				if cmd != "-" {
+					tempLabel = label
+				}
 				var keyboard [][]map[string]interface{}
 				keyboard = append(keyboard, []map[string]interface{}{
 					{"text": "Да", "callback_data": "ports_def"},
@@ -686,6 +719,7 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 				}
 				expiresAt := time.Now().Add(time.Duration(tempDays) * 24 * time.Hour).Unix()
 				db.Passwords[newPass] = &PasswordEntry{
+					Label:     tempLabel,
 					ExpiresAt: expiresAt,
 					VkHash:    hash,
 					Ports:     tempPorts,
@@ -697,8 +731,13 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 				srvIP := getPublicIP()
 				pts := strings.Split(tempPorts, ",")
 				link := fmt.Sprintf("wdtt://%s:%s:%s:%s:%s:%s", srvIP, pts[0], pts[1], pts[2], newPass, hash)
+				labelLine := ""
+				if tempLabel != "" {
+					labelLine = fmt.Sprintf("🏷 Метка: %s\n", tempLabel)
+				}
 
-				sendTelegram(token, adminID, fmt.Sprintf("🔑 Новый пароль:\n`%s`\n\n⏰ Действует %d дн. (до %s)\n📱 Ожидает первого подключения\n\n🔗 *Быстрая ссылка:* `%s`", newPass, tempDays, expDate, link), nil)
+				sendTelegram(token, adminID, fmt.Sprintf("🔑 Новый пароль:\n`%s`\n%s\n⏰ Действует %d дн. (до %s)\n📱 Ожидает первого подключения\n\n🔗 *Быстрая ссылка:* `%s`", newPass, labelLine, tempDays, expDate, link), nil)
+				tempLabel = ""
 				continue
 			}
 
@@ -717,6 +756,7 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 				}
 				dbMutex.Unlock()
 				waitingForDays = true
+				tempLabel = ""
 				sendTelegram(token, adminID, "📅 Введите срок действия пароля в днях (1–365):\n\n_Примеры: 30 = месяц, 365 = год_", nil)
 
 			} else if cmd == "/list" {
@@ -837,9 +877,13 @@ func sendPasswordList(token string, adminID int64, wgDev *device.Device) {
 					expiry = "❌"
 				}
 			}
-			txt += fmt.Sprintf("%s `%s` (%s)\n", status, p, expiry)
+			labelSuffix := ""
+			if entry != nil && entry.Label != "" {
+				labelSuffix = " • " + entry.Label
+			}
+			txt += fmt.Sprintf("%s `%s` (%s)%s\n", status, p, expiry, labelSuffix)
 			inlineKb = append(inlineKb, map[string]interface{}{
-				"text":          "🔍 " + p,
+				"text":          "🔍 " + p + labelSuffix,
 				"callback_data": "viewpass_" + p,
 			})
 		}
