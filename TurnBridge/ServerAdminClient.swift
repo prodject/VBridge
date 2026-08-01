@@ -45,6 +45,16 @@ struct ServerAdminCreateRequest {
     var clientPassword: String
 }
 
+struct ServerAdminUpdateRequest {
+    var clientPassword: String
+    var label: String
+    var vkHash: String
+    var ports: String
+    var days: Int?
+    var expiresAt: Int64?
+    var newPassword: String
+}
+
 enum ServerAdminAction: String {
     case list
     case create
@@ -52,6 +62,14 @@ enum ServerAdminAction: String {
     case unbind
     case activate
     case deactivate
+    case setLabel = "set-label"
+    case setHash = "set-hash"
+    case setPorts = "set-ports"
+    case setPassword = "set-password"
+    case setExpiry = "set-expiry"
+    case updateClient = "update-client"
+    case cleanupExpired = "cleanup-expired"
+    case cleanupOrphans = "cleanup-orphans"
 }
 
 private struct ServerAdminBridgeRequest: Encodable {
@@ -66,6 +84,8 @@ private struct ServerAdminBridgeRequest: Encodable {
     var vkHash: String?
     var ports: String?
     var days: Int?
+    var expiresAt: Int64?
+    var newPassword: String?
 }
 
 enum ServerAdminBridge {
@@ -97,6 +117,48 @@ enum ServerAdminBridge {
         ))
     }
 
+    static func update(_ target: ServerAdminTarget, request: ServerAdminUpdateRequest) async throws -> ServerAdminEnvelope {
+        try await call(ServerAdminBridgeRequest(
+            action: ServerAdminAction.updateClient.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            mainPassword: target.mainPassword,
+            clientPassword: request.clientPassword,
+            label: request.label.isEmpty ? nil : request.label,
+            vkHash: request.vkHash.isEmpty ? nil : request.vkHash,
+            ports: request.ports.isEmpty ? nil : request.ports
+        ))
+    }
+
+    static func setPassword(_ target: ServerAdminTarget, clientPassword: String, newPassword: String) async throws -> ServerAdminEnvelope {
+        try await call(ServerAdminBridgeRequest(
+            action: ServerAdminAction.setPassword.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            mainPassword: target.mainPassword,
+            clientPassword: clientPassword,
+            newPassword: newPassword
+        ))
+    }
+
+    static func setExpiry(_ target: ServerAdminTarget, clientPassword: String, days: Int?, expiresAt: Int64?) async throws -> ServerAdminEnvelope {
+        try await call(ServerAdminBridgeRequest(
+            action: ServerAdminAction.setExpiry.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            mainPassword: target.mainPassword,
+            clientPassword: clientPassword,
+            days: days,
+            expiresAt: expiresAt
+        ))
+    }
+
     static func run(_ action: ServerAdminAction, target: ServerAdminTarget, clientPassword: String) async throws -> ServerAdminEnvelope {
         try await call(ServerAdminBridgeRequest(
             action: action.rawValue,
@@ -106,6 +168,17 @@ enum ServerAdminBridge {
             port: target.port,
             mainPassword: target.mainPassword,
             clientPassword: clientPassword
+        ))
+    }
+
+    static func run(_ action: ServerAdminAction, target: ServerAdminTarget) async throws -> ServerAdminEnvelope {
+        try await call(ServerAdminBridgeRequest(
+            action: action.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            mainPassword: target.mainPassword
         ))
     }
 

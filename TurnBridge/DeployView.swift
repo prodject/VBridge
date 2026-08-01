@@ -85,15 +85,6 @@ struct DeployView: View {
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
-    @State private var isLoadingClients = false
-    @State private var serverClients: [ServerAdminClientInfo] = []
-    @State private var showCreateClientSheet = false
-    @State private var newClientLabel = ""
-    @State private var newClientHash = ""
-    @State private var newClientPorts = "56000,56001,9000"
-    @State private var newClientDays = 30
-    @State private var newClientPassword = ""
-
     private let serverArchitectures = ["amd64", "arm64"]
 
     var body: some View {
@@ -125,75 +116,6 @@ struct DeployView: View {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "WDTT installed", value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
-                }
-
-                Section(header: Text("Server Clients")) {
-                    HStack {
-                        Button {
-                            refreshServerClients()
-                        } label: {
-                            Label(isLoadingClients ? "Refreshing..." : "Refresh Clients", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(!canConnect || isLoadingClients)
-
-                        Spacer()
-
-                        Button {
-                            showCreateClientSheet = true
-                        } label: {
-                            Label("New Client", systemImage: "plus")
-                        }
-                        .disabled(!canConnect || mainPassword.isEmpty)
-                    }
-
-                    if serverClients.isEmpty {
-                        Text(isLoadingClients ? "Loading clients..." : "No clients loaded.")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(serverClients) { client in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(client.title)
-                                            .font(.headline)
-                                        Text(client.password)
-                                            .font(.caption.monospaced())
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(client.status)
-                                        .font(.caption)
-                                        .foregroundColor(client.isActive ? .green : .orange)
-                                }
-
-                                if let ports = client.ports, !ports.isEmpty {
-                                    Text("Ports: \(ports)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack {
-                                        Button(client.isActive ? "Deactivate" : "Activate") {
-                                            runServerClientAction(client.isActive ? .deactivate : .activate, clientPassword: client.password)
-                                        }
-                                        .buttonStyle(.bordered)
-
-                                        Button("Unbind") {
-                                            runServerClientAction(.unbind, clientPassword: client.password)
-                                        }
-                                        .buttonStyle(.bordered)
-
-                                        Button("Delete", role: .destructive) {
-                                            runServerClientAction(.delete, clientPassword: client.password)
-                                        }
-                                        .buttonStyle(.bordered)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
                 }
             }
 
@@ -256,6 +178,15 @@ struct DeployView: View {
             }
 
             Section {
+                NavigationLink {
+                    ServerManagementView(
+                        target: serverAdminTarget,
+                        canConnect: canConnect
+                    )
+                } label: {
+                    Label("Management", systemImage: "person.3")
+                }
+
                 Button {
                     showExportConfirmation = true
                 } label: {
@@ -434,41 +365,6 @@ struct DeployView: View {
                     showImportStatePicker = false
                 }
             )
-        }
-        .sheet(isPresented: $showCreateClientSheet) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Client")) {
-                        TextField("Label", text: $newClientLabel)
-                        TextField("VK Hash", text: $newClientHash)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Ports", text: $newClientPorts)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("Password", text: $newClientPassword)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Stepper("Days: \(newClientDays)", value: $newClientDays, in: 0...365)
-                    }
-
-                    Section {
-                        Button("Create Client") {
-                            createServerClient()
-                        }
-                        .disabled(!canConnect || mainPassword.isEmpty)
-                    }
-                }
-                .navigationTitle("New Client")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") {
-                            showCreateClientSheet = false
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -806,76 +702,6 @@ struct DeployView: View {
             port: sshPort,
             mainPassword: trimmedMainPassword
         )
-    }
-
-    private func refreshServerClients() {
-        guard let target = serverAdminTarget, !isLoadingClients else { return }
-        isLoadingClients = true
-        Task {
-            do {
-                let clients = try await ServerAdminBridge.list(target)
-                await MainActor.run {
-                    serverClients = clients.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-                    isLoadingClients = false
-                }
-            } catch {
-                await MainActor.run {
-                    isLoadingClients = false
-                    resultTitle = "Clients Refresh Failed"
-                    resultMessage = error.localizedDescription
-                    showAlert = true
-                }
-            }
-        }
-    }
-
-    private func createServerClient() {
-        guard let target = serverAdminTarget else { return }
-        let request = ServerAdminCreateRequest(
-            label: newClientLabel.trimmingCharacters(in: .whitespacesAndNewlines),
-            vkHash: newClientHash.trimmingCharacters(in: .whitespacesAndNewlines),
-            ports: newClientPorts.trimmingCharacters(in: .whitespacesAndNewlines),
-            days: newClientDays,
-            clientPassword: newClientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-        Task {
-            do {
-                _ = try await ServerAdminBridge.create(target, request: request)
-                await MainActor.run {
-                    newClientLabel = ""
-                    newClientHash = ""
-                    newClientPorts = "56000,56001,9000"
-                    newClientDays = 30
-                    newClientPassword = ""
-                    showCreateClientSheet = false
-                    refreshServerClients()
-                }
-            } catch {
-                await MainActor.run {
-                    resultTitle = "Create Client Failed"
-                    resultMessage = error.localizedDescription
-                    showAlert = true
-                }
-            }
-        }
-    }
-
-    private func runServerClientAction(_ action: ServerAdminAction, clientPassword: String) {
-        guard let target = serverAdminTarget else { return }
-        Task {
-            do {
-                _ = try await ServerAdminBridge.run(action, target: target, clientPassword: clientPassword)
-                await MainActor.run {
-                    refreshServerClients()
-                }
-            } catch {
-                await MainActor.run {
-                    resultTitle = "Client Action Failed"
-                    resultMessage = error.localizedDescription
-                    showAlert = true
-                }
-            }
-        }
     }
 
     @ViewBuilder

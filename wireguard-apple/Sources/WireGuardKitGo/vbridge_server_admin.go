@@ -13,18 +13,19 @@ import (
 )
 
 type serverAdminRequest struct {
-	Action       string `json:"action"`
-	Host         string `json:"host"`
-	User         string `json:"user"`
-	Password     string `json:"password"`
-	Port         int    `json:"port"`
-	MainPassword string `json:"mainPassword"`
+	Action         string `json:"action"`
+	Host           string `json:"host"`
+	User           string `json:"user"`
+	Password       string `json:"password"`
+	Port           int    `json:"port"`
+	MainPassword   string `json:"mainPassword"`
 	ClientPassword string `json:"clientPassword,omitempty"`
-	Label        string `json:"label,omitempty"`
-	VKHash       string `json:"vkHash,omitempty"`
-	Ports        string `json:"ports,omitempty"`
-	Days         int    `json:"days,omitempty"`
-	NewPassword  string `json:"newPassword,omitempty"`
+	Label          string `json:"label,omitempty"`
+	VKHash         string `json:"vkHash,omitempty"`
+	Ports          string `json:"ports,omitempty"`
+	Days           int    `json:"days,omitempty"`
+	ExpiresAt      int64  `json:"expiresAt,omitempty"`
+	NewPassword    string `json:"newPassword,omitempty"`
 }
 
 type serverAdminResponse struct {
@@ -133,6 +134,56 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 			return nil, fmt.Errorf("client password is empty")
 		}
 		return []string{r.Action, "--password", shellQuoteDeploy(r.ClientPassword)}, nil
+	case "set-label":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		return []string{"set-label", "--password", shellQuoteDeploy(r.ClientPassword), "--label", shellQuoteDeploy(r.Label)}, nil
+	case "set-hash":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		return []string{"set-hash", "--password", shellQuoteDeploy(r.ClientPassword), "--vk-hash", shellQuoteDeploy(r.VKHash)}, nil
+	case "set-ports":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		return []string{"set-ports", "--password", shellQuoteDeploy(r.ClientPassword), "--ports", shellQuoteDeploy(r.Ports)}, nil
+	case "set-password":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		if r.NewPassword == "" {
+			return nil, fmt.Errorf("new password is empty")
+		}
+		return []string{"set-password", "--password", shellQuoteDeploy(r.ClientPassword), "--new-password", shellQuoteDeploy(r.NewPassword)}, nil
+	case "set-expiry":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		if r.ExpiresAt >= 0 {
+			return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--expires-at", fmt.Sprint(r.ExpiresAt)}, nil
+		}
+		return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--days", fmt.Sprint(maxInt(0, minInt(r.Days, 365)))}, nil
+	case "update-client":
+		if r.ClientPassword == "" {
+			return nil, fmt.Errorf("client password is empty")
+		}
+		args := []string{"update-client", "--password", shellQuoteDeploy(r.ClientPassword)}
+		if r.Label != "" {
+			args = append(args, "--label", shellQuoteDeploy(r.Label))
+		}
+		if r.VKHash != "" {
+			args = append(args, "--vk-hash", shellQuoteDeploy(r.VKHash))
+		}
+		if r.Ports != "" {
+			args = append(args, "--ports", shellQuoteDeploy(r.Ports))
+		}
+		return args, nil
+	case "cleanup-expired":
+		return []string{"cleanup-expired"}, nil
+	case "cleanup-orphans":
+		return []string{"cleanup-orphans"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported server admin action %q", r.Action)
 	}
