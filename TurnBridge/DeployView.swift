@@ -202,6 +202,15 @@ struct DeployView: View {
                     Label("Management", systemImage: "person.3")
                 }
 
+                NavigationLink {
+                    OutboundManagementView(
+                        target: serverOutboundTarget,
+                        canConnect: canConnect
+                    )
+                } label: {
+                    Label("Outbound IP / Proxy", systemImage: "network")
+                }
+
                 Button {
                     showExportConfirmation = true
                 } label: {
@@ -219,14 +228,14 @@ struct DeployView: View {
                 Button {
                     run(.exportState)
                 } label: {
-                    Label(isRunning && currentAction == .exportState ? "Exporting State..." : "Export Server State", systemImage: "externaldrive.badge.arrow.up")
+                    Label(isRunning && currentAction == .exportState ? "Creating Backup..." : "Backup Server", systemImage: "externaldrive.badge.icloud")
                 }
                 .disabled(!canConnect)
 
                 Button {
                     showImportStatePicker = true
                 } label: {
-                    Label(isRunning && currentAction == .importState ? "Importing State..." : "Import Server State", systemImage: "externaldrive.badge.arrow.down")
+                    Label(isRunning && currentAction == .importState ? "Restoring Backup..." : "Restore Server", systemImage: "arrow.clockwise.icloud")
                 }
                 .disabled(!canConnect)
 
@@ -756,6 +765,20 @@ struct DeployView: View {
         )
     }
 
+    private var serverOutboundTarget: ServerOutboundTarget? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty, !password.isEmpty, isSSHPortValid else {
+            return nil
+        }
+        return ServerOutboundTarget(
+            host: trimmedHost,
+            user: trimmedUser.isEmpty ? "root" : trimmedUser,
+            password: password,
+            port: sshPort
+        )
+    }
+
     @ViewBuilder
     private func secretField(_ title: String, text: Binding<String>) -> some View {
         HStack(spacing: 12) {
@@ -891,17 +914,17 @@ struct DeployView: View {
                     if response.ok {
                         applyDiscoveredServerSettings(response)
                     }
-                    resultTitle = response.ok ? "Import Complete" : "Import Failed"
-                    resultMessage = response.ok ? "Server state was imported and applied." : response.message
+                    resultTitle = response.ok ? "Restore Complete" : "Restore Failed"
+                    resultMessage = response.ok ? "Server backup was restored and applied." : response.message
                     showAlert = true
-                    SharedLogger.info("WDTT server state import finished for archive size \(archive.count)")
+                    SharedLogger.info("WDTT server backup restore finished for archive size \(archive.count)")
                     if !response.output.isEmpty {
                         SharedLogger.info("WDTT deploy output:\n\(response.output)")
                     }
                 }
             } catch {
                 await MainActor.run {
-                    resultTitle = "Import Failed"
+                    resultTitle = "Restore Failed"
                     resultMessage = error.localizedDescription
                     showAlert = true
                 }

@@ -283,7 +283,6 @@ enum ServerAdminBridge {
                 throw NSError(domain: "ServerAdminBridge", code: 3, userInfo: [NSLocalizedDescriptionKey: "Server admin bridge returned invalid UTF-8."])
             }
             let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
             let envelope = try decoder.decode(ServerAdminEnvelope.self, from: responseData)
             if !envelope.ok {
                 throw NSError(domain: "ServerAdminBridge", code: 4, userInfo: [NSLocalizedDescriptionKey: localizedServerAdminMessage(envelope.message)])
