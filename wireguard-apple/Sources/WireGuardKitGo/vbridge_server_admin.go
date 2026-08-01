@@ -6,6 +6,7 @@ package main
 import "C"
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -112,9 +113,39 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 	if err != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: err.Error()}
 	}
-	command := fmt.Sprintf("/usr/local/bin/wdtt-server admin -main-password %s %s", shellQuoteDeploy(req.MainPassword), strings.Join(args, " "))
-	text, cmdErr := runSSHCommand(client, command, 70*time.Second)
-	jsonText := extractTrailingJSONObject(text)
+	socketRequest, err := json.Marshal(map[string]any{
+		"main_password": req.MainPassword,
+		"args":          args,
+	})
+	if err != nil {
+		return serverAdminResponse{OK: false, Status: "error", Message: "failed to encode admin socket request: " + err.Error()}
+	}
+	socketPayload := base64.StdEncoding.EncodeToString(socketRequest)
+	command := rootDeployCommand(fmt.Sprintf(`python3 -c %s`,
+		shellQuoteDeploy(fmt.Sprintf(`import base64, socket, sys
+payload = base64.b64decode(%q)
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.settimeout(15)
+sock.connect(%q)
+sock.sendall(payload)
+sock.shutdown(socket.SHUT_WR)
+chunks = []
+while True:
+    chunk = sock.recv(65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+sys.stdout.buffer.write(b"".join(chunks))
+`, socketPayload, "/run/wdtt/admin.sock"))), req.Password)
+	stdoutText, stderrText, cmdErr := runSSHCommandSeparated(client, command, 70*time.Second)
+	text := stdoutText
+	if strings.TrimSpace(stderrText) != "" {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += stderrText
+	}
+	jsonText := extractTrailingJSONObject(stdoutText)
 
 	var state serverAdminState
 	if jsonText != "" {
@@ -133,7 +164,7 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 	if cmdErr != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server admin failed: " + cmdErr.Error(), Output: text}
 	}
-	if err := json.Unmarshal([]byte(text), &state); err != nil {
+	if err := json.Unmarshal([]byte(stdoutText), &state); err != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server returned invalid admin JSON", Output: text}
 	}
 	if !state.OK {

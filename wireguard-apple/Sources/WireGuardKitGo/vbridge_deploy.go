@@ -836,15 +836,25 @@ func runSSHCommand(client *ssh.Client, command string, timeout time.Duration) (s
 }
 
 func runSSHCommandWithInput(client *ssh.Client, command string, input []byte, timeout time.Duration) (string, error) {
+	stdout, stderr, err := runSSHCommandSeparatedWithInput(client, command, input, timeout)
+	return stdout + stderr, err
+}
+
+func runSSHCommandSeparated(client *ssh.Client, command string, timeout time.Duration) (string, string, error) {
+	return runSSHCommandSeparatedWithInput(client, command, nil, timeout)
+}
+
+func runSSHCommandSeparatedWithInput(client *ssh.Client, command string, input []byte, timeout time.Duration) (string, string, error) {
 	session, err := client.NewSession()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer session.Close()
 
-	var combined bytes.Buffer
-	session.Stdout = &combined
-	session.Stderr = &combined
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
 	if input != nil {
 		session.Stdin = bytes.NewReader(input)
 	}
@@ -856,10 +866,10 @@ func runSSHCommandWithInput(client *ssh.Client, command string, input []byte, ti
 
 	select {
 	case err := <-done:
-		return combined.String(), err
+		return stdout.String(), stderr.String(), err
 	case <-time.After(timeout):
 		_ = session.Close()
-		return combined.String(), fmt.Errorf("timeout after %s", timeout)
+		return stdout.String(), stderr.String(), fmt.Errorf("timeout after %s", timeout)
 	}
 }
 
