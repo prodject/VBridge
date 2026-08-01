@@ -96,6 +96,11 @@ struct DeployView: View {
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
     private let serverArchitectures = ["amd64", "arm64"]
+    private let maxPasswordsOptions = [10, 25, 50, 75, 100, 150, 200, 300, 500]
+    private let maxWorkersPerAccessOptions = [0, 9, 18, 27, 36, 45, 54, 72, 90, 108]
+    private let maxHandshakesOptions = [8, 16, 24, 32, 48, 64, 96, 128]
+    private let handshakeRateOptions = [6, 12, 18, 24, 32, 48, 64]
+    private let maxClientMbpsOptions = [0, 1, 2, 5, 10, 20, 50, 100, 200]
 
     var body: some View {
         Form {
@@ -188,16 +193,35 @@ struct DeployView: View {
             }
 
             Section(header: Text("Runtime Limits")) {
-                TextField("Max Passwords", value: $maxPasswords, format: .number)
-                    .keyboardType(.numberPad)
-                TextField("Max Workers Per Access", value: $maxWorkersPerAccess, format: .number)
-                    .keyboardType(.numberPad)
-                TextField("Max Handshakes", value: $maxHandshakes, format: .number)
-                    .keyboardType(.numberPad)
-                TextField("Handshake Rate", value: $handshakeRate, format: .number)
-                    .keyboardType(.numberPad)
-                TextField("Max Client Mbps", value: $maxClientMbps, format: .number)
-                    .keyboardType(.numberPad)
+                Picker("Max Passwords", selection: $maxPasswords) {
+                    ForEach(maxPasswordsOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Workers Per Access", selection: $maxWorkersPerAccess) {
+                    ForEach(maxWorkersPerAccessOptions, id: \.self) { value in
+                        Text(value == 0 ? "Unlimited" : "\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Handshakes", selection: $maxHandshakes) {
+                    ForEach(maxHandshakesOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Handshake Rate", selection: $handshakeRate) {
+                    ForEach(handshakeRateOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Client Mbps", selection: $maxClientMbps) {
+                    ForEach(maxClientMbpsOptions, id: \.self) { value in
+                        Text(value == 0 ? "Unlimited" : "\(value) Mbps").tag(value)
+                    }
+                }
             }
 
             Section {
