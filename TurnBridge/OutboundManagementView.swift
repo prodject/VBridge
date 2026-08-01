@@ -20,6 +20,14 @@ struct OutboundManagementView: View {
     @State private var localLogin = ""
     @State private var localPassword = ""
     @State private var localPort = 1080
+    @State private var warpMTU = 1280
+
+    @State private var otherServerHost = ""
+    @State private var otherServerSSHPort = 22
+    @State private var otherServerUser = "root"
+    @State private var otherServerPassword = ""
+    @State private var otherServerWGPort = 51820
+    @State private var otherServerDNS = "1.1.1.1,1.0.0.1"
 
     private let proxyKinds = ["socks5", "http"]
 
@@ -117,6 +125,14 @@ struct OutboundManagementView: View {
             }
 
             Section(header: Text("Free WARP")) {
+                TextField("Preferred MTU", value: $warpMTU, format: .number)
+                    .keyboardType(.numberPad)
+
+                Button("Install / Restore WARP") {
+                    run(.init(action: "warp_install", mtu: warpMTU))
+                }
+                .disabled(!canConnect || isRunning)
+
                 Button("Check WARP") {
                     run(.init(action: "warp_check"))
                 }
@@ -131,6 +147,11 @@ struct OutboundManagementView: View {
                     run(.init(action: "warp_delete"))
                 }
                 .disabled(!canConnect || isRunning)
+
+                Button("Reset WARP Registration", role: .destructive) {
+                    run(.init(action: "warp_reset"))
+                }
+                .disabled(!canConnect || isRunning)
             }
 
             Section(header: Text("Direct")) {
@@ -141,9 +162,43 @@ struct OutboundManagementView: View {
             }
 
             Section(header: Text("Other Server")) {
-                Text("WireGuard outbound through another server is not yet exposed in iOS. The current bridge covers direct mode, local proxy, external TCP proxy, and existing Free WARP management.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                TextField("Server Host", text: $otherServerHost)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("SSH Port", value: $otherServerSSHPort, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("SSH User", text: $otherServerUser)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                SecureField("SSH Password", text: $otherServerPassword)
+                TextField("WireGuard Port", value: $otherServerWGPort, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("WireGuard DNS", text: $otherServerDNS)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button("Enable Other Server Outbound") {
+                    run(.init(
+                        action: "wireguard_vps_enable",
+                        proxyHost: otherServerHost.trimmingCharacters(in: .whitespacesAndNewlines),
+                        proxyPort: otherServerWGPort,
+                        login: otherServerUser.trimmingCharacters(in: .whitespacesAndNewlines),
+                        secret: otherServerPassword,
+                        sshPort: otherServerSSHPort,
+                        dns: otherServerDNS.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ))
+                }
+                .disabled(!canConnect || isRunning || otherServerHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || otherServerPassword.isEmpty)
+
+                Button("Check Other Server Outbound") {
+                    run(.init(action: "wireguard_vps_check"))
+                }
+                .disabled(!canConnect || isRunning)
+
+                Button("Remove Other Server Outbound", role: .destructive) {
+                    run(.init(action: "wireguard_vps_remove"))
+                }
+                .disabled(!canConnect || isRunning)
             }
 
             if !output.isEmpty {

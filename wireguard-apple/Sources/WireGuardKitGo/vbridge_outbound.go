@@ -6,6 +6,8 @@ package main
 import "C"
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,6 +28,9 @@ type outboundRequest struct {
 	Login     string `json:"login,omitempty"`
 	Secret    string `json:"secret,omitempty"`
 	LocalPort int    `json:"localPort,omitempty"`
+	SSHPort   int    `json:"sshPort,omitempty"`
+	DNS       string `json:"dns,omitempty"`
+	MTU       int    `json:"mtu,omitempty"`
 }
 
 type outboundResponse struct {
@@ -116,8 +121,25 @@ func (r outboundRequest) command() (string, time.Duration, error) {
 		return freeWarpCheckScript(false), 35 * time.Second, nil
 	case "warp_restart":
 		return freeWarpCheckScript(true), 40 * time.Second, nil
+	case "warp_install":
+		mtu := r.MTU
+		if mtu == 0 {
+			mtu = 1280
+		}
+		return freeWarpInstallScript(mtu), 5 * time.Minute, nil
+	case "warp_reset":
+		return resetFreeWarpScript(), 45 * time.Second, nil
 	case "warp_delete":
 		return deleteFreeWarpScript(), 30 * time.Second, nil
+	case "wireguard_vps_enable":
+		if err := validateWireGuardVPS(r); err != nil {
+			return "", 0, err
+		}
+		return wireGuardVPSApplyScript(r), 4 * time.Minute, nil
+	case "wireguard_vps_check":
+		return wireGuardVPSCheckScript(), 30 * time.Second, nil
+	case "wireguard_vps_remove":
+		return wireGuardVPSRemoveScript(), 40 * time.Second, nil
 	case "local_install":
 		if r.Login == "" || r.Secret == "" {
 			return "", 0, fmt.Errorf("local proxy login and password are required")
@@ -164,6 +186,25 @@ func validateExternalProxy(r outboundRequest) error {
 	return nil
 }
 
+func validateWireGuardVPS(r outboundRequest) error {
+	if strings.TrimSpace(r.ProxyHost) == "" {
+		return fmt.Errorf("other server host is empty")
+	}
+	if strings.TrimSpace(r.Login) == "" {
+		return fmt.Errorf("other server user is empty")
+	}
+	if strings.TrimSpace(r.Secret) == "" {
+		return fmt.Errorf("other server SSH password is empty")
+	}
+	if r.SSHPort < 1 || r.SSHPort > 65535 {
+		return fmt.Errorf("other server SSH port must be between 1 and 65535")
+	}
+	if r.ProxyPort < 1 || r.ProxyPort > 65535 {
+		return fmt.Errorf("other server WireGuard port must be between 1 and 65535")
+	}
+	return nil
+}
+
 func successOutboundMessage(action string) string {
 	switch action {
 	case "status":
@@ -180,8 +221,18 @@ func successOutboundMessage(action string) string {
 		return "WARP check completed."
 	case "warp_restart":
 		return "WARP restarted and checked."
+	case "warp_install":
+		return "Free WARP installed or restored."
+	case "warp_reset":
+		return "WARP registration reset."
 	case "warp_delete":
 		return "WARP deleted."
+	case "wireguard_vps_enable":
+		return "Other server outbound enabled."
+	case "wireguard_vps_check":
+		return "Other server outbound check completed."
+	case "wireguard_vps_remove":
+		return "Other server outbound removed."
 	case "local_install":
 		return "Local proxy installed or updated."
 	case "local_check":
@@ -490,6 +541,258 @@ rm -f /usr/local/bin/wgcf /usr/local/bin/wgcf.previous /usr/local/lib/wdtt/warp-
 rm -f /etc/systemd/system/wdtt-warp-watchdog.service /etc/systemd/system/wdtt-warp-watchdog.timer
 systemctl daemon-reload 2>/dev/null || true
 echo "Free WARP removed."
+`
+}
+
+func resetFreeWarpScript() string {
+	return outboundPrelude() + `
+WARP_DIR=/etc/wdtt-plus/warp
+MODE="$(sed -n 's/.*"outboundMode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/wdtt/outbound.json 2>/dev/null | head -n 1)"
+systemctl disable --now wdtt-warp-watchdog.timer wdtt-warp-watchdog.service 2>/dev/null || true
+if [ "$MODE" = "warp_free" ]; then
+  wdtt_clear_external_out
+  wdtt_write_mode "direct" "WARP registration reset"
+fi
+rm -f "$WARP_DIR"/wgcf-account.toml "$WARP_DIR"/wgcf-account.toml.invalid-* \
+  "$WARP_DIR"/wgcf-profile.raw.conf "$WARP_DIR"/wgcf-profile.conf \
+  "$WARP_DIR"/selected.env "$WARP_DIR"/health.env
+chmod 700 "$WARP_DIR" 2>/dev/null || true
+echo "WARP registration reset. Verified wgcf was kept on the server."
+`
+}
+
+func freeWarpInstallScript(mtu int) string {
+	if mtu < 1280 || mtu > 1500 {
+		mtu = 1280
+	}
+	return outboundPrelude() + `
+WARP_MTU=` + strconv.Itoa(mtu) + `
+BACKUP_DIR="/tmp/vbridge-warp-backup-$(date +%s)"
+mkdir -p "$BACKUP_DIR" /etc/wdtt-plus/warp /etc/wdtt-plus/wg-exit /etc/wireguard
+[ -f /etc/wireguard/wg-wdtt-exit.conf ] && cp -f /etc/wireguard/wg-wdtt-exit.conf "$BACKUP_DIR/wg.conf"
+[ -f /etc/wdtt/outbound.json ] && cp -f /etc/wdtt/outbound.json "$BACKUP_DIR/outbound.json"
+trap 'status=$?; if [ $status -ne 0 ]; then wdtt_clear_external_out; [ -f "$BACKUP_DIR/wg.conf" ] && cp -f "$BACKUP_DIR/wg.conf" /etc/wireguard/wg-wdtt-exit.conf || rm -f /etc/wireguard/wg-wdtt-exit.conf; [ -f "$BACKUP_DIR/outbound.json" ] && cp -f "$BACKUP_DIR/outbound.json" /etc/wdtt/outbound.json || rm -f /etc/wdtt/outbound.json; fi; rm -rf "$BACKUP_DIR"' EXIT
+wdtt_install_pkg wireguard-tools curl ca-certificates iptables iproute2 || true
+command -v wg-quick >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_tools_required; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo WDTT_ERROR=warp_download_tools_missing; exit 2; }
+command -v sha256sum >/dev/null 2>&1 || { echo WDTT_ERROR=warp_checksum_tool_missing; exit 2; }
+if [ ! -x /usr/local/bin/wgcf ]; then
+  ARCH="$(uname -m)"
+  case "$ARCH" in
+    x86_64|amd64) WGCF_URL="https://github.com/ViRb3/wgcf/releases/download/v2.2.26/wgcf_2.2.26_linux_amd64"; WGCF_SHA="8d1f3f0cbeb5341d0f0d1342c092fd2a8d0f8cd6fa0dfa50f5e3df7f34131f39" ;;
+    aarch64|arm64) WGCF_URL="https://github.com/ViRb3/wgcf/releases/download/v2.2.26/wgcf_2.2.26_linux_arm64"; WGCF_SHA="" ;;
+    *) echo WDTT_ERROR=warp_unsupported_arch; exit 2 ;;
+  esac
+  TMP_WGCF="$(mktemp)"
+  curl -fsSL --connect-timeout 15 --max-time 180 -o "$TMP_WGCF" "$WGCF_URL" || { echo WDTT_ERROR=warp_wgcf_download_failed; exit 2; }
+  if [ -n "$WGCF_SHA" ]; then
+    [ "$(sha256sum "$TMP_WGCF" | awk '{print $1}')" = "$WGCF_SHA" ] || { echo WDTT_ERROR=warp_wgcf_download_failed; exit 2; }
+  fi
+  install -m 700 "$TMP_WGCF" /usr/local/bin/wgcf
+  rm -f "$TMP_WGCF"
+fi
+WARP_DIR=/etc/wdtt-plus/warp
+ACCOUNT="$WARP_DIR/wgcf-account.toml"
+RAW_PROFILE="$WARP_DIR/wgcf-profile.raw.conf"
+SAFE_PROFILE="$WARP_DIR/wgcf-profile.conf"
+mkdir -p "$WARP_DIR"
+chmod 700 "$WARP_DIR"
+if [ -f "$ACCOUNT" ]; then
+  /usr/local/bin/wgcf --config "$ACCOUNT" status >/dev/null 2>&1 || mv "$ACCOUNT" "$ACCOUNT.invalid-$(date +%s)"
+fi
+if [ ! -f "$ACCOUNT" ]; then
+  /usr/local/bin/wgcf --config "$ACCOUNT" register --accept-tos --name "VBridge" --model "VBridge Server" >/tmp/vbridge-wgcf-register.log 2>&1 || { echo WDTT_ERROR=warp_registration_failed; exit 3; }
+fi
+/usr/local/bin/wgcf --config "$ACCOUNT" generate --profile "$RAW_PROFILE" >/tmp/vbridge-wgcf-generate.log 2>&1 || { echo WDTT_ERROR=warp_profile_generation_failed; exit 3; }
+grep -Eq '^[[:space:]]*Endpoint[[:space:]]*=' "$RAW_PROFILE" || { echo WDTT_ERROR=warp_profile_invalid; exit 3; }
+awk -v mtu="$WARP_MTU" '
+BEGIN { in_interface=0 }
+/^[[:space:]]*\[Interface\][[:space:]]*$/ { print "[Interface]"; print "Table = off"; print "MTU = " mtu; in_interface=1; next }
+/^[[:space:]]*\[/ { in_interface=0; print; next }
+/^[[:space:]]*(Table|MTU|DNS|PreUp|PostUp|PreDown|PostDown)[[:space:]]*=/ { next }
+{ print }
+' "$RAW_PROFILE" >"$SAFE_PROFILE"
+install -m 600 "$SAFE_PROFILE" /etc/wireguard/wg-wdtt-exit.conf
+install -m 600 "$SAFE_PROFILE" /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
+systemctl disable --now wdtt-redsocks 2>/dev/null || true
+wg-quick down wg-wdtt-exit 2>/dev/null || true
+wg-quick up wg-wdtt-exit >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
+while ip rule del from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100 2>/dev/null; do :; done
+ip route flush table "$WDTT_TABLE" 2>/dev/null || true
+ip rule add from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100
+ip route add default dev "$WDTT_WG_IFACE" table "$WDTT_TABLE"
+iptables -t nat -D POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE
+cat >/etc/systemd/system/wdtt-wg-exit.service <<EOF
+[Unit]
+Description=VBridge outbound WireGuard exit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wg-quick up wg-wdtt-exit
+ExecStop=/usr/bin/wg-quick down wg-wdtt-exit
+
+[Install]
+WantedBy=multi-user.target
+EOF
+if [ ! -x /usr/bin/wg-quick ] && [ -x /usr/local/bin/wg-quick ]; then
+  sed -i 's#/usr/bin/wg-quick#/usr/local/bin/wg-quick#g' /etc/systemd/system/wdtt-wg-exit.service
+fi
+systemctl daemon-reload
+systemctl enable wdtt-wg-exit.service >/dev/null 2>&1 || true
+wdtt_write_mode "warp_free" "free Cloudflare WARP"
+TEST_SOURCE="$(wdtt_test_source)"
+[ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
+TRACE="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 25 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+printf '%s\n' "$TRACE" | grep -Eq '^warp=(on|plus)$' || { echo WDTT_ERROR=warp_trace_check_failed; exit 3; }
+mkdir -p "$WARP_DIR"
+printf 'WARP_MTU=%s\n' "$WARP_MTU" >"$WARP_DIR/selected.env"
+chmod 600 "$WARP_DIR/selected.env"
+echo "Free WARP installed and verified."
+`
+}
+
+func randomBase64(n int) string {
+	buf := make([]byte, n)
+	_, _ = rand.Read(buf)
+	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+func wireGuardVPSApplyScript(r outboundRequest) string {
+	tx := randomBase64(9)
+	foreignHost := shellQuoteDeploy(r.ProxyHost)
+	foreignUser := shellQuoteDeploy(r.Login)
+	foreignPass := shellQuoteDeploy(r.Secret)
+	foreignSSHPort := strconv.Itoa(r.SSHPort)
+	wgPort := strconv.Itoa(r.ProxyPort)
+	dns := shellQuoteDeploy(strings.TrimSpace(r.DNS))
+	return outboundPrelude() + `
+TX=` + shellQuoteDeploy(tx) + `
+FOREIGN_HOST=` + foreignHost + `
+FOREIGN_USER=` + foreignUser + `
+FOREIGN_PASS=` + foreignPass + `
+FOREIGN_SSH_PORT=` + foreignSSHPort + `
+WG_PORT=` + wgPort + `
+WG_DNS=` + dns + `
+CUR_BACKUP="/tmp/vbridge-wg-cur-${TX}"
+mkdir -p "$CUR_BACKUP" /etc/wdtt-plus/wg-exit /etc/wireguard
+[ -f /etc/wireguard/wg-wdtt-exit.conf ] && cp -f /etc/wireguard/wg-wdtt-exit.conf "$CUR_BACKUP/wg.conf"
+[ -f /etc/wdtt/outbound.json ] && cp -f /etc/wdtt/outbound.json "$CUR_BACKUP/outbound.json"
+rollback_current() {
+  wdtt_clear_external_out
+  [ -f "$CUR_BACKUP/wg.conf" ] && cp -f "$CUR_BACKUP/wg.conf" /etc/wireguard/wg-wdtt-exit.conf || rm -f /etc/wireguard/wg-wdtt-exit.conf
+  [ -f "$CUR_BACKUP/outbound.json" ] && cp -f "$CUR_BACKUP/outbound.json" /etc/wdtt/outbound.json || rm -f /etc/wdtt/outbound.json
+}
+trap 'status=$?; if [ $status -ne 0 ]; then rollback_current; fi; rm -rf "$CUR_BACKUP"' EXIT
+wdtt_install_pkg wireguard-tools iptables iproute2 openssh-client || true
+sshpass -V >/dev/null 2>&1 || wdtt_install_pkg sshpass || true
+command -v sshpass >/dev/null 2>&1 || { echo WDTT_ERROR=sshpass_required; exit 2; }
+umask 077
+mkdir -p /etc/wdtt-plus/wg-exit
+wg genkey | tee /etc/wdtt-plus/wg-exit/private.key | wg pubkey >/etc/wdtt-plus/wg-exit/public.key
+CUR_PUB="$(cat /etc/wdtt-plus/wg-exit/public.key)"
+FOREIGN_SCRIPT=$(cat <<'EOS'
+set -e
+WG_PORT="$1"
+CLIENT_PUB="$2"
+mkdir -p /etc/wireguard /tmp/vbridge-foreign
+apt-get update -y >/dev/null 2>&1 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard-tools iptables >/dev/null 2>&1 || true
+[ -f /etc/wireguard/wg-wdtt-exit.conf ] && cp -f /etc/wireguard/wg-wdtt-exit.conf /tmp/vbridge-foreign/wg.conf || true
+[ -f /etc/sysctl.d/99-vbridge-exit-forward.conf ] && cp -f /etc/sysctl.d/99-vbridge-exit-forward.conf /tmp/vbridge-foreign/sysctl.conf || true
+PRIV="$(wg genkey)"
+PUB="$(printf '%s' "$PRIV" | wg pubkey)"
+cat >/etc/wireguard/wg-wdtt-exit.conf <<EOF
+[Interface]
+Address = 10.77.77.1/30
+ListenPort = $WG_PORT
+PrivateKey = $PRIV
+
+[Peer]
+PublicKey = $CLIENT_PUB
+AllowedIPs = 10.77.77.2/32,10.66.66.0/24
+PersistentKeepalive = 25
+EOF
+printf 'net.ipv4.ip_forward=1\n' >/etc/sysctl.d/99-vbridge-exit-forward.conf
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+EXT_IF="$(ip -o route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i==\"dev\") {print $(i+1); exit}}')"
+[ -n "$EXT_IF" ] || EXT_IF="eth0"
+iptables -t nat -D POSTROUTING -s 10.66.66.0/24 -o "$EXT_IF" -m comment --comment WDTT_EXIT_FOREIGN -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o "$EXT_IF" -m comment --comment WDTT_EXIT_FOREIGN -j MASQUERADE
+wg-quick down wg-wdtt-exit 2>/dev/null || true
+wg-quick up wg-wdtt-exit >/dev/null 2>&1
+echo "FOREIGN_PUB=$PUB"
+EOS
+)
+FOREIGN_OUT="$(sshpass -p "$FOREIGN_PASS" ssh -o StrictHostKeyChecking=no -p "$FOREIGN_SSH_PORT" "$FOREIGN_USER@$FOREIGN_HOST" "bash -s -- '$WG_PORT' '$CUR_PUB'" <<<"$FOREIGN_SCRIPT" 2>&1)" || { echo "$FOREIGN_OUT"; echo WDTT_ERROR=wireguard_vps_foreign_setup_failed; exit 3; }
+FOREIGN_PUB="$(printf '%s\n' "$FOREIGN_OUT" | sed -n 's/^FOREIGN_PUB=//p' | tail -n 1)"
+[ -n "$FOREIGN_PUB" ] || { echo "$FOREIGN_OUT"; echo WDTT_ERROR=wireguard_vps_foreign_setup_failed; exit 3; }
+cat >/etc/wireguard/wg-wdtt-exit.conf <<EOF
+[Interface]
+Address = 10.77.77.2/30
+PrivateKey = $(cat /etc/wdtt-plus/wg-exit/private.key)
+DNS = $(printf '%s' "$WG_DNS" | tr ',' ' ')
+Table = off
+
+[Peer]
+PublicKey = $FOREIGN_PUB
+Endpoint = $FOREIGN_HOST:$WG_PORT
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOF
+install -m 600 /etc/wireguard/wg-wdtt-exit.conf /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
+wg-quick down wg-wdtt-exit 2>/dev/null || true
+wg-quick up wg-wdtt-exit >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
+while ip rule del from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100 2>/dev/null; do :; done
+ip route flush table "$WDTT_TABLE" 2>/dev/null || true
+ip rule add from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100
+ip route add default dev "$WDTT_WG_IFACE" table "$WDTT_TABLE"
+iptables -t nat -D POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE
+wdtt_write_mode "wireguard_vps" "other server $FOREIGN_HOST:$WG_PORT"
+cat >/etc/wdtt/outbound-profile.env <<EOF
+WG_VPS_HOST_B64=$(printf '%s' "$FOREIGN_HOST" | base64 | tr -d '\n')
+WG_VPS_SSH_PORT=$FOREIGN_SSH_PORT
+WG_VPS_USER_B64=$(printf '%s' "$FOREIGN_USER" | base64 | tr -d '\n')
+WG_VPS_PASSWORD_B64=$(printf '%s' "$FOREIGN_PASS" | base64 | tr -d '\n')
+WG_VPS_PORT=$WG_PORT
+WG_VPS_DNS_B64=$(printf '%s' "$WG_DNS" | base64 | tr -d '\n')
+UPDATED_AT=$(date -Is)
+EOF
+echo "Other server WireGuard outbound enabled."
+`
+}
+
+func wireGuardVPSCheckScript() string {
+	return outboundPrelude() + `
+MODE="$(sed -n 's/.*"outboundMode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/wdtt/outbound.json 2>/dev/null | head -n 1)"
+[ "$MODE" = "wireguard_vps" ] || { echo WDTT_ERROR=wireguard_vps_not_active; exit 3; }
+wg show "$WDTT_WG_IFACE" >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
+TEST_SOURCE="$(wdtt_test_source)"
+[ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
+EXIT_IP="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 20 https://api.ipify.org 2>/dev/null || true)"
+echo "Other server outbound is active."
+[ -n "$EXIT_IP" ] && echo "Exit IP: $EXIT_IP"
+`
+}
+
+func wireGuardVPSRemoveScript() string {
+	return outboundPrelude() + `
+if [ -f /etc/wdtt/outbound-profile.env ]; then
+  tmp_profile=/etc/wdtt/outbound-profile.env.tmp
+  grep -v '^WG_VPS_' /etc/wdtt/outbound-profile.env >"$tmp_profile" 2>/dev/null || true
+  mv "$tmp_profile" /etc/wdtt/outbound-profile.env
+fi
+MODE="$(sed -n 's/.*"outboundMode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/wdtt/outbound.json 2>/dev/null | head -n 1)"
+if [ "$MODE" = "wireguard_vps" ]; then
+  wdtt_clear_external_out
+  rm -f /etc/wireguard/wg-wdtt-exit.conf /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
+  wdtt_write_mode "direct" "direct outbound"
+fi
+echo "Other server outbound removed."
 `
 }
 

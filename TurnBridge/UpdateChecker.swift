@@ -66,8 +66,8 @@ enum UpdateChecker {
 #endif
     }
 
-    private static func latestRelease(from releases: [GitHubRelease]) -> (version: Version, url: URL, asset: GitHubAsset)? {
-        var best: (version: Version, url: URL, asset: GitHubAsset)?
+    private static func latestRelease(from releases: [GitHubRelease]) -> (version: AppVersion, url: URL, asset: GitHubAsset)? {
+        var best: (version: AppVersion, url: URL, asset: GitHubAsset)?
 
         for release in releases where !release.draft {
             guard let url = URL(string: release.htmlURL) else { continue }
@@ -90,7 +90,7 @@ enum UpdateChecker {
         return best
     }
 
-    private static func parseVersion(_ raw: String) -> Version? {
+    private static func parseVersion(_ raw: String) -> AppVersion? {
         let pattern = "\\d+(?:\\.\\d+)+"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
@@ -101,7 +101,7 @@ enum UpdateChecker {
         let text = String(raw[swiftRange])
         let parts = text.split(separator: ".").compactMap { Int($0) }
         guard !parts.isEmpty else { return nil }
-        return Version(parts: parts)
+        return AppVersion(parts: parts)
     }
 }
 
@@ -132,11 +132,11 @@ private struct GitHubAsset: Decodable, Equatable {
     }
 }
 
-private struct Version: Comparable {
+private struct AppVersion: Comparable {
     let parts: [Int]
     var display: String { parts.map(String.init).joined(separator: ".") }
 
-    static func < (lhs: Version, rhs: Version) -> Bool {
+    static func < (lhs: AppVersion, rhs: AppVersion) -> Bool {
         let maxCount = max(lhs.parts.count, rhs.parts.count)
         for idx in 0..<maxCount {
             let left = idx < lhs.parts.count ? lhs.parts[idx] : 0
