@@ -2476,13 +2476,14 @@ struct ContentView: View {
     }
 
     private func profile(fromWDTT config: WDTTConfigImport, fallbackName: String) -> VPNProfile {
+        let resolvedWorkers = config.maxWorkers.flatMap { $0 > 0 ? $0 : nil } ?? 30
         VPNProfile(
-            name: fallbackName,
+            name: config.profileName?.isEmpty == false ? config.profileName! : fallbackName,
             transportMode: .wdtt,
             vkLink: config.vkLink,
             peerAddr: config.peerAddr,
             listenAddr: "127.0.0.1:\(config.localPort)",
-            nValue: 30,
+            nValue: resolvedWorkers,
             credsGroupSize: 12,
             wgQuickConfig: "",
             turnHost: "",

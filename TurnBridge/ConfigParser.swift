@@ -35,6 +35,8 @@ struct WDTTConfigImport {
     let localPort: String
     let password: String
     let hashes: [String]
+    let profileName: String?
+    let maxWorkers: Int?
 
     var peerAddr: String {
         "\(host):\(serverPort)"
@@ -97,6 +99,7 @@ struct ConfigParser {
     static let deploySettingsScheme = "vbridge://server/"
     static let legacySchemes = ["turnbridge://"]
     static let wdttScheme = "wdtt://"
+    static let wdttConnectPrefix = "wdtt://connect?"
 
     static func exportDeploySettings(_ settings: DeploySettingsLink) throws -> String {
         let data = try JSONEncoder().encode(settings)
@@ -237,31 +240,93 @@ struct ConfigParser {
             throw ConfigParseError.invalidScheme
         }
 
-        let payload = String(trimmed.dropFirst(wdttScheme.count))
+        if trimmed.lowercased().hasPrefix(wdttConnectPrefix) {
+            return try parseModernWDTT(trimmed)
+        }
+        return try parseLegacyWDTT(trimmed)
+    }
+
+    private static func parseLegacyWDTT(_ value: String) throws -> WDTTConfigImport {
+        let payload = String(value.dropFirst(wdttScheme.count))
         let parts = payload.split(separator: ":", maxSplits: 5).map(String.init)
         guard parts.count == 6 else {
             throw ConfigParseError.invalidWDTTLink("Expected host:dtlsPort:wgPort:localPeerPort:password:hash[,hash].")
         }
 
-        let host = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        let serverPort = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        let configPort = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
-        let localPort = parts[3].trimmingCharacters(in: .whitespacesAndNewlines)
-        let password = parts[4].trimmingCharacters(in: .whitespacesAndNewlines)
-        let hashes = parts[5]
+        return try makeWDTTConfig(
+            host: parts[0],
+            serverPort: parts[1],
+            configPort: parts[2],
+            localPort: parts[3],
+            password: parts[4],
+            hashesValue: parts[5],
+            profileName: nil,
+            maxWorkers: nil
+        )
+    }
+
+    private static func parseModernWDTT(_ value: String) throws -> WDTTConfigImport {
+        guard let components = URLComponents(string: value) else {
+            throw ConfigParseError.invalidWDTTLink("Invalid wdtt://connect URL.")
+        }
+        let queryItems = components.queryItems ?? []
+        let queryMap = Dictionary(uniqueKeysWithValues: queryItems.map { ($0.name.lowercased(), $0.value ?? "") })
+
+        if let version = queryMap["v"], !version.isEmpty, version != "1" {
+            throw ConfigParseError.invalidWDTTLink("Unsupported wdtt://connect version: \(version).")
+        }
+
+        let maxWorkers: Int?
+        if let rawWorkers = queryMap["max_workers"]?.trimmingCharacters(in: .whitespacesAndNewlines), !rawWorkers.isEmpty {
+            guard let parsedWorkers = Int(rawWorkers), parsedWorkers >= 4, parsedWorkers <= 128 else {
+                throw ConfigParseError.invalidWDTTLink("Invalid max_workers value: \(rawWorkers).")
+            }
+            maxWorkers = parsedWorkers
+        } else {
+            maxWorkers = nil
+        }
+
+        return try makeWDTTConfig(
+            host: queryMap["host"] ?? "",
+            serverPort: queryMap["dtls"] ?? "",
+            configPort: queryMap["wg"] ?? "",
+            localPort: queryMap["local"] ?? "",
+            password: queryMap["password"] ?? "",
+            hashesValue: queryMap["hashes"] ?? "",
+            profileName: queryMap["name"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            maxWorkers: maxWorkers
+        )
+    }
+
+    private static func makeWDTTConfig(
+        host: String,
+        serverPort: String,
+        configPort: String,
+        localPort: String,
+        password: String,
+        hashesValue: String,
+        profileName: String?,
+        maxWorkers: Int?
+    ) throws -> WDTTConfigImport {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedServerPort = serverPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedConfigPort = configPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLocalPort = localPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hashes = hashesValue
             .split(separator: ",", omittingEmptySubsequences: false)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        guard !host.isEmpty else {
+        guard !trimmedHost.isEmpty else {
             throw ConfigParseError.invalidWDTTLink("Host is empty.")
         }
-        for port in [serverPort, configPort, localPort] {
+        for port in [trimmedServerPort, trimmedConfigPort, trimmedLocalPort] {
             guard let value = Int(port), (1...65535).contains(value) else {
                 throw ConfigParseError.invalidWDTTLink("Invalid port: \(port).")
             }
         }
-        guard !password.isEmpty else {
+        guard !trimmedPassword.isEmpty else {
             throw ConfigParseError.invalidWDTTLink("Password is empty.")
         }
         guard !hashes.isEmpty else {
@@ -269,12 +334,14 @@ struct ConfigParser {
         }
 
         return WDTTConfigImport(
-            host: host,
-            serverPort: serverPort,
-            configPort: configPort,
-            localPort: localPort,
-            password: password,
-            hashes: hashes
+            host: trimmedHost,
+            serverPort: trimmedServerPort,
+            configPort: trimmedConfigPort,
+            localPort: trimmedLocalPort,
+            password: trimmedPassword,
+            hashes: hashes,
+            profileName: profileName?.isEmpty == false ? profileName : nil,
+            maxWorkers: maxWorkers
         )
     }
 }
