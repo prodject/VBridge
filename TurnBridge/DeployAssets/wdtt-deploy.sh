@@ -1,25 +1,31 @@
 #!/bin/bash
 # ==============================================================================
-#  WDTT VPN Server — Универсальный установщик для VPS
-#  Source: https://github.com/amurcanov/proxy-turn-vk-android
-#  Imported commit: c01fadd7d810cfb9d53598005f900674449a928e
+#  WDTT Plus Server — Универсальный установщик для VPS
 #  Поддержка: Debian 11+, Ubuntu 20.04+, CentOS/RHEL/Fedora/AlmaLinux/Rocky
-#  Версия: 3.2  |  Дата: 2026-05-13
+#  Версия: 3.5  |  Дата: 2026-07-30
 #  NAT:  MASQUERADE через iptables
 #  WG:   порт 56001 (не конфликтует с существующим WG на 51820)
 #  DTLS: порт 56000
 # ==============================================================================
 set -uo pipefail
 
-readonly SCRIPT_VERSION="3.2"
+readonly SCRIPT_VERSION="3.5"
 readonly LOG_FILE="/var/log/wdtt-install.log"
 readonly WG_PORT="${WDTT_WG_PORT:-56001}"
 readonly DTLS_PORT="${WDTT_DTLS_PORT:-56000}"
 readonly SSH_PORT="${WDTT_SSH_PORT:-22}"
+readonly MAX_PASSWORDS="${WDTT_MAX_PASSWORDS:-50}"
+readonly MAX_WORKERS_PER_ACCESS="${WDTT_MAX_WORKERS_PER_ACCESS:-0}"
+readonly MAX_HANDSHAKES="${WDTT_MAX_HANDSHAKES:-32}"
+readonly HANDSHAKE_RATE="${WDTT_HANDSHAKE_RATE:-24}"
+readonly MAX_CLIENT_MBPS="${WDTT_MAX_CLIENT_MBPS:-0}"
+readonly WG_BACKEND="${WDTT_WG_BACKEND:-auto}"
 readonly WDTT_ARGS="${WDTT_ARGS:-}"
+readonly WDTT_PRESERVE_DATA="${WDTT_PRESERVE_DATA:-0}"
 readonly WDTT_IFACE="wdtt0"
 readonly WDTT_CONFIG_DIR="/etc/wdtt"
 readonly WDTT_ACCESS_DB="passwords.json"
+readonly WDTT_WG_KEYS="wg-keys.dat"
 readonly IPT_COMMENT="WDTT_MANAGED"
 readonly IPT_MIRROR_COMMENT="WDTT_MIRRORED"
 
@@ -31,6 +37,33 @@ validate_port() {
     if [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
         die "$name должен быть в диапазоне 1..65535, получено: $value"
     fi
+}
+
+validate_runtime_limits() {
+    for item in \
+        "WDTT_MAX_PASSWORDS:$MAX_PASSWORDS" \
+        "WDTT_MAX_HANDSHAKES:$MAX_HANDSHAKES"; do
+        local name="${item%%:*}" value="${item#*:}"
+        case "$value" in
+            ''|*[!0-9]*) die "$name должен быть положительным целым числом" ;;
+        esac
+        [ "$value" -ge 1 ] || die "$name должен быть не меньше 1"
+    done
+    case "$MAX_WORKERS_PER_ACCESS" in
+        ''|*[!0-9]*) die "WDTT_MAX_WORKERS_PER_ACCESS должен быть целым числом" ;;
+    esac
+    for item in \
+        "WDTT_HANDSHAKE_RATE:$HANDSHAKE_RATE" \
+        "WDTT_MAX_CLIENT_MBPS:$MAX_CLIENT_MBPS"; do
+        local name="${item%%:*}" value="${item#*:}"
+        case "$value" in
+            ''|*[!0-9.]*) die "$name должен быть неотрицательным числом" ;;
+        esac
+    done
+    case "$WG_BACKEND" in
+        auto|kernel|userspace) ;;
+        *) die "WDTT_WG_BACKEND должен быть auto, kernel или userspace" ;;
+    esac
 }
 
 # ─── Цвета ───────────────────────────────────────────────────────────────────
@@ -112,16 +145,22 @@ install_prerequisites() {
 
     case "$PKG_MGR" in
         apt)
-            pkg_install ca-certificates iproute2 iptables nftables procps psmisc jq || \
+            pkg_install ca-certificates iproute2 iptables nftables procps psmisc || \
                 log_warn "Часть apt-пакетов не установилась, продолжаю с доступными утилитами"
+            pkg_install wireguard-tools || \
+                log_warn "wireguard-tools не установлен; будет использован userspace WireGuard"
             ;;
         dnf|yum)
-            pkg_install ca-certificates iproute iptables nftables procps-ng psmisc jq || \
+            pkg_install ca-certificates iproute iptables nftables procps-ng psmisc || \
                 log_warn "Часть rpm-пакетов не установилась, продолжаю с доступными утилитами"
+            pkg_install wireguard-tools || \
+                log_warn "wireguard-tools не установлен; будет использован userspace WireGuard"
             ;;
         pacman)
-            pkg_install ca-certificates iproute2 iptables nftables procps-ng psmisc jq || \
+            pkg_install ca-certificates iproute2 iptables nftables procps-ng psmisc || \
                 log_warn "Часть pacman-пакетов не установилась, продолжаю с доступными утилитами"
+            pkg_install wireguard-tools || \
+                log_warn "wireguard-tools не установлен; будет использован userspace WireGuard"
             ;;
     esac
 }
@@ -329,18 +368,19 @@ fw_cleanup_wdtt_rules() {
 
 cleanup_config_dir_keep_access_db() {
     [ -d "$WDTT_CONFIG_DIR" ] || return 0
-    find "$WDTT_CONFIG_DIR" -mindepth 1 -maxdepth 1 ! -name "$WDTT_ACCESS_DB" -exec rm -rf {} + 2>/dev/null || true
+    find "$WDTT_CONFIG_DIR" -mindepth 1 -maxdepth 1 ! -name "$WDTT_ACCESS_DB" ! -name "$WDTT_WG_KEYS" -exec rm -rf {} + 2>/dev/null || true
     [ -f "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" 2>/dev/null || true
+    [ -f "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" 2>/dev/null || true
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  WDTT VPN SERVER DEPLOYMENT
+#  WDTT PLUS SERVER DEPLOYMENT
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ─── Очистка старого WDTT ─────────────────────────────────────────────────────
 wdtt_cleanup() {
     prog 0.05 "Очистка..."
-    echo "🧹 Очистка старой установки WDTT..."
+    echo "🧹 Очистка старой установки WDTT Plus..."
 
     systemctl unmask wdtt 2>/dev/null || true
     systemctl stop wdtt 2>/dev/null || true
@@ -355,8 +395,14 @@ wdtt_cleanup() {
     # Удаляем старые правила NAT для WDTT подсети
     fw_cleanup_wdtt_rules "$(detect_wan_interface)"
 
-    rm -f /usr/local/bin/wdtt-server 2>/dev/null || true
-    cleanup_config_dir_keep_access_db
+    if [ "$WDTT_PRESERVE_DATA" = "1" ]; then
+        [ -f "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" 2>/dev/null || true
+        [ -f "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" 2>/dev/null || true
+        echo "✓ Режим обновления: конфигурация и данные сохранены"
+    else
+        rm -f /usr/local/bin/wdtt-server 2>/dev/null || true
+        cleanup_config_dir_keep_access_db
+    fi
 
     echo "✓ Очистка завершена (база доступа сохранена)"
 }
@@ -370,7 +416,21 @@ setup_sysctl() {
     mkdir -p /etc/sysctl.d
     cat > /etc/sysctl.d/99-wdtt.conf << 'SYSEOF'
 net.ipv4.ip_forward = 1
+net.core.default_qdisc = fq
+net.core.rmem_max = 25165824
+net.core.wmem_max = 25165824
+net.core.rmem_default = 4194304
+net.core.wmem_default = 4194304
+net.core.netdev_max_backlog = 16384
+net.ipv4.udp_rmem_min = 262144
+net.ipv4.udp_wmem_min = 262144
+net.ipv4.tcp_rmem = 4096 87380 25165824
+net.ipv4.tcp_wmem = 4096 65536 25165824
 SYSEOF
+
+    if sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+        echo 'net.ipv4.tcp_congestion_control = bbr' >> /etc/sysctl.d/99-wdtt.conf
+    fi
 
     sysctl -p /etc/sysctl.d/99-wdtt.conf >/dev/null 2>&1 || true
 
@@ -403,7 +463,7 @@ setup_nat_and_firewall() {
 
     # === NAT: MASQUERADE для подсети WireGuard ===
     fw_add_masquerade "$iface" "10.66.66.0/24"
-
+    
     # === MSS Clamping для исправления MTU (DonationAlerts / Cloudflare) ===
     fw_add_mss_clamping "10.66.66.0/24"
 
@@ -423,7 +483,10 @@ setup_wdtt_binary() {
 
     if [ -f /tmp/wdtt-server ]; then
         chmod +x /tmp/wdtt-server
-        install -m 0755 /tmp/wdtt-server /usr/local/bin/wdtt-server 2>/dev/null || mv /tmp/wdtt-server /usr/local/bin/wdtt-server
+        rm -f /usr/local/bin/.wdtt-server.new
+        install -m 0755 /tmp/wdtt-server /usr/local/bin/.wdtt-server.new || die "Не удалось подготовить новый wdtt-server"
+        mv -f /usr/local/bin/.wdtt-server.new /usr/local/bin/wdtt-server || die "Не удалось атомарно заменить wdtt-server"
+        rm -f /tmp/wdtt-server
         echo "✓ wdtt-server установлен"
     elif [ -f /usr/local/bin/wdtt-server ]; then
         echo "✓ wdtt-server уже установлен"
@@ -438,11 +501,11 @@ setup_wdtt_binary() {
 # ─── Systemd-сервис WDTT ─────────────────────────────────────────────────────
 setup_wdtt_service() {
     prog 0.75 "Сервис..."
-    echo "🔧 Создание systemd-сервиса WDTT..."
+    echo "🔧 Создание systemd-сервиса WDTT Plus..."
 
     cat > /etc/systemd/system/wdtt.service << WDTTSVC
 [Unit]
-Description=WDTT VPN Server
+Description=WDTT Plus Server
 After=network.target network-online.target
 Wants=network-online.target
 
@@ -450,7 +513,7 @@ Wants=network-online.target
 Type=simple
 ExecStartPre=-/usr/bin/env bash -c "ip link show ${WDTT_IFACE} >/dev/null 2>&1 && ip link del ${WDTT_IFACE} 2>/dev/null || true"
 ExecStartPre=-/usr/bin/env bash -c "if command -v iptables >/dev/null 2>&1; then iptables -C INPUT -p udp --dport ${DTLS_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport ${DTLS_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT; iptables -C INPUT -p udp --dport ${WG_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport ${WG_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT; iptables -C INPUT -p tcp --dport ${SSH_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport ${SSH_PORT} -m comment --comment ${IPT_COMMENT} -j ACCEPT; fi"
-ExecStart=/usr/local/bin/wdtt-server -listen 0.0.0.0:${DTLS_PORT} -wg-port ${WG_PORT} -config-dir ${WDTT_CONFIG_DIR} ${WDTT_ARGS}
+ExecStart=/usr/local/bin/wdtt-server -listen 0.0.0.0:${DTLS_PORT} -wg-port ${WG_PORT} -config-dir ${WDTT_CONFIG_DIR} -max-passwords ${MAX_PASSWORDS} -max-workers-per-access ${MAX_WORKERS_PER_ACCESS} -max-handshakes ${MAX_HANDSHAKES} -handshake-rate ${HANDSHAKE_RATE} -max-client-mbps ${MAX_CLIENT_MBPS} -wg-backend ${WG_BACKEND} ${WDTT_ARGS}
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
@@ -468,7 +531,7 @@ WDTTSVC
 # ─── Запуск WDTT ─────────────────────────────────────────────────────────────
 start_wdtt() {
     prog 0.90 "Запуск..."
-    echo "🚀 Запуск WDTT VPN Server..."
+    echo "🚀 Запуск WDTT Plus Server..."
 
     if [ ! -f /usr/local/bin/wdtt-server ]; then
         echo "⚠ wdtt-server не установлен — запуск пропущен"
@@ -481,7 +544,7 @@ start_wdtt() {
     local status
     status=$(systemctl is-active wdtt 2>/dev/null || echo "unknown")
 
-    prog 1.0 "Готово!"
+    prog 0.95 "Сервер запущен, выполняю итоговую проверку…"
 
     echo ""
     echo "══════════════════════════════════════════════════════════════"
@@ -506,7 +569,7 @@ start_wdtt() {
 
 # ─── Команда: uninstall ──────────────────────────────────────────────────────
 do_uninstall() {
-    log_step "Удаление WDTT..."
+    log_step "Удаление WDTT Plus..."
 
     systemctl stop wdtt 2>/dev/null || true
     systemctl disable wdtt 2>/dev/null || true
@@ -523,12 +586,12 @@ do_uninstall() {
     rm -f /etc/sysctl.d/99-wdtt.conf
     sysctl --system >/dev/null 2>&1 || true
 
-    log_info "WDTT удалён. База доступа сохранена: ${WDTT_CONFIG_DIR}/${WDTT_ACCESS_DB}"
+    log_info "WDTT Plus удалён. База доступа сохранена: ${WDTT_CONFIG_DIR}/${WDTT_ACCESS_DB}"
 }
 
 # ─── Команда: status ─────────────────────────────────────────────────────────
 do_status() {
-    echo "Статус WDTT:"
+    echo "Статус WDTT Plus:"
     echo ""
     if systemctl is-active wdtt &>/dev/null; then
         log_info "Сервис: АКТИВЕН"
@@ -541,9 +604,9 @@ do_status() {
         log_warn "Бинарник: НЕ найден"
     fi
     if ip link show "$WDTT_IFACE" &>/dev/null; then
-        log_info "WDTT интерфейс ($WDTT_IFACE): активен"
+        log_info "VPN-интерфейс ($WDTT_IFACE): активен"
     else
-        log_warn "WDTT интерфейс ($WDTT_IFACE): не активен"
+        log_warn "VPN-интерфейс ($WDTT_IFACE): не активен"
     fi
 }
 
@@ -552,7 +615,7 @@ do_status() {
 # ══════════════════════════════════════════════════════════════════════════════
 main() {
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║       WDTT VPN Server — Installer v${SCRIPT_VERSION}                    ║"
+    echo "║       WDTT Plus Server — Installer v${SCRIPT_VERSION}                    ║"
     echo "║       DTLS: ${DTLS_PORT}  |  WG: ${WG_PORT}  |  SSH: ${SSH_PORT}       ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
 
@@ -561,9 +624,10 @@ main() {
     validate_port "WDTT_DTLS_PORT" "$DTLS_PORT"
     validate_port "WDTT_WG_PORT" "$WG_PORT"
     validate_port "WDTT_SSH_PORT" "$SSH_PORT"
+    validate_runtime_limits
 
     mkdir -p "$(dirname "$LOG_FILE")"
-    echo "=== WDTT Installer v${SCRIPT_VERSION} — $(date) ===" >> "$LOG_FILE"
+    echo "=== WDTT Plus Installer v${SCRIPT_VERSION} — $(date) ===" >> "$LOG_FILE"
 
     detect_os
     install_prerequisites
