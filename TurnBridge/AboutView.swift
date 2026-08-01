@@ -124,6 +124,24 @@ struct AboutView: View {
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(12)
                     }
+
+                    Link(destination: URL(string: "https://github.com/Ivan4537/WDTT-Plus")!) {
+                        HStack {
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.system(size: 18))
+                                .frame(width: 30)
+                            Text("Ivan4537 / WDTT-Plus")
+                                .font(.system(size: 15, weight: .medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding()
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
                 }
                 .padding(.horizontal, 40)
             }
