@@ -33,7 +33,25 @@ type serverAdminResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	Output  string `json:"output,omitempty"`
-	State   *adminResponse `json:"state,omitempty"`
+	State   *serverAdminState `json:"state,omitempty"`
+}
+
+type serverAdminState struct {
+	OK        bool                      `json:"ok"`
+	Message   string                    `json:"message,omitempty"`
+	Passwords []serverAdminPasswordInfo `json:"passwords,omitempty"`
+}
+
+type serverAdminPasswordInfo struct {
+	Password  string `json:"password"`
+	Label     string `json:"label,omitempty"`
+	VKHash    string `json:"vk_hash,omitempty"`
+	Ports     string `json:"ports,omitempty"`
+	Status    string `json:"status,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+	DownBytes int64  `json:"down_bytes,omitempty"`
+	UpBytes   int64  `json:"up_bytes,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
 }
 
 //export VBridgeWGServerAdmin
@@ -100,7 +118,7 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server admin failed: " + cmdErr.Error(), Output: text}
 	}
 
-	var state adminResponse
+	var state serverAdminState
 	if err := json.Unmarshal([]byte(text), &state); err != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server returned invalid admin JSON", Output: text}
 	}
@@ -187,13 +205,6 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 	default:
 		return nil, fmt.Errorf("unsupported server admin action %q", r.Action)
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func maxInt(a, b int) int {
