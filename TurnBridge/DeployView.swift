@@ -1,15 +1,19 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 import WireGuardKitGo
 
 private enum DeployAction: String, Sendable {
     case install
+    case updatePreserve = "update_preserve"
     case reinstall
     case uninstall
     case status
     case exportLogs = "export_logs"
     case cleanupDevices = "cleanup_devices"
+    case exportState = "export_state"
+    case importState = "import_state"
 }
 
 private struct DeployRequest: Encodable, Sendable {
@@ -27,6 +31,7 @@ private struct DeployRequest: Encodable, Sendable {
     var wgPort: Int
     var dns1: String
     var dns2: String
+    var stateArchiveBase64: String
 }
 
 private struct DeployResponse: Decodable, Sendable {
@@ -72,8 +77,10 @@ struct DeployView: View {
     @State private var showCleanupConfirmation = false
     @State private var showExportConfirmation = false
     @State private var showReinstallConfirmation = false
+    @State private var showImportStatePicker = false
     @State private var exportedLogsURL: URL?
     @State private var shareLogsURL: URL?
+    @State private var shareStateURL: URL?
     @State private var isCheckingServerStatus = false
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
@@ -264,9 +271,30 @@ struct DeployView: View {
                 .disabled(!canConnect)
 
                 Button {
+                    run(.exportState)
+                } label: {
+                    Label(isRunning && currentAction == .exportState ? "Exporting State..." : "Export Server State", systemImage: "externaldrive.badge.arrow.up")
+                }
+                .disabled(!canConnect)
+
+                Button {
+                    showImportStatePicker = true
+                } label: {
+                    Label(isRunning && currentAction == .importState ? "Importing State..." : "Import Server State", systemImage: "externaldrive.badge.arrow.down")
+                }
+                .disabled(!canConnect)
+
+                Button {
                     run(.install)
                 } label: {
                     Label(isRunning && currentAction == .install ? "Installing..." : "Install", systemImage: "icloud.and.arrow.up")
+                }
+                .disabled(!canInstall)
+
+                Button {
+                    run(.updatePreserve)
+                } label: {
+                    Label(isRunning && currentAction == .updatePreserve ? "Updating..." : "Update With Preserve", systemImage: "arrow.clockwise.circle")
                 }
                 .disabled(!canInstall)
 
@@ -383,6 +411,30 @@ struct DeployView: View {
                 ActivityView(items: [url])
             }
         }
+        .sheet(isPresented: Binding(
+            get: { shareStateURL != nil },
+            set: { isPresented in
+                if !isPresented {
+                    shareStateURL = nil
+                }
+            }
+        )) {
+            if let url = shareStateURL {
+                ActivityView(items: [url])
+            }
+        }
+        .sheet(isPresented: $showImportStatePicker) {
+            DocumentPicker(
+                contentTypes: [.json, .plainText, .text],
+                onPick: { url in
+                    showImportStatePicker = false
+                    importServerState(from: url)
+                },
+                onCancel: {
+                    showImportStatePicker = false
+                }
+            )
+        }
         .sheet(isPresented: $showCreateClientSheet) {
             NavigationStack {
                 Form {
@@ -484,6 +536,10 @@ struct DeployView: View {
                    let url = writeExportedLogsFile(contents: response.output) {
                     exportedLogsURL = url
                     shareLogsURL = url
+                }
+                if action == .exportState, response.ok,
+                   let url = writeExportedStateFile(contents: response.output) {
+                    shareStateURL = url
                 }
                 resultTitle = response.ok ? "Deploy Complete" : "Deploy Failed"
                 resultMessage = response.message
@@ -657,14 +713,14 @@ struct DeployView: View {
 
     private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
         let scriptURL = Bundle.main.url(forResource: "wdtt-deploy", withExtension: "sh")
-        if action == .install || action == .uninstall, scriptURL == nil {
+        if (action == .install || action == .updatePreserve || action == .uninstall), scriptURL == nil {
             throw DeployError.missingAsset("wdtt-deploy.sh")
         }
 
         let binaryName = "wdtt-server-linux-\(serverArch)"
         let binaryURL = Bundle.main.url(forResource: binaryName, withExtension: nil)
 
-        if action == .install, binaryURL == nil {
+        if (action == .install || action == .updatePreserve), binaryURL == nil {
             throw DeployError.missingAsset(binaryName)
         }
 
@@ -682,7 +738,8 @@ struct DeployView: View {
             dtlsPort: effectiveDTLSPort,
             wgPort: effectiveWGPort,
             dns1: dns1.trimmingCharacters(in: .whitespacesAndNewlines),
-            dns2: dns2.trimmingCharacters(in: .whitespacesAndNewlines)
+            dns2: dns2.trimmingCharacters(in: .whitespacesAndNewlines),
+            stateArchiveBase64: ""
         )
     }
 
@@ -877,6 +934,100 @@ struct DeployView: View {
             resultMessage = "Failed to prepare the exported server log file."
             showAlert = true
             return nil
+        }
+    }
+
+    private func writeExportedStateFile(contents: String) -> URL? {
+        guard let archive = extractExportedStateArchive(from: contents) else {
+            resultTitle = "Export Failed"
+            resultMessage = "Failed to extract server state archive from deploy output."
+            showAlert = true
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let stamp = formatter.string(from: Date())
+        let safeHost = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let filename = "wdtt-server-state-\(safeHost.isEmpty ? "server" : safeHost)-\(stamp).json"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try archive.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            SharedLogger.error("Failed to write exported server state: \(error.localizedDescription)")
+            resultTitle = "Export Failed"
+            resultMessage = "Failed to prepare the exported server state file."
+            showAlert = true
+            return nil
+        }
+    }
+
+    private func extractExportedStateArchive(from contents: String) -> String? {
+        let marker = "== state archive =="
+        guard let range = contents.range(of: marker) else {
+            return nil
+        }
+        let suffix = contents[range.upperBound...]
+        let trimmed = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let nextRange = trimmed.range(of: "\n== ") {
+            return String(trimmed[..<nextRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    private func importServerState(from url: URL) {
+        guard !isRunning else { return }
+        Task {
+            do {
+                let access = url.startAccessingSecurityScopedResource()
+                defer {
+                    if access {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                let data = try Data(contentsOf: url)
+                guard let archive = String(data: data, encoding: .utf8) else {
+                    throw NSError(domain: "DeployView", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected file is not valid UTF-8 text."])
+                }
+
+                var request = try makeRequest(.importState)
+                request.stateArchiveBase64 = data.base64EncodedString()
+
+                await MainActor.run {
+                    isRunning = true
+                    currentAction = .importState
+                    output = ""
+                }
+
+                let response = await perform(request)
+                await MainActor.run {
+                    isRunning = false
+                    currentAction = nil
+                    output = response.output
+                    updateStatusIndicators(response)
+                    if response.ok {
+                        applyDiscoveredServerSettings(response)
+                    }
+                    resultTitle = response.ok ? "Import Complete" : "Import Failed"
+                    resultMessage = response.ok ? "Server state was imported and applied." : response.message
+                    showAlert = true
+                    SharedLogger.info("WDTT server state import finished for archive size \(archive.count)")
+                    if !response.output.isEmpty {
+                        SharedLogger.info("WDTT deploy output:\n\(response.output)")
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    resultTitle = "Import Failed"
+                    resultMessage = error.localizedDescription
+                    showAlert = true
+                }
+            }
         }
     }
 }

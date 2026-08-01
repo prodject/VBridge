@@ -7,6 +7,7 @@ import "C"
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,20 +22,21 @@ import (
 )
 
 type deployRequest struct {
-	Action       string `json:"action"`
-	Host         string `json:"host"`
-	User         string `json:"user"`
-	Password     string `json:"password"`
-	Port         int    `json:"port"`
-	DeployScript string `json:"deployScriptPath"`
-	ServerBinary string `json:"serverBinaryPath"`
-	MainPassword string `json:"mainPassword"`
-	AdminID      string `json:"adminId"`
-	BotToken     string `json:"botToken"`
-	DTLSPort     int    `json:"dtlsPort"`
-	WGPort       int    `json:"wgPort"`
-	DNS1         string `json:"dns1"`
-	DNS2         string `json:"dns2"`
+	Action           string `json:"action"`
+	Host             string `json:"host"`
+	User             string `json:"user"`
+	Password         string `json:"password"`
+	Port             int    `json:"port"`
+	DeployScript     string `json:"deployScriptPath"`
+	ServerBinary     string `json:"serverBinaryPath"`
+	MainPassword     string `json:"mainPassword"`
+	AdminID          string `json:"adminId"`
+	BotToken         string `json:"botToken"`
+	DTLSPort         int    `json:"dtlsPort"`
+	WGPort           int    `json:"wgPort"`
+	DNS1             string `json:"dns1"`
+	DNS2             string `json:"dns2"`
+	StateArchiveBase64 string `json:"stateArchiveBase64"`
 }
 
 type deployResponse struct {
@@ -65,6 +67,14 @@ type deployStatusChecks struct {
 	MainPassword   string
 	AdminID        string
 	BotToken       string
+}
+
+type deployStateArchive struct {
+	Format        string `json:"format"`
+	Version       int    `json:"version"`
+	ExportedAt    string `json:"exportedAt"`
+	PasswordsJSON string `json:"passwordsJson"`
+	WGKeysData    string `json:"wgKeysData,omitempty"`
 }
 
 //export VBridgeWGDeployServer
@@ -183,6 +193,108 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.Action == "export_state" {
+		checks, text := checkDeployStatus(client)
+		appendOutput("status", text)
+
+		state, commandErr := exportDeployState(client, req.Password)
+		if commandErr != nil {
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "server state export failed: " + commandErr.Error(),
+				Output:          output.String(),
+				ServerConnected: true,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+				DTLSPort:        checks.DTLSPort,
+				WGPort:          checks.WGPort,
+				DNS1:            checks.DNS1,
+				DNS2:            checks.DNS2,
+				MainPassword:    checks.MainPassword,
+				AdminID:         checks.AdminID,
+				BotToken:        checks.BotToken,
+			}
+		}
+
+		appendOutput("export state", "Server state archive prepared.")
+		appendOutput("state archive", state)
+		return deployResponse{
+			OK:              true,
+			Status:          "success",
+			Message:         "Server state exported",
+			Output:          output.String(),
+			ServerConnected: true,
+			WDTTInstalled:   checks.WDTTInstalled,
+			ReadyToConnect:  checks.ReadyToConnect,
+			DTLSPort:        checks.DTLSPort,
+			WGPort:          checks.WGPort,
+			DNS1:            checks.DNS1,
+			DNS2:            checks.DNS2,
+			MainPassword:    checks.MainPassword,
+			AdminID:         checks.AdminID,
+			BotToken:        checks.BotToken,
+		}
+	}
+
+	if req.Action == "import_state" {
+		checks, text := checkDeployStatus(client)
+		appendOutput("status", text)
+
+		archiveText, decodeErr := decodeStateArchive(req.StateArchiveBase64)
+		if decodeErr != nil {
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "invalid server state archive: " + decodeErr.Error(),
+				Output:          output.String(),
+				ServerConnected: true,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+			}
+		}
+
+		importText, commandErr := importDeployState(client, req.Password, archiveText)
+		appendOutput("import state", importText)
+		checks, checkText := checkDeployStatus(client)
+		appendOutput("status", checkText)
+		if commandErr != nil {
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "server state import failed: " + commandErr.Error(),
+				Output:          output.String(),
+				ServerConnected: true,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+				DTLSPort:        checks.DTLSPort,
+				WGPort:          checks.WGPort,
+				DNS1:            checks.DNS1,
+				DNS2:            checks.DNS2,
+				MainPassword:    checks.MainPassword,
+				AdminID:         checks.AdminID,
+				BotToken:        checks.BotToken,
+			}
+		}
+
+		return deployResponse{
+			OK:              true,
+			Status:          "success",
+			Message:         "Server state imported",
+			Output:          output.String(),
+			ServerConnected: true,
+			WDTTInstalled:   checks.WDTTInstalled,
+			ReadyToConnect:  checks.ReadyToConnect,
+			DTLSPort:        checks.DTLSPort,
+			WGPort:          checks.WGPort,
+			DNS1:            checks.DNS1,
+			DNS2:            checks.DNS2,
+			MainPassword:    checks.MainPassword,
+			AdminID:         checks.AdminID,
+			BotToken:        checks.BotToken,
+		}
+	}
+
 	if req.Action == "cleanup_devices" {
 		text, commandErr := runSSHCommand(
 			client,
@@ -217,7 +329,7 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
-	if req.Action == "install" {
+	if req.Action == "install" || req.Action == "update_preserve" {
 		if err := uploadDeployFile(client, req.ServerBinary, "/tmp/wdtt-server", 0o755); err != nil {
 			return deployResponse{
 				OK:              false,
@@ -314,7 +426,7 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
-	if r.Action != "install" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" && r.Action != "export_logs" {
+	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
 		return fmt.Errorf("unsupported deploy action %q", r.Action)
 	}
 	if r.Host == "" {
@@ -332,14 +444,17 @@ func (r deployRequest) validate() error {
 	if r.WGPort < 1 || r.WGPort > 65535 {
 		return fmt.Errorf("invalid WireGuard port %d", r.WGPort)
 	}
-	if (r.Action == "install" || r.Action == "uninstall") && r.DeployScript == "" {
+	if (r.Action == "install" || r.Action == "update_preserve" || r.Action == "uninstall") && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
 	}
-	if r.Action == "install" && r.MainPassword == "" {
+	if (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
 		return errors.New("WDTT main password is empty")
 	}
-	if r.Action == "install" && r.ServerBinary == "" {
+	if (r.Action == "install" || r.Action == "update_preserve") && r.ServerBinary == "" {
 		return errors.New("server binary path is empty")
+	}
+	if r.Action == "import_state" && strings.TrimSpace(r.StateArchiveBase64) == "" {
+		return errors.New("server state archive is empty")
 	}
 	return nil
 }
@@ -431,6 +546,20 @@ func (r deployRequest) remoteCommand() string {
 			r.WGPort,
 			r.Port,
 		)
+	case "update_preserve":
+		args := strings.TrimSpace(strings.Join([]string{
+			deployFlag("-password", r.MainPassword),
+			deployFlag("-admin", r.AdminID),
+			deployFlag("-bot-token", r.BotToken),
+			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
+		}, " "))
+		return fmt.Sprintf(
+			"env WDTT_PRESERVE_DATA=1 WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			shellQuoteDeploy(args),
+			r.DTLSPort,
+			r.WGPort,
+			r.Port,
+		)
 	default:
 		args := strings.TrimSpace(strings.Join([]string{
 			deployFlag("-password", r.MainPassword),
@@ -446,6 +575,66 @@ func (r deployRequest) remoteCommand() string {
 			r.Port,
 		)
 	}
+}
+
+func exportDeployState(client *ssh.Client, password string) (string, error) {
+	command := strings.Join([]string{
+		"set -euo pipefail",
+		"db=/etc/wdtt/passwords.json",
+		"keys=/etc/wdtt/wg-keys.dat",
+		"[ -f \"$db\" ] || { echo 'error: passwords.json not found'; exit 1; }",
+		"db_b64=$(base64 < \"$db\" | tr -d '\\n')",
+		"keys_b64=''",
+		"[ -f \"$keys\" ] && keys_b64=$(base64 < \"$keys\" | tr -d '\\n') || true",
+		`printf '{"format":"wdtt-plus-state","version":1,"exportedAt":"%s","passwordsJson":"%s","wgKeysData":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$db_b64" "$keys_b64"`,
+	}, "; ")
+	return runSSHCommand(client, rootDeployCommand(command, password), 45*time.Second)
+}
+
+func importDeployState(client *ssh.Client, password, archiveText string) (string, error) {
+	if err := uploadDeployContent(client, []byte(archiveText), "/tmp/vbridge-wdtt-state.json", 0o600); err != nil {
+		return "", err
+	}
+	pythonScript := strings.Join([]string{
+		"import base64, json, pathlib",
+		"archive = pathlib.Path('/tmp/vbridge-wdtt-state.json')",
+		"data = json.loads(archive.read_text())",
+		"if data.get('format') != 'wdtt-plus-state': raise SystemExit('invalid format')",
+		"db_bytes = base64.b64decode(data.get('passwordsJson', ''))",
+		"if not db_bytes: raise SystemExit('empty passwordsJson')",
+		"pathlib.Path('/etc/wdtt').mkdir(parents=True, exist_ok=True)",
+		"pathlib.Path('/etc/wdtt/passwords.json').write_bytes(db_bytes)",
+		"wg_data = data.get('wgKeysData', '')",
+		"wg_path = pathlib.Path('/etc/wdtt/wg-keys.dat')",
+		"wg_path.write_bytes(base64.b64decode(wg_data)) if wg_data else (wg_path.unlink() if wg_path.exists() else None)",
+	}, "; ")
+	command := strings.Join([]string{
+		"set -euo pipefail",
+		"db=/etc/wdtt/passwords.json",
+		"keys=/etc/wdtt/wg-keys.dat",
+		"archive=/tmp/vbridge-wdtt-state.json",
+		"python3 -c " + shellQuoteDeploy(pythonScript),
+		"chmod 600 \"$db\"",
+		"[ -f \"$keys\" ] && chmod 600 \"$keys\" || true",
+		"systemctl restart wdtt >/dev/null 2>&1 || true",
+		"rm -f \"$archive\"",
+		"echo 'Server state imported into /etc/wdtt'",
+	}, "; ")
+	return runSSHCommand(client, rootDeployCommand(command, password), 2*time.Minute)
+}
+
+func uploadDeployContent(client *ssh.Client, data []byte, remotePath string, mode os.FileMode) error {
+	cmd := fmt.Sprintf("cat > %s && chmod %o %s", shellQuoteDeploy(remotePath), mode.Perm(), shellQuoteDeploy(remotePath))
+	_, err := runSSHCommandWithInput(client, cmd, data, 2*time.Minute)
+	return err
+}
+
+func decodeStateArchive(value string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func deployFlag(name, value string) string {
