@@ -2489,7 +2489,7 @@ struct ContentView: View {
             }
             return min(androidDefaultWorkers, maxWorkers)
         }()
-        VPNProfile(
+        return VPNProfile(
             name: config.profileName?.isEmpty == false ? config.profileName! : fallbackName,
             transportMode: .wdtt,
             vkLink: config.vkLink,
