@@ -167,6 +167,16 @@ func desktopChromeProfile() *BrowserProfile {
 		}
 		log.Printf("pow: VK_DESKTOP_CHROME=1 — captcha session presents DESKTOP CHROME 146 (TLS Chrome_146 + sec-ch-ua + 1920x1080 device + random browser_fp), NOT iPhone Safari")
 	})
+	if RuntimeFingerprintMode() == "chrome" {
+		if desktopChromeProf == nil {
+			desktopChromeProf = &BrowserProfile{
+				UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+				Platform:      "Windows",
+				ChromeVersion: 146,
+			}
+		}
+		return desktopChromeProf
+	}
 	return desktopChromeProf
 }
 

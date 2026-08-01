@@ -60,6 +60,9 @@ struct VBridge: App {
         wdttPassword: String,
         wdttClientKey: String,
         wdttServerKey: String,
+        wdttFingerprint: String,
+        wdttClientIDMode: String,
+        wdttUseVKCallsPreflight: Bool,
         seededTURN: SeededTURNCredentials? = nil,
         completionHandler: @escaping (Bool) -> Void
     ) {
@@ -78,6 +81,9 @@ struct VBridge: App {
             wdttPassword: wdttPassword,
             wdttClientKey: wdttClientKey,
             wdttServerKey: wdttServerKey,
+            wdttFingerprint: wdttFingerprint,
+            wdttClientIDMode: wdttClientIDMode,
+            wdttUseVKCallsPreflight: wdttUseVKCallsPreflight,
             seededTURN: seededTURN
         )
         tunnelBackend.start(configuration, completionHandler: completionHandler)

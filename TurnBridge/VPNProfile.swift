@@ -50,6 +50,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var wdttPassword: String
     var wdttClientKey: String
     var wdttServerKey: String
+    var wdttFingerprint: String
+    var wdttClientIDMode: String
+    var wdttUseVKCallsPreflight: Bool
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -68,6 +71,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case wdttPassword
         case wdttClientKey
         case wdttServerKey
+        case wdttFingerprint
+        case wdttClientIDMode
+        case wdttUseVKCallsPreflight
     }
 
     init(
@@ -86,7 +92,10 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wrapKeyHex: String = "",
         wdttPassword: String = "",
         wdttClientKey: String = "",
-        wdttServerKey: String = ""
+        wdttServerKey: String = "",
+        wdttFingerprint: String = "auto",
+        wdttClientIDMode: String = "default",
+        wdttUseVKCallsPreflight: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -104,6 +113,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.wdttPassword = wdttPassword
         self.wdttClientKey = wdttClientKey
         self.wdttServerKey = wdttServerKey
+        self.wdttFingerprint = wdttFingerprint
+        self.wdttClientIDMode = wdttClientIDMode
+        self.wdttUseVKCallsPreflight = wdttUseVKCallsPreflight
     }
 
     init(from decoder: Decoder) throws {
@@ -124,5 +136,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttPassword = try container.decodeIfPresent(String.self, forKey: .wdttPassword) ?? ""
         wdttClientKey = try container.decodeIfPresent(String.self, forKey: .wdttClientKey) ?? ""
         wdttServerKey = try container.decodeIfPresent(String.self, forKey: .wdttServerKey) ?? ""
+        wdttFingerprint = try container.decodeIfPresent(String.self, forKey: .wdttFingerprint) ?? "auto"
+        wdttClientIDMode = try container.decodeIfPresent(String.self, forKey: .wdttClientIDMode) ?? "default"
+        wdttUseVKCallsPreflight = try container.decodeIfPresent(Bool.self, forKey: .wdttUseVKCallsPreflight) ?? true
     }
 }

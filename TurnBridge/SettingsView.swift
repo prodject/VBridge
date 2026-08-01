@@ -106,6 +106,31 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                Section(header: Text("Advanced WDTT")) {
+                    Toggle(isOn: binding(\.wdttUseVKCallsPreflight)) {
+                        VStack(alignment: .leading) {
+                            Text("VK Calls Preflight")
+                            Text("Disable only if you need the legacy captcha path instead of the VK Calls bootstrap path.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Picker("Fingerprint", selection: binding(\.wdttFingerprint)) {
+                        Text("Auto").tag("auto")
+                        Text("Safari").tag("safari")
+                        Text("Chrome").tag("chrome")
+                    }
+                    .pickerStyle(.menu)
+
+                    Picker("Client ID Filter", selection: binding(\.wdttClientIDMode)) {
+                        Text("Default Rotation").tag("default")
+                        Text("6287487").tag("6287487")
+                        Text("8202606").tag("8202606")
+                    }
+                    .pickerStyle(.menu)
+                }
             }
 
             if profile.transportMode != .wdtt {
@@ -337,7 +362,10 @@ struct SettingsView: View {
             "wrapKeyHex": profile.wrapKeyHex,
             "wdttPassword": profile.wdttPassword,
             "wdttClientKey": profile.wdttClientKey,
-            "wdttServerKey": profile.wdttServerKey
+            "wdttServerKey": profile.wdttServerKey,
+            "wdttFingerprint": profile.wdttFingerprint,
+            "wdttClientIDMode": profile.wdttClientIDMode,
+            "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight
         ]
 
         guard JSONSerialization.isValidJSONObject(payload),

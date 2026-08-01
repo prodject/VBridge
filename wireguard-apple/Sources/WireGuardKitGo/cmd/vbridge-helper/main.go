@@ -47,6 +47,9 @@ type tunnelStartConfiguration struct {
 	WDTTPassword    string      `json:"wdttPassword"`
 	WDTTClientKey   string      `json:"wdttClientKey"`
 	WDTTServerKey   string      `json:"wdttServerKey"`
+	WDTTFingerprint string      `json:"wdttFingerprint"`
+	WDTTClientIDMode string     `json:"wdttClientIDMode"`
+	WDTTUseVKCallsPreflight bool `json:"wdttUseVKCallsPreflight"`
 	SeededTURN      *seededTURN `json:"seededTURN"`
 }
 
@@ -211,6 +214,10 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 	if cfg.WDTTPassword == "" {
 		return nil, errors.New("wdttPassword is empty")
 	}
+
+	proxy.SetForceLegacyCaptcha(!cfg.WDTTUseVKCallsPreflight)
+	proxy.SetRuntimeFingerprint(cfg.WDTTFingerprint)
+	proxy.SetRuntimeClientIDOnly(cfg.WDTTClientIDMode)
 
 	defaultGateway, err := currentDefaultGateway()
 	if err != nil {

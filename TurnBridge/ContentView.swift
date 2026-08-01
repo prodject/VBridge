@@ -1034,6 +1034,9 @@ struct ContentView: View {
             wdttPassword: profile.wdttPassword,
             wdttClientKey: profile.wdttClientKey,
             wdttServerKey: profile.wdttServerKey,
+            wdttFingerprint: profile.wdttFingerprint,
+            wdttClientIDMode: profile.wdttClientIDMode,
+            wdttUseVKCallsPreflight: profile.wdttUseVKCallsPreflight,
             seededTURN: seededTURN
         ) { isSuccess in
             if isSuccess {
@@ -2471,7 +2474,10 @@ struct ContentView: View {
             wrapKeyHex: config.wrapKeyHex ?? "",
             wdttPassword: config.wdttPassword ?? "",
             wdttClientKey: config.wdttClientKey ?? "",
-            wdttServerKey: config.wdttServerKey ?? ""
+            wdttServerKey: config.wdttServerKey ?? "",
+            wdttFingerprint: config.wdttFingerprint ?? "auto",
+            wdttClientIDMode: config.wdttClientIDMode ?? "default",
+            wdttUseVKCallsPreflight: config.wdttUseVKCallsPreflight ?? true
         )
     }
 

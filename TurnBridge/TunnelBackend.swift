@@ -17,6 +17,9 @@ struct TunnelStartConfiguration: Codable {
     var wdttPassword: String
     var wdttClientKey: String
     var wdttServerKey: String
+    var wdttFingerprint: String
+    var wdttClientIDMode: String
+    var wdttUseVKCallsPreflight: Bool
     var seededTURN: SeededTURNCredentials?
 
     var normalizedWgQuickConfig: String {
@@ -41,6 +44,9 @@ struct TunnelStartConfiguration: Codable {
             "wdttPassword": wdttPassword,
             "wdttClientKey": wdttClientKey,
             "wdttServerKey": wdttServerKey,
+            "wdttFingerprint": wdttFingerprint,
+            "wdttClientIDMode": wdttClientIDMode,
+            "wdttUseVKCallsPreflight": wdttUseVKCallsPreflight,
             // PacketTunnel cannot read the app's Application Support directory,
             // and sideloaded builds often have no App Group entitlement. Pass the
             // current snapshot through NetworkExtension preferences so both signed

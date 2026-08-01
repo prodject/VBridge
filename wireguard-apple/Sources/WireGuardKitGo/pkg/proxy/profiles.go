@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // BrowserProfile holds a consistent set of browser identity fields.
@@ -56,11 +57,13 @@ var browserProfiles = []BrowserProfile{
 
 // userAgentProfiles kept for backward compatibility (creds.go uses it)
 var userAgentProfiles []string
+var runtimeFingerprintMode atomic.Value
 
 func init() {
 	for _, p := range browserProfiles {
 		userAgentProfiles = append(userAgentProfiles, p.UserAgent)
 	}
+	runtimeFingerprintMode.Store("auto")
 }
 
 // randomUserAgent returns a random User-Agent string from the profiles list.
@@ -101,4 +104,26 @@ func profileForUA(ua string) BrowserProfile {
 
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+func normalizeRuntimeFingerprint(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "chrome":
+		return "chrome"
+	case "safari":
+		return "safari"
+	default:
+		return "auto"
+	}
+}
+
+func SetRuntimeFingerprint(mode string) {
+	runtimeFingerprintMode.Store(normalizeRuntimeFingerprint(mode))
+}
+
+func RuntimeFingerprintMode() string {
+	if value, ok := runtimeFingerprintMode.Load().(string); ok && value != "" {
+		return value
+	}
+	return "auto"
 }

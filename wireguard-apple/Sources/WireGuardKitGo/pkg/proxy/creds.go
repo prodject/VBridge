@@ -106,6 +106,25 @@ var vkCredentialsList = []vkCredentials{
 	{ClientID: "8202606", ClientSecret: "lMRsTiMCyPnp5vfoldmn"}, // amurcanov's 2nd stable app_id
 }
 
+var runtimeClientIDOnly atomic.Value
+
+func SetRuntimeClientIDOnly(value string) {
+	normalized := strings.TrimSpace(value)
+	switch normalized {
+	case "", "default":
+		runtimeClientIDOnly.Store("")
+	default:
+		runtimeClientIDOnly.Store(normalized)
+	}
+}
+
+func runtimeClientIDFilter() string {
+	if value, ok := runtimeClientIDOnly.Load().(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
 // CaptchaSolver is called when VK requires a captcha.
 // It receives the captcha image URL and must return the user's answer.
 // Returning an error aborts the credential fetch.
@@ -282,7 +301,11 @@ func GetVKCreds(linkID string, captchaSolver CaptchaSolver, solvedCaptchaSID, so
 			// client_id if VK_CLIENT_ID_ONLY env var is set. Used to isolate
 			// which client_id is captcha-gated on api.vk.me. Remove after
 			// experiment resolves.
-			if only := os.Getenv("VK_CLIENT_ID_ONLY"); only != "" {
+			only := runtimeClientIDFilter()
+			if only == "" {
+				only = os.Getenv("VK_CLIENT_ID_ONLY")
+			}
+			if only != "" {
 				filtered := creds[:0]
 				for _, vc := range creds {
 					if vc.ClientID == only {

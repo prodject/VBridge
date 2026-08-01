@@ -195,6 +195,12 @@ type ProxyConfig struct {
 	// never runs otherwise). Driven by an undocumented `forceLegacyCaptcha`
 	// backup-JSON field. Default false → no production effect.
 	ForceLegacyCaptcha bool `json:"force_legacy_captcha,omitempty"`
+	// BrowserFingerprint selects the runtime browser presentation used by the
+	// WDTT bootstrap path. Supported values: auto, safari, chrome.
+	BrowserFingerprint string `json:"browser_fingerprint,omitempty"`
+	// ClientIDOnly limits legacy VK credential minting to a single app_id when
+	// set. Empty/default preserves the normal rotation.
+	ClientIDOnly string `json:"client_id_only,omitempty"`
 
 	// UseWrapA enables the "SRTP-WRAP-A" 4th transport mode — wire-compatible
 	// with amurcanov's proxy-turn-vk-android server (see proxy.Config.UseWrapA
@@ -238,6 +244,8 @@ func VBridgeWGTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON 
 		proxy.SetVKHostIPs(pcfg.VKHostIPs)
 	}
 	proxy.SetForceLegacyCaptcha(pcfg.ForceLegacyCaptcha)
+	proxy.SetRuntimeFingerprint(pcfg.BrowserFingerprint)
+	proxy.SetRuntimeClientIDOnly(pcfg.ClientIDOnly)
 
 	// Create proxy
 	wrapKey, wrapErr := decodeWrapKey(pcfg.UseWrap, pcfg.WrapKeyHex)
@@ -358,6 +366,8 @@ func VBridgeWGStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 		proxy.SetVKHostIPs(pcfg.VKHostIPs)
 	}
 	proxy.SetForceLegacyCaptcha(pcfg.ForceLegacyCaptcha)
+	proxy.SetRuntimeFingerprint(pcfg.BrowserFingerprint)
+	proxy.SetRuntimeClientIDOnly(pcfg.ClientIDOnly)
 
 	// Seeded TURN creds from main app's pre-bootstrap captcha flow (optional).
 	var seededTURN *proxy.TURNCreds

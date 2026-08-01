@@ -19,6 +19,13 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Theme Control:** User-selectable app theme (System / Light / Dark).
 * **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.
 * **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`1.X`) and release artifact publishing.
+* **Built-In WDTT Server Management:** Deploy, inspect, and manage a WDTT server directly from the app, including client listing, create/edit/delete actions, cleanup actions, runtime limits, reinstall flows, and server state export.
+* **Client Transfer and Share Flows:** Move a WDTT client separately via transfer code, file export/import, quick link, or QR code, with camera-based QR import and compatibility with modern `wdtt://connect?...` links.
+* **User and Admin Separation:** User-facing VPN connection workflows stay available without server administration, while deploy and server-management tools remain grouped under the admin flow.
+* **Safer WDTT Reinstall and Recovery:** Reinstall, uninstall, update-preserve, backup, export, and import flows are integrated around the migrated WDTT-Plus-style server management model.
+* **Advanced WDTT Runtime Controls:** Per-profile WDTT settings include VK Calls preflight, fingerprint mode, client ID filtering, worker import hints from WDTT links, and quick-link generation from the profile screen.
+* **Resilient VK Bootstrap Path:** WDTT startup prefers the VK Calls path, supports pre-bootstrap TURN probing, preserves a stable device identity, and falls back into captcha-aware recovery only when required.
+* **Shareable Admin-State Transfer:** Deploy settings and local server state can be exported from the app for migration or recovery workflows.
 
 ## ✨ Features
 

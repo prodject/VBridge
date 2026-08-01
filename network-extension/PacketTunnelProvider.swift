@@ -596,6 +596,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let wdttPassword = (providerConfiguration["wdttPassword"] as? String) ?? ""
         let wdttClientKey = (providerConfiguration["wdttClientKey"] as? String) ?? ""
         let wdttServerKey = (providerConfiguration["wdttServerKey"] as? String) ?? ""
+        let wdttFingerprint = (providerConfiguration["wdttFingerprint"] as? String) ?? "auto"
+        let wdttClientIDMode = (providerConfiguration["wdttClientIDMode"] as? String) ?? "default"
+        let wdttUseVKCallsPreflight = (providerConfiguration["wdttUseVKCallsPreflight"] as? Bool) ?? true
         let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
 
         if useSingleProxyWorker && requestedNValue != 1 {
@@ -622,6 +625,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             nValue: Int(nValue),
             wrapKeyHex: wrapKeyHex,
             wdttPassword: wdttPassword,
+            wdttFingerprint: wdttFingerprint,
+            wdttClientIDMode: wdttClientIDMode,
+            wdttUseVKCallsPreflight: wdttUseVKCallsPreflight,
             seededTURN: seededTURN
         ) else {
             SharedLogger.error("Failed to encode proxy config", source: .tunnel)
@@ -757,6 +763,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         nValue: Int,
         wrapKeyHex: String,
         wdttPassword: String,
+        wdttFingerprint: String,
+        wdttClientIDMode: String,
+        wdttUseVKCallsPreflight: Bool,
         seededTURN: [String: String]?
     ) -> String? {
         let useWDTT = mode == "wdtt"
@@ -775,7 +784,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "wrap_a_password": wdttPassword,
             "device_id": persistedDeviceID(),
             "num_conns": max(nValue, 1),
-            "cred_pool_cooldown_seconds": 120
+            "cred_pool_cooldown_seconds": 120,
+            "browser_fingerprint": wdttFingerprint,
+            "client_id_only": wdttClientIDMode,
+            "force_legacy_captcha": !wdttUseVKCallsPreflight
         ]
         if let seededTURN,
            let address = seededTURN["address"], !address.isEmpty,
