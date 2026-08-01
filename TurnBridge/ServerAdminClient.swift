@@ -29,6 +29,17 @@ struct ServerAdminStatePayload: Decodable {
     var passwords: [ServerAdminClientInfo]?
 }
 
+struct ServerAdminClientTransferPayload: Codable {
+    var format: String
+    var version: Int
+    var createdAt: Int64
+    var password: String
+    var label: String?
+    var vkHash: String?
+    var expiresAt: Int64
+    var deactivated: Bool
+}
+
 struct ServerAdminEnvelope: Decodable {
     var ok: Bool
     var status: String
@@ -180,6 +191,50 @@ enum ServerAdminBridge {
             port: target.port,
             mainPassword: target.mainPassword
         ))
+    }
+
+    static func exportClient(_ client: ServerAdminClientInfo) throws -> String {
+        let payload = ServerAdminClientTransferPayload(
+            format: "wdtt-plus-client",
+            version: 1,
+            createdAt: Int64(Date().timeIntervalSince1970 * 1000),
+            password: client.password,
+            label: client.label,
+            vkHash: client.vkHash,
+            expiresAt: client.expiresAt ?? 0,
+            deactivated: !client.isActive
+        )
+        let data = try JSONEncoder().encode(payload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "ServerAdminBridge", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to encode client transfer JSON."])
+        }
+        return text
+    }
+
+    static func importClient(_ target: ServerAdminTarget, transferText: String, defaultPorts: String = "56000,56001,9000") async throws -> ServerAdminEnvelope {
+        let data = Data(transferText.utf8)
+        let payload = try JSONDecoder().decode(ServerAdminClientTransferPayload.self, from: data)
+        guard payload.format == "wdtt-plus-client", payload.version == 1 else {
+            throw NSError(domain: "ServerAdminBridge", code: 6, userInfo: [NSLocalizedDescriptionKey: "Unsupported client transfer format."])
+        }
+        let now = Int64(Date().timeIntervalSince1970)
+        if payload.expiresAt > 0, payload.expiresAt <= now {
+            throw NSError(domain: "ServerAdminBridge", code: 7, userInfo: [NSLocalizedDescriptionKey: "The transferred client has already expired."])
+        }
+        let response = try await create(target, request: ServerAdminCreateRequest(
+            label: payload.label ?? "",
+            vkHash: payload.vkHash ?? "",
+            ports: defaultPorts,
+            days: 0,
+            clientPassword: payload.password
+        ))
+        if payload.expiresAt > 0 {
+            _ = try await setExpiry(target, clientPassword: payload.password, days: nil, expiresAt: payload.expiresAt)
+        }
+        if payload.deactivated {
+            _ = try await run(.deactivate, target: target, clientPassword: payload.password)
+        }
+        return response
     }
 
     private static func call(_ request: ServerAdminBridgeRequest) async throws -> ServerAdminEnvelope {

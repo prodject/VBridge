@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -285,6 +289,85 @@ func inlineUrlButton(text, url string) map[string]interface{} {
 		"text": text,
 		"url":  url,
 	}
+}
+
+func botQuickLink(password string, entry *PasswordEntry) string {
+	if entry == nil || strings.TrimSpace(entry.VkHash) == "" {
+		return ""
+	}
+	ports := strings.TrimSpace(entry.Ports)
+	if ports == "" {
+		ports = defaultPortsSpec()
+	}
+	pts := strings.Split(ports, ",")
+	if len(pts) != 3 {
+		return ""
+	}
+	return fmt.Sprintf("wdtt://%s:%s:%s:%s:%s:%s", getPublicIP(), pts[0], pts[1], pts[2], password, entry.VkHash)
+}
+
+func sendTelegramPhoto(token string, chatID int64, caption string, pngData []byte, replyMarkup interface{}) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("chat_id", fmt.Sprint(chatID)); err != nil {
+		return err
+	}
+	if err := writer.WriteField("caption", caption); err != nil {
+		return err
+	}
+	if err := writer.WriteField("parse_mode", "Markdown"); err != nil {
+		return err
+	}
+	if replyMarkup != nil {
+		data, err := json.Marshal(replyMarkup)
+		if err != nil {
+			return err
+		}
+		if err := writer.WriteField("reply_markup", string(data)); err != nil {
+			return err
+		}
+	}
+
+	part, err := writer.CreateFormFile("photo", "wdtt-client-qr.png")
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, bytes.NewReader(pngData)); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	resp, err := http.Post(fmt.Sprintf("https://api.telegram.org/bot%s/sendPhoto", token), writer.FormDataContentType(), &body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		payload, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram sendPhoto failed: %s", strings.TrimSpace(string(payload)))
+	}
+	return nil
+}
+
+func sendBotClientQR(token string, adminID int64, password string, entry *PasswordEntry) error {
+	link := botQuickLink(password, entry)
+	if link == "" {
+		return errors.New("быстрая ссылка для этого клиента недоступна")
+	}
+	pngData, err := qrcode.Encode(link, qrcode.Medium, 512)
+	if err != nil {
+		return err
+	}
+	return sendTelegramPhoto(
+		token,
+		adminID,
+		fmt.Sprintf("📷 *QR для клиента*\n\nПароль: `%s`\nСсылка: `%s`", mdCode(password), mdCode(link)),
+		pngData,
+		inlineKeyboard([]map[string]interface{}{inlineButton("🔐 К списку", "backlist")}),
+	)
 }
 
 type trafficTotals struct {
@@ -2145,9 +2228,7 @@ func sendBotClientCreated(token string, adminID int64, messageID int, password s
 	}
 	linkText := ""
 	if entry.VkHash != "" {
-		pts := strings.Split(entry.Ports, ",")
-		if len(pts) == 3 {
-			link := fmt.Sprintf("wdtt://%s:%s:%s:%s:%s:%s", getPublicIP(), pts[0], pts[1], pts[2], password, entry.VkHash)
+		if link := botQuickLink(password, entry); link != "" {
 			linkText = fmt.Sprintf("\n\n🔗 *Быстрая ссылка:* `%s`", mdCode(link))
 		}
 	}
@@ -2155,6 +2236,7 @@ func sendBotClientCreated(token string, adminID int64, messageID int, password s
 		fmt.Sprintf("%s\n\n🔑 Пароль: `%s`\n%s%s\n%s%s", title, mdCode(password), labelText, ttlText, statusText, linkText),
 		inlineKeyboard(
 			[]map[string]interface{}{inlineButton("🔍 Открыть клиента", "viewpass_"+password)},
+			[]map[string]interface{}{inlineButton("📷 QR", "showqr_"+password)},
 			[]map[string]interface{}{inlineButton("🔐 К списку", "backlist")},
 			[]map[string]interface{}{inlineButton("◀️ Главное меню", "mainmenu")},
 		),
@@ -2469,6 +2551,10 @@ func botLoop(token string, adminIDstr string, wgDev wgDevice) {
 						"callback_data": "exportclient_" + pass,
 					})
 					kb = append(kb, map[string]interface{}{
+						"text":          "📷 QR",
+						"callback_data": "showqr_" + pass,
+					})
+					kb = append(kb, map[string]interface{}{
 						"text":          "◀️ Назад к списку",
 						"callback_data": "backlist",
 					})
@@ -2612,6 +2698,28 @@ func botLoop(token string, adminIDstr string, wgDev wgDevice) {
 							[]map[string]interface{}{inlineButton("🔐 К списку", "backlist")},
 						),
 					)
+				} else if strings.HasPrefix(data, "showqr_") {
+					pass := strings.TrimPrefix(data, "showqr_")
+					dbMutex.Lock()
+					entry := db.Passwords[pass]
+					dbMutex.Unlock()
+					if entry == nil {
+						promptMessageID = sendOrEditTelegram(token, adminID, menuMessageID, "❌ Клиент не найден.", inlineKeyboard(
+							[]map[string]interface{}{inlineButton("🔐 К списку", "backlist")},
+						))
+						continue
+					}
+					if err := sendBotClientQR(token, adminID, pass, entry); err != nil {
+						promptMessageID = sendOrEditTelegram(token, adminID, menuMessageID, "❌ QR не создан: "+mdCode(err.Error()), inlineKeyboard(
+							[]map[string]interface{}{inlineButton("◀️ К клиенту", "viewpass_"+pass)},
+							[]map[string]interface{}{inlineButton("🔐 К списку", "backlist")},
+						))
+						continue
+					}
+					promptMessageID = sendOrEditTelegram(token, adminID, menuMessageID, fmt.Sprintf("✅ QR для клиента `%s` отправлен отдельным сообщением.", mdCode(pass)), inlineKeyboard(
+						[]map[string]interface{}{inlineButton("◀️ К клиенту", "viewpass_"+pass)},
+						[]map[string]interface{}{inlineButton("🔐 К списку", "backlist")},
+					))
 				} else if strings.HasPrefix(data, "edit_password_") {
 					pass := strings.TrimPrefix(data, "edit_password_")
 					promptMessageID = sendOrEditTelegram(token, adminID, menuMessageID,

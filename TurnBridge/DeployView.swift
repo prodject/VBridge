@@ -31,6 +31,11 @@ private struct DeployRequest: Encodable, Sendable {
     var wgPort: Int
     var dns1: String
     var dns2: String
+    var maxPasswords: Int
+    var maxWorkersPerAccess: Int
+    var maxHandshakes: Int
+    var handshakeRate: Int
+    var maxClientMbps: Int
     var stateArchiveBase64: String
 }
 
@@ -67,6 +72,11 @@ struct DeployView: View {
     @AppStorage("deploy.dtlsPort") private var dtlsPort = 56000
     @AppStorage("deploy.wgPort") private var wgPort = 56001
     @AppStorage("deploy.serverArch") private var serverArch = "amd64"
+    @AppStorage("deploy.maxPasswords") private var maxPasswords = 50
+    @AppStorage("deploy.maxWorkersPerAccess") private var maxWorkersPerAccess = 0
+    @AppStorage("deploy.maxHandshakes") private var maxHandshakes = 32
+    @AppStorage("deploy.handshakeRate") private var handshakeRate = 24
+    @AppStorage("deploy.maxClientMbps") private var maxClientMbps = 0
 
     @State private var isRunning = false
     @State private var currentAction: DeployAction?
@@ -175,6 +185,19 @@ struct DeployView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+
+            Section(header: Text("Runtime Limits")) {
+                TextField("Max Passwords", value: $maxPasswords, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("Max Workers Per Access", value: $maxWorkersPerAccess, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("Max Handshakes", value: $maxHandshakes, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("Handshake Rate", value: $handshakeRate, format: .number)
+                    .keyboardType(.numberPad)
+                TextField("Max Client Mbps", value: $maxClientMbps, format: .number)
+                    .keyboardType(.numberPad)
             }
 
             Section {
@@ -635,6 +658,11 @@ struct DeployView: View {
             wgPort: effectiveWGPort,
             dns1: dns1.trimmingCharacters(in: .whitespacesAndNewlines),
             dns2: dns2.trimmingCharacters(in: .whitespacesAndNewlines),
+            maxPasswords: maxPasswords,
+            maxWorkersPerAccess: maxWorkersPerAccess,
+            maxHandshakes: maxHandshakes,
+            handshakeRate: handshakeRate,
+            maxClientMbps: maxClientMbps,
             stateArchiveBase64: ""
         )
     }

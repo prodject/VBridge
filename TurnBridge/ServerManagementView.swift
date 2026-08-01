@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+import CoreImage.CIFilterBuiltins
 
 struct ServerManagementView: View {
     let target: ServerAdminTarget?
@@ -23,6 +26,8 @@ struct ServerManagementView: View {
     @State private var resultTitle = ""
     @State private var resultMessage = ""
     @State private var showAlert = false
+    @State private var showImportPicker = false
+    @State private var shareItems: [Any] = []
 
     var body: some View {
         Form {
@@ -82,6 +87,21 @@ struct ServerManagementView: View {
                                     }
                                     .buttonStyle(.bordered)
 
+                                    Button("Share") {
+                                        shareClient(client)
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button("Quick Link") {
+                                        shareQuickLink(client)
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button("QR") {
+                                        shareClientQR(client)
+                                    }
+                                    .buttonStyle(.bordered)
+
                                     Button(client.isActive ? "Deactivate" : "Activate") {
                                         runServerClientAction(client.isActive ? .deactivate : .activate, clientPassword: client.password)
                                     }
@@ -115,6 +135,11 @@ struct ServerManagementView: View {
                         runGlobalAction(.cleanupOrphans)
                     }
                     .disabled(!canManage)
+
+                    Button("Import Client") {
+                        showImportPicker = true
+                    }
+                    .disabled(!canManage)
                 }
             }
 
@@ -134,6 +159,30 @@ struct ServerManagementView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(resultMessage)
+        }
+        .sheet(isPresented: Binding(
+            get: { !shareItems.isEmpty },
+            set: { isPresented in
+                if !isPresented {
+                    shareItems = []
+                }
+            }
+        )) {
+            if !shareItems.isEmpty {
+                ServerManagementActivityView(items: shareItems)
+            }
+        }
+        .sheet(isPresented: $showImportPicker) {
+            DocumentPicker(
+                contentTypes: [.json, .plainText, .text],
+                onPick: { url in
+                    showImportPicker = false
+                    importClient(from: url)
+                },
+                onCancel: {
+                    showImportPicker = false
+                }
+            )
         }
         .sheet(isPresented: $showCreateClientSheet) {
             NavigationStack {
@@ -375,6 +424,105 @@ struct ServerManagementView: View {
         }
     }
 
+    private func shareClient(_ client: ServerAdminClientInfo) {
+        do {
+            let transfer = try ServerAdminBridge.exportClient(client)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("wdtt-client-\(client.password).json")
+            try transfer.write(to: url, atomically: true, encoding: .utf8)
+            shareItems = [url]
+        } catch {
+            resultTitle = "Export Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
+        }
+    }
+
+    private func shareQuickLink(_ client: ServerAdminClientInfo) {
+        guard let link = quickLink(for: client) else {
+            resultTitle = "Share Failed"
+            resultMessage = "This client does not have enough data for a quick link."
+            showAlert = true
+            return
+        }
+        shareItems = [link]
+    }
+
+    private func shareClientQR(_ client: ServerAdminClientInfo) {
+        guard let link = quickLink(for: client) else {
+            resultTitle = "QR Failed"
+            resultMessage = "This client does not have enough data for a quick link."
+            showAlert = true
+            return
+        }
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.setValue(Data(link.utf8), forKey: "inputMessage")
+        guard let outputImage = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+              let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            resultTitle = "QR Failed"
+            resultMessage = "Failed to generate the QR image."
+            showAlert = true
+            return
+        }
+        let image = UIImage(cgImage: cgImage)
+        guard let data = image.pngData() else {
+            resultTitle = "QR Failed"
+            resultMessage = "Failed to encode the QR image."
+            showAlert = true
+            return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("wdtt-client-\(client.password)-qr.png")
+        do {
+            try data.write(to: url)
+            shareItems = [url]
+        } catch {
+            resultTitle = "QR Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
+        }
+    }
+
+    private func importClient(from url: URL) {
+        guard let target else { return }
+        Task {
+            do {
+                let access = url.startAccessingSecurityScopedResource()
+                defer {
+                    if access {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let data = try Data(contentsOf: url)
+                guard let text = String(data: data, encoding: .utf8) else {
+                    throw NSError(domain: "ServerManagementView", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected file is not valid UTF-8 text."])
+                }
+                _ = try await ServerAdminBridge.importClient(target, transferText: text)
+                await MainActor.run {
+                    resultTitle = "Import Complete"
+                    resultMessage = "The client was imported."
+                    showAlert = true
+                    refreshServerClients()
+                }
+            } catch {
+                await MainActor.run {
+                    resultTitle = "Import Failed"
+                    resultMessage = error.localizedDescription
+                    showAlert = true
+                }
+            }
+        }
+    }
+
+    private func quickLink(for client: ServerAdminClientInfo) -> String? {
+        guard let target, let rawHash = client.vkHash?.trimmingCharacters(in: .whitespacesAndNewlines), !rawHash.isEmpty else {
+            return nil
+        }
+        let ports = (client.ports?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? client.ports! : "56000,56001,9000")
+        let parts = ports.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 3 else { return nil }
+        return "wdtt://\(target.host):\(parts[0]):\(parts[1]):\(parts[2]):\(client.password):\(rawHash)"
+    }
+
     private func expiryText(for client: ServerAdminClientInfo) -> String {
         guard let expiresAt = client.expiresAt, expiresAt > 0 else {
             return "Expires: Never"
@@ -384,4 +532,14 @@ struct ServerManagementView: View {
         formatter.timeStyle = .short
         return "Expires: \(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(expiresAt))))"
     }
+}
+
+private struct ServerManagementActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

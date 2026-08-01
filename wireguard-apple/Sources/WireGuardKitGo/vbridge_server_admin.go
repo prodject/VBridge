@@ -24,7 +24,7 @@ type serverAdminRequest struct {
 	VKHash         string `json:"vkHash,omitempty"`
 	Ports          string `json:"ports,omitempty"`
 	Days           int    `json:"days,omitempty"`
-	ExpiresAt      int64  `json:"expiresAt,omitempty"`
+	ExpiresAt      *int64 `json:"expiresAt,omitempty"`
 	NewPassword    string `json:"newPassword,omitempty"`
 }
 
@@ -161,8 +161,8 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		if r.ExpiresAt >= 0 {
-			return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--expires-at", fmt.Sprint(r.ExpiresAt)}, nil
+		if r.ExpiresAt != nil {
+			return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--expires-at", fmt.Sprint(*r.ExpiresAt)}, nil
 		}
 		return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--days", fmt.Sprint(maxInt(0, minInt(r.Days, 365)))}, nil
 	case "update-client":

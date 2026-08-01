@@ -36,6 +36,11 @@ type deployRequest struct {
 	WGPort           int    `json:"wgPort"`
 	DNS1             string `json:"dns1"`
 	DNS2             string `json:"dns2"`
+	MaxPasswords     int    `json:"maxPasswords"`
+	MaxWorkersPerAccess int `json:"maxWorkersPerAccess"`
+	MaxHandshakes    int    `json:"maxHandshakes"`
+	HandshakeRate    int    `json:"handshakeRate"`
+	MaxClientMbps    int    `json:"maxClientMbps"`
 	StateArchiveBase64 string `json:"stateArchiveBase64"`
 }
 
@@ -67,6 +72,11 @@ type deployStatusChecks struct {
 	MainPassword   string
 	AdminID        string
 	BotToken       string
+	MaxPasswords   int
+	MaxWorkersPerAccess int
+	MaxHandshakes  int
+	HandshakeRate  int
+	MaxClientMbps  int
 }
 
 type deployStateArchive struct {
@@ -421,6 +431,15 @@ func (r *deployRequest) normalize() {
 	if r.WGPort == 0 {
 		r.WGPort = 56001
 	}
+	if r.MaxPasswords == 0 {
+		r.MaxPasswords = 50
+	}
+	if r.MaxHandshakes == 0 {
+		r.MaxHandshakes = 32
+	}
+	if r.HandshakeRate == 0 {
+		r.HandshakeRate = 24
+	}
 	r.DNS1 = strings.TrimSpace(r.DNS1)
 	r.DNS2 = strings.TrimSpace(r.DNS2)
 }
@@ -443,6 +462,21 @@ func (r deployRequest) validate() error {
 	}
 	if r.WGPort < 1 || r.WGPort > 65535 {
 		return fmt.Errorf("invalid WireGuard port %d", r.WGPort)
+	}
+	if r.MaxPasswords < 1 {
+		return fmt.Errorf("invalid max passwords %d", r.MaxPasswords)
+	}
+	if r.MaxWorkersPerAccess < 0 {
+		return fmt.Errorf("invalid max workers per access %d", r.MaxWorkersPerAccess)
+	}
+	if r.MaxHandshakes < 1 {
+		return fmt.Errorf("invalid max handshakes %d", r.MaxHandshakes)
+	}
+	if r.HandshakeRate < 1 {
+		return fmt.Errorf("invalid handshake rate %d", r.HandshakeRate)
+	}
+	if r.MaxClientMbps < 0 {
+		return fmt.Errorf("invalid max client mbps %d", r.MaxClientMbps)
 	}
 	if (r.Action == "install" || r.Action == "update_preserve" || r.Action == "uninstall") && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
@@ -554,7 +588,12 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
 		}, " "))
 		return fmt.Sprintf(
-			"env WDTT_PRESERVE_DATA=1 WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			"env WDTT_PRESERVE_DATA=1 WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			r.MaxPasswords,
+			r.MaxWorkersPerAccess,
+			r.MaxHandshakes,
+			r.HandshakeRate,
+			r.MaxClientMbps,
 			shellQuoteDeploy(args),
 			r.DTLSPort,
 			r.WGPort,
@@ -568,7 +607,12 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
 		}, " "))
 		return fmt.Sprintf(
-			"env WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			"env WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			r.MaxPasswords,
+			r.MaxWorkersPerAccess,
+			r.MaxHandshakes,
+			r.HandshakeRate,
+			r.MaxClientMbps,
 			shellQuoteDeploy(args),
 			r.DTLSPort,
 			r.WGPort,
