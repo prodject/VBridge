@@ -2476,7 +2476,13 @@ struct ContentView: View {
     }
 
     private func profile(fromWDTT config: WDTTConfigImport, fallbackName: String) -> VPNProfile {
-        let resolvedWorkers = config.maxWorkers.flatMap { $0 > 0 ? $0 : nil } ?? 30
+        let resolvedWorkers: Int = {
+            let androidDefaultWorkers = 18
+            guard let maxWorkers = config.maxWorkers, maxWorkers > 0 else {
+                return androidDefaultWorkers
+            }
+            return min(androidDefaultWorkers, maxWorkers)
+        }()
         VPNProfile(
             name: config.profileName?.isEmpty == false ? config.profileName! : fallbackName,
             transportMode: .wdtt,

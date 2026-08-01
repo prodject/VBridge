@@ -278,7 +278,10 @@ struct ConfigParser {
 
         let maxWorkers: Int?
         if let rawWorkers = queryMap["max_workers"]?.trimmingCharacters(in: .whitespacesAndNewlines), !rawWorkers.isEmpty {
-            guard let parsedWorkers = Int(rawWorkers), parsedWorkers >= 4, parsedWorkers <= 128 else {
+            guard let parsedWorkers = Int(rawWorkers),
+                  parsedWorkers >= 9,
+                  parsedWorkers <= 108,
+                  parsedWorkers % 9 == 0 else {
                 throw ConfigParseError.invalidWDTTLink("Invalid max_workers value: \(rawWorkers).")
             }
             maxWorkers = parsedWorkers
