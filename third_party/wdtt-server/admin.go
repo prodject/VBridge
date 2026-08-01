@@ -1582,24 +1582,34 @@ func adminUpdateClient(configDir string, loaded *Database, args []string) (admin
 	if err := fs.Parse(args); err != nil {
 		return adminResponse{}, err
 	}
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) {
+		provided[f.Name] = true
+	})
 	entry, err := requireAdminPassword(loaded, *password)
 	if err != nil {
 		return adminResponse{}, err
 	}
-	normalizedHash := ""
-	if strings.TrimSpace(*hash) != "" {
-		normalizedHash, err = normalizeVKHashesInput(*hash)
+	if provided["label"] {
+		entry.Label = normalizePasswordLabel(*label)
+	}
+	if provided["vk-hash"] {
+		normalizedHash := ""
+		if strings.TrimSpace(*hash) != "" {
+			normalizedHash, err = normalizeVKHashesInput(*hash)
+			if err != nil {
+				return adminResponse{}, err
+			}
+		}
+		entry.VkHash = normalizedHash
+	}
+	if provided["ports"] {
+		normalizedPorts, err := parsePortsSpec(*ports)
 		if err != nil {
 			return adminResponse{}, err
 		}
+		entry.Ports = normalizedPorts
 	}
-	normalizedPorts, err := parsePortsSpec(*ports)
-	if err != nil {
-		return adminResponse{}, err
-	}
-	entry.Label = normalizePasswordLabel(*label)
-	entry.VkHash = normalizedHash
-	entry.Ports = normalizedPorts
 	if err := saveAdminDB(configDir, loaded); err != nil {
 		return adminResponse{}, err
 	}

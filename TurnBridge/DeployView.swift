@@ -192,38 +192,6 @@ struct DeployView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section(header: Text("Runtime Limits")) {
-                Picker("Max Passwords", selection: $maxPasswords) {
-                    ForEach(maxPasswordsOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
-                    }
-                }
-
-                Picker("Max Workers Per Access", selection: $maxWorkersPerAccess) {
-                    ForEach(maxWorkersPerAccessOptions, id: \.self) { value in
-                        Text(value == 0 ? "Unlimited" : "\(value)").tag(value)
-                    }
-                }
-
-                Picker("Max Handshakes", selection: $maxHandshakes) {
-                    ForEach(maxHandshakesOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
-                    }
-                }
-
-                Picker("Handshake Rate", selection: $handshakeRate) {
-                    ForEach(handshakeRateOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
-                    }
-                }
-
-                Picker("Max Client Mbps", selection: $maxClientMbps) {
-                    ForEach(maxClientMbpsOptions, id: \.self) { value in
-                        Text(value == 0 ? "Unlimited" : "\(value) Mbps").tag(value)
-                    }
-                }
-            }
-
             Section {
                 NavigationLink {
                     ServerManagementView(
@@ -303,6 +271,38 @@ struct DeployView: View {
                     Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
                 }
                 .disabled(!canConnect)
+            }
+
+            Section(header: Text("Advanced Server")) {
+                Picker("Max Passwords", selection: $maxPasswords) {
+                    ForEach(maxPasswordsOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Workers Per Access", selection: $maxWorkersPerAccess) {
+                    ForEach(maxWorkersPerAccessOptions, id: \.self) { value in
+                        Text(value == 0 ? "Unlimited" : "\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Handshakes", selection: $maxHandshakes) {
+                    ForEach(maxHandshakesOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Handshake Rate", selection: $handshakeRate) {
+                    ForEach(handshakeRateOptions, id: \.self) { value in
+                        Text("\(value)").tag(value)
+                    }
+                }
+
+                Picker("Max Client Mbps", selection: $maxClientMbps) {
+                    ForEach(maxClientMbpsOptions, id: \.self) { value in
+                        Text(value == 0 ? "Unlimited" : "\(value) Mbps").tag(value)
+                    }
+                }
             }
 
             if isRunning {

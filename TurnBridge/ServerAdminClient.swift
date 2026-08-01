@@ -1,5 +1,6 @@
 import Foundation
 import WireGuardKitGo
+import UIKit
 
 struct ServerAdminTarget: Encodable {
     var host: String
@@ -285,9 +286,41 @@ enum ServerAdminBridge {
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             let envelope = try decoder.decode(ServerAdminEnvelope.self, from: responseData)
             if !envelope.ok {
-                throw NSError(domain: "ServerAdminBridge", code: 4, userInfo: [NSLocalizedDescriptionKey: envelope.message])
+                throw NSError(domain: "ServerAdminBridge", code: 4, userInfo: [NSLocalizedDescriptionKey: localizedServerAdminMessage(envelope.message)])
             }
             return envelope
         }.value
+    }
+
+    private static func localizedServerAdminMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("порт #"), trimmed.contains("должен быть числом 1..65535") {
+            if let number = trimmed.split(separator: "#").dropFirst().first?.split(separator: " ").first {
+                return "Port #\(number) must be a number from 1 to 65535."
+            }
+            return "Every port must be a number from 1 to 65535."
+        }
+        switch trimmed {
+        case "пароль не найден":
+            return "Client password not found."
+        case "главный пароль администратора не совпадает":
+            return "Main admin password does not match."
+        case "срок действия клиента истёк":
+            return "The client access has already expired."
+        case "укажите только один из параметров: days или expires-at":
+            return "Specify only one expiry mode: days or expires-at."
+        case "новый срок действия уже истёк":
+            return "The new expiry time is already in the past."
+        case "укажите --password":
+            return "Client password is required."
+        case "клиент с таким паролем уже существует":
+            return "A client with this password already exists."
+        case "пароль клиента не должен совпадать с главным паролем":
+            return "Client password must not match the main password."
+        case "не удалось создать уникальный пароль":
+            return "Failed to generate a unique client password."
+        default:
+            return trimmed
+        }
     }
 }

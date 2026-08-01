@@ -46,7 +46,10 @@ struct WDTTConfigImport {
     }
 
     var vkLink: String {
-        "https://vk.com/call/join/\(hashes.first ?? "")"
+        guard let firstHash = hashes.first, !firstHash.isEmpty else {
+            return ""
+        }
+        return "https://vk.com/call/join/\(firstHash)"
     }
 }
 
@@ -335,10 +338,6 @@ struct ConfigParser {
         guard !trimmedPassword.isEmpty else {
             throw ConfigParseError.invalidWDTTLink("Password is empty.")
         }
-        guard !hashes.isEmpty else {
-            throw ConfigParseError.invalidWDTTLink("VK hash is empty.")
-        }
-
         return WDTTConfigImport(
             host: trimmedHost,
             serverPort: trimmedServerPort,

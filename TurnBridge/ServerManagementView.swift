@@ -28,6 +28,13 @@ struct ServerManagementView: View {
     @State private var showAlert = false
     @State private var showImportPicker = false
     @State private var shareItems: [Any] = []
+    @State private var copiedCurrentPassword = false
+    private let clientDurationOptions: [(title: String, value: Int)] = [
+        ("30", 30),
+        ("180", 180),
+        ("365", 365),
+        ("Unlimited", 0)
+    ]
 
     var body: some View {
         Form {
@@ -77,6 +84,10 @@ struct ServerManagementView: View {
                             }
 
                             Text(expiryText(for: client))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Text(trafficText(for: client))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
@@ -198,7 +209,20 @@ struct ServerManagementView: View {
                         TextField("Password", text: $newClientPassword)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        Stepper("Days: \(newClientDays)", value: $newClientDays, in: 0...365)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Duration")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            HStack {
+                                ForEach(clientDurationOptions, id: \.value) { option in
+                                    Button(option.title) {
+                                        newClientDays = option.value
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(newClientDays == option.value ? .accentColor : .gray.opacity(0.35))
+                                }
+                            }
+                        }
                     }
 
                     Section {
@@ -223,9 +247,17 @@ struct ServerManagementView: View {
             NavigationStack {
                 Form {
                     Section(header: Text("Client")) {
-                        Text(client.password)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
+                        HStack {
+                            Text(String(repeating: "•", count: max(8, client.password.count)))
+                                .font(.caption.monospaced())
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Copy") {
+                                UIPasteboard.general.string = client.password
+                                copiedCurrentPassword = true
+                            }
+                            .buttonStyle(.bordered)
+                        }
                         TextField("Label", text: $editedLabel)
                         TextField("VK Hash", text: $editedHash)
                             .textInputAutocapitalization(.never)
@@ -266,6 +298,11 @@ struct ServerManagementView: View {
                 }
             }
         }
+        .alert("Password Copied", isPresented: $copiedCurrentPassword) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The current client password was copied to the clipboard.")
+        }
     }
 
     private var canManage: Bool {
@@ -298,7 +335,7 @@ struct ServerManagementView: View {
         let request = ServerAdminCreateRequest(
             label: newClientLabel.trimmingCharacters(in: .whitespacesAndNewlines),
             vkHash: newClientHash.trimmingCharacters(in: .whitespacesAndNewlines),
-            ports: newClientPorts.trimmingCharacters(in: .whitespacesAndNewlines),
+            ports: normalizedPortsInput(newClientPorts),
             days: newClientDays,
             clientPassword: newClientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         )
@@ -344,24 +381,44 @@ struct ServerManagementView: View {
     private func saveClientEdits(_ client: ServerAdminClientInfo) {
         guard let target else { return }
         let trimmedPassword = editedNewPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLabel = editedLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedHash = editedHash.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPorts = normalizedPortsInput(editedPorts)
+        let currentExpiresAt = client.expiresAt ?? 0
+        let expiryNeedsUpdate: Bool = {
+            if editedNeverExpires {
+                return currentExpiresAt != 0
+            }
+            guard currentExpiresAt > 0 else { return true }
+            let currentDays = max(1, Int(ceil(Double(max(0, currentExpiresAt - Int64(Date().timeIntervalSince1970))) / 86400.0)))
+            return currentDays != editedExpiryDays
+        }()
+        let detailsNeedUpdate =
+            trimmedLabel != (client.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines) ||
+            trimmedHash != (client.vkHash ?? "").trimmingCharacters(in: .whitespacesAndNewlines) ||
+            trimmedPorts != (client.ports ?? "56000,56001,9000").trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                _ = try await ServerAdminBridge.update(target, request: ServerAdminUpdateRequest(
-                    clientPassword: client.password,
-                    label: editedLabel,
-                    vkHash: editedHash,
-                    ports: editedPorts,
-                    days: nil,
-                    expiresAt: nil,
-                    newPassword: ""
-                ))
+                if detailsNeedUpdate {
+                    _ = try await ServerAdminBridge.update(target, request: ServerAdminUpdateRequest(
+                        clientPassword: client.password,
+                        label: trimmedLabel,
+                        vkHash: trimmedHash,
+                        ports: trimmedPorts,
+                        days: nil,
+                        expiresAt: nil,
+                        newPassword: ""
+                    ))
+                }
 
-                _ = try await ServerAdminBridge.setExpiry(
-                    target,
-                    clientPassword: client.password,
-                    days: editedNeverExpires ? nil : editedExpiryDays,
-                    expiresAt: editedNeverExpires ? 0 : nil
-                )
+                if expiryNeedsUpdate {
+                    _ = try await ServerAdminBridge.setExpiry(
+                        target,
+                        clientPassword: client.password,
+                        days: editedNeverExpires ? nil : editedExpiryDays,
+                        expiresAt: editedNeverExpires ? 0 : nil
+                    )
+                }
 
                 if !trimmedPassword.isEmpty {
                     _ = try await ServerAdminBridge.setPassword(
@@ -514,13 +571,32 @@ struct ServerManagementView: View {
     }
 
     private func quickLink(for client: ServerAdminClientInfo) -> String? {
-        guard let target, let rawHash = client.vkHash?.trimmingCharacters(in: .whitespacesAndNewlines), !rawHash.isEmpty else {
+        guard let target else {
             return nil
         }
+        let rawHash = client.vkHash?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let ports = (client.ports?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? client.ports! : "56000,56001,9000")
         let parts = ports.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard parts.count == 3 else { return nil }
-        return "wdtt://\(target.host):\(parts[0]):\(parts[1]):\(parts[2]):\(client.password):\(rawHash)"
+        var components = URLComponents()
+        components.scheme = "wdtt"
+        components.host = "connect"
+        var queryItems = [
+            URLQueryItem(name: "v", value: "1"),
+            URLQueryItem(name: "host", value: target.host),
+            URLQueryItem(name: "dtls", value: parts[0]),
+            URLQueryItem(name: "wg", value: parts[1]),
+            URLQueryItem(name: "local", value: parts[2]),
+            URLQueryItem(name: "password", value: client.password)
+        ]
+        if !rawHash.isEmpty {
+            queryItems.append(URLQueryItem(name: "hashes", value: rawHash))
+        }
+        if let label = client.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            queryItems.append(URLQueryItem(name: "name", value: label))
+        }
+        components.queryItems = queryItems
+        return components.url?.absoluteString
     }
 
     private func expiryText(for client: ServerAdminClientInfo) -> String {
@@ -531,6 +607,29 @@ struct ServerManagementView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "Expires: \(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(expiresAt))))"
+    }
+
+    private func trafficText(for client: ServerAdminClientInfo) -> String {
+        let total = max(0, (client.downBytes ?? 0) + (client.upBytes ?? 0))
+        return "Traffic: \(formatBytes(total))"
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+        formatter.countStyle = .binary
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    private func normalizedPortsInput(_ value: String) -> String {
+        value
+            .components(separatedBy: .newlines)
+            .joined()
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .joined(separator: ",")
     }
 }
 
