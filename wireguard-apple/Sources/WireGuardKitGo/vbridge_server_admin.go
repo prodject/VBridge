@@ -114,11 +114,25 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 	}
 	command := fmt.Sprintf("/usr/local/bin/wdtt-server admin -main-password %s %s", shellQuoteDeploy(req.MainPassword), strings.Join(args, " "))
 	text, cmdErr := runSSHCommand(client, command, 70*time.Second)
+	jsonText := extractTrailingJSONObject(text)
+
+	var state serverAdminState
+	if jsonText != "" {
+		if err := json.Unmarshal([]byte(jsonText), &state); err == nil {
+			if cmdErr != nil || !state.OK {
+				message := strings.TrimSpace(state.Message)
+				if message == "" && cmdErr != nil {
+					message = "server admin failed: " + cmdErr.Error()
+				}
+				return serverAdminResponse{OK: false, Status: "error", Message: message, Output: text, State: &state}
+			}
+			return serverAdminResponse{OK: true, Status: "success", Message: strings.TrimSpace(state.Message), Output: text, State: &state}
+		}
+	}
+
 	if cmdErr != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server admin failed: " + cmdErr.Error(), Output: text}
 	}
-
-	var state serverAdminState
 	if err := json.Unmarshal([]byte(text), &state); err != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "server returned invalid admin JSON", Output: text}
 	}
@@ -212,4 +226,48 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func extractTrailingJSONObject(text string) string {
+	end := strings.LastIndexByte(text, '}')
+	if end < 0 {
+		return ""
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	start := -1
+	for i := end; i >= 0; i-- {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '}':
+			depth++
+		case '{':
+			depth--
+			if depth == 0 {
+				start = i
+				i = -1
+			}
+		}
+	}
+	if start < 0 || start > end {
+		return ""
+	}
+	return strings.TrimSpace(text[start : end+1])
 }

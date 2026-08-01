@@ -99,6 +99,33 @@ private struct ServerAdminBridgeRequest: Encodable {
     var newPassword: String?
 }
 
+extension ServerAdminClientInfo {
+    private enum CodingKeys: String, CodingKey {
+        case password
+        case label
+        case vkHash = "vk_hash"
+        case ports
+        case status
+        case expiresAt = "expires_at"
+        case downBytes = "down_bytes"
+        case upBytes = "up_bytes"
+        case deviceId = "device_id"
+    }
+}
+
+extension ServerAdminClientTransferPayload {
+    private enum CodingKeys: String, CodingKey {
+        case format
+        case version
+        case createdAt = "created_at"
+        case password
+        case label
+        case vkHash = "vk_hash"
+        case expiresAt = "expires_at"
+        case deactivated
+    }
+}
+
 enum ServerAdminBridge {
     static func list(_ target: ServerAdminTarget) async throws -> [ServerAdminClientInfo] {
         let response = try await call(ServerAdminBridgeRequest(
@@ -254,7 +281,9 @@ enum ServerAdminBridge {
             guard let responseData = responseJSON.data(using: .utf8) else {
                 throw NSError(domain: "ServerAdminBridge", code: 3, userInfo: [NSLocalizedDescriptionKey: "Server admin bridge returned invalid UTF-8."])
             }
-            let envelope = try JSONDecoder().decode(ServerAdminEnvelope.self, from: responseData)
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let envelope = try decoder.decode(ServerAdminEnvelope.self, from: responseData)
             if !envelope.ok {
                 throw NSError(domain: "ServerAdminBridge", code: 4, userInfo: [NSLocalizedDescriptionKey: envelope.message])
             }
