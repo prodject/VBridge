@@ -44,6 +44,7 @@ extern void VBridgeWGSetTimezoneOffset(int offsetSeconds);
 extern char *VBridgeWGGetTURNServerIP(int32_t handle);
 extern char *VBridgeWGDeployServer(const char *jsonConfig);
 extern char *VBridgeWGServerAdmin(const char *jsonConfig);
+extern char *VBridgeWGServerOutbound(const char *jsonConfig);
 extern void VBridgeWGFreeCString(char *ptr);
 
 typedef void (*libxray_sockcallback)(uintptr_t fd, void* ctx);
