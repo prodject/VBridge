@@ -405,8 +405,12 @@ struct SplitTunnelSettingsView: View {
     @State private var errorMessage = ""
     @State private var showErrorAlert = false
 
-    init(showsDoneButton: Bool = false) {
+    init(
+        showsDoneButton: Bool = false,
+        onCommit: ((SplitTunnelSettings) -> Void)? = nil
+    ) {
         self.showsDoneButton = showsDoneButton
+        self.onCommit = onCommit
     }
 
     var body: some View {
