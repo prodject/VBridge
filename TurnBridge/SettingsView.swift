@@ -21,6 +21,8 @@ struct SettingsView: View {
     @State private var showVKCallCreator = false
     @State private var vkCallCreatorStatus: String?
 
+    private let wdttTunnelMTUPresets: [Int?] = [nil, 1280, 1320, 1360, 1380, 1400, 1420, 1440, 1500]
+
     private var profile: VPNProfile {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
     }
@@ -153,6 +155,17 @@ struct SettingsView: View {
                         Text("8202606").tag("8202606")
                     }
                     .pickerStyle(.menu)
+
+                    Picker("Tunnel MTU", selection: binding(\.wdttTunnelMTU)) {
+                        ForEach(wdttTunnelMTUPresets, id: \.self) { mtu in
+                            Text(mtuLabel(mtu)).tag(mtu as Int?)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("Auto uses the MTU provisioned by the server. Set an override only if you need to tune the client-side tunnel path.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -384,7 +397,7 @@ struct SettingsView: View {
     }
 
     private func generateQuickImportLink() {
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "name": profile.name,
             "mode": profile.transportMode.rawValue,
             "turn": profile.vkLink,
@@ -404,6 +417,9 @@ struct SettingsView: View {
             "wdttClientIDMode": profile.wdttClientIDMode,
             "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight
         ]
+        if let wdttTunnelMTU = profile.wdttTunnelMTU, wdttTunnelMTU > 0 {
+            payload["wdttTunnelMTU"] = wdttTunnelMTU
+        }
 
         guard JSONSerialization.isValidJSONObject(payload),
               let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []),
@@ -445,5 +461,10 @@ struct SettingsView: View {
                 draft?[keyPath: keyPath] = newValue
             }
         )
+    }
+
+    private func mtuLabel(_ value: Int?) -> String {
+        guard let value else { return "Auto (Server Suggested)" }
+        return "\(value)"
     }
 }

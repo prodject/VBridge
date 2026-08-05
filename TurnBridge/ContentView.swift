@@ -1083,6 +1083,7 @@ struct ContentView: View {
             wdttFingerprint: profile.wdttFingerprint,
             wdttClientIDMode: profile.wdttClientIDMode,
             wdttUseVKCallsPreflight: profile.wdttUseVKCallsPreflight,
+            wdttTunnelMTU: profile.wdttTunnelMTU,
             seededTURN: seededTURN
         ) { isSuccess in
             if isSuccess {
@@ -2533,7 +2534,8 @@ struct ContentView: View {
             wdttServerKey: config.wdttServerKey ?? "",
             wdttFingerprint: config.wdttFingerprint ?? "auto",
             wdttClientIDMode: config.wdttClientIDMode ?? "default",
-            wdttUseVKCallsPreflight: config.wdttUseVKCallsPreflight ?? true
+            wdttUseVKCallsPreflight: config.wdttUseVKCallsPreflight ?? true,
+            wdttTunnelMTU: config.wdttTunnelMTU
         )
     }
 

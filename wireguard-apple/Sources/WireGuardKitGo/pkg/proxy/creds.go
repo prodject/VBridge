@@ -1855,7 +1855,7 @@ func (cp *credPool) get(connIdx int, allowCaptchaBlock bool) (string, *TURNCreds
 	// grower's existing cold-start target (growCredPool) — the grower still
 	// fills reserve slots beyond the target, but slowly + staggered.
 	{
-		usable := cp.countWithUsableCredsLocked()
+		fresh := cp.countFreshLocked()
 		inFlight := 0
 		for i := range cp.pool {
 			if cp.pool[i].fetching {
@@ -1866,9 +1866,9 @@ func (cp *credPool) get(connIdx int, allowCaptchaBlock bool) (string, *TURNCreds
 		if coldStartTarget < 1 {
 			coldStartTarget = 1
 		}
-		if usable+inFlight >= coldStartTarget {
+		if fresh+inFlight >= coldStartTarget {
 			cp.mu.Unlock()
-			return "", nil, -1, fmt.Errorf("credpool: cold-start cap (%d usable+inflight >= %d target) — parking to share instead of over-fetching", usable+inFlight, coldStartTarget)
+			return "", nil, -1, fmt.Errorf("credpool: cold-start cap (%d fresh+inflight >= %d target) — parking to share instead of over-fetching", fresh+inFlight, coldStartTarget)
 		}
 	}
 

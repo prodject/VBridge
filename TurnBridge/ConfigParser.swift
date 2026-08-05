@@ -24,6 +24,7 @@ struct TurnConfigImport: Codable {
     let wdttFingerprint: String?
     let wdttClientIDMode: String?
     let wdttUseVKCallsPreflight: Bool?
+    let wdttTunnelMTU: Int?
 }
 
 struct AmneziaConfigImport {

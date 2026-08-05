@@ -599,6 +599,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let wdttFingerprint = (providerConfiguration["wdttFingerprint"] as? String) ?? "auto"
         let wdttClientIDMode = (providerConfiguration["wdttClientIDMode"] as? String) ?? "default"
         let wdttUseVKCallsPreflight = (providerConfiguration["wdttUseVKCallsPreflight"] as? Bool) ?? true
+        let wdttTunnelMTU = providerConfiguration["wdttTunnelMTU"] as? Int
         let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
 
         if useSingleProxyWorker && requestedNValue != 1 {
@@ -690,10 +691,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
                 SharedLogger.info("WDTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 effectiveUAPI = provision.uapi
+                let effectiveMTU = wdttTunnelMTU.flatMap { $0 > 0 ? $0 : nil } ?? provision.mtu ?? 1280
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
                     dns: provision.dns,
-                    mtu: provision.mtu.map(String.init) ?? "1280",
+                    mtu: String(effectiveMTU),
                     tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
                     splitTunnel: splitTunnel
                 )

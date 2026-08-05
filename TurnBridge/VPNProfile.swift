@@ -53,6 +53,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var wdttFingerprint: String
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
+    var wdttTunnelMTU: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -74,6 +75,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case wdttFingerprint
         case wdttClientIDMode
         case wdttUseVKCallsPreflight
+        case wdttTunnelMTU
     }
 
     init(
@@ -95,7 +97,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttServerKey: String = "",
         wdttFingerprint: String = "auto",
         wdttClientIDMode: String = "default",
-        wdttUseVKCallsPreflight: Bool = true
+        wdttUseVKCallsPreflight: Bool = true,
+        wdttTunnelMTU: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -116,6 +119,7 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.wdttFingerprint = wdttFingerprint
         self.wdttClientIDMode = wdttClientIDMode
         self.wdttUseVKCallsPreflight = wdttUseVKCallsPreflight
+        self.wdttTunnelMTU = wdttTunnelMTU
     }
 
     init(from decoder: Decoder) throws {
@@ -139,5 +143,6 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttFingerprint = try container.decodeIfPresent(String.self, forKey: .wdttFingerprint) ?? "auto"
         wdttClientIDMode = try container.decodeIfPresent(String.self, forKey: .wdttClientIDMode) ?? "default"
         wdttUseVKCallsPreflight = try container.decodeIfPresent(Bool.self, forKey: .wdttUseVKCallsPreflight) ?? true
+        wdttTunnelMTU = try container.decodeIfPresent(Int.self, forKey: .wdttTunnelMTU)
     }
 }

@@ -20,6 +20,7 @@ struct TunnelStartConfiguration: Codable {
     var wdttFingerprint: String
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
+    var wdttTunnelMTU: Int?
     var seededTURN: SeededTURNCredentials?
 
     var normalizedWgQuickConfig: String {
@@ -63,6 +64,10 @@ struct TunnelStartConfiguration: Codable {
 
         if let seededTURN {
             configuration["seededTURN"] = seededTURN.providerConfiguration
+        }
+
+        if let wdttTunnelMTU, wdttTunnelMTU > 0 {
+            configuration["wdttTunnelMTU"] = wdttTunnelMTU
         }
 
         return configuration
