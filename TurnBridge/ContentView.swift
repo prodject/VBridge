@@ -351,6 +351,10 @@ struct ContentView: View {
     @State private var lastHandledCaptchaRecoveryID: String?
     @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
     @State private var preBootstrapCaptchaContinuation: CheckedContinuation<PreBootstrapCaptchaResult, Never>?
+    @State private var settingsProfileSnapshot: VPNProfile?
+    @State private var splitTunnelSnapshot = SplitTunnelStorage.load()
+    @State private var pendingTunnelRestartProfile: VPNProfile?
+    @State private var pendingTunnelRestartReason = ""
 
     // PacketTunnelProvider may spend up to 120s in VK/TURN bootstrap and
     // another 30s waiting for WDTT provisioning. Keep the UI watchdog beyond
@@ -377,12 +381,20 @@ struct ContentView: View {
             }
             .sheet(item: $settingsSheet) { sheet in
                 NavigationStack {
-                    SettingsView(store: store, profileID: sheet.profileID, isNewProfile: sheet.isNew)
+                    SettingsView(
+                        store: store,
+                        profileID: sheet.profileID,
+                        isNewProfile: sheet.isNew
+                    ) { profile, changed in
+                        handleProfileSettingsCommit(profile: profile, changed: changed)
+                    }
                 }
             }
             .sheet(isPresented: $showSplitTunnelSheet) {
                 NavigationStack {
-                    SplitTunnelSettingsView(showsDoneButton: true)
+                    SplitTunnelSettingsView(showsDoneButton: true) { _ in
+                        handleSplitTunnelSettingsCommit()
+                    }
                 }
             }
             .sheet(isPresented: $showDeploySheet) {
@@ -710,13 +722,12 @@ struct ContentView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            let canEditProfile = vpnStatus == .disconnected && store.selectedProfile != nil
+            let canEditProfile = store.selectedProfile != nil
 
             Button(action: {
                 guard let id = store.selectedProfileID else { return }
-                if vpnStatus == .disconnected {
-                    settingsSheet = SettingsSheet(profileID: id, isNew: false)
-                }
+                settingsProfileSnapshot = store.selectedProfile
+                settingsSheet = SettingsSheet(profileID: id, isNew: false)
             }) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.title3)
@@ -724,23 +735,20 @@ struct ContentView: View {
             }
 
             Button(action: {
-                if vpnStatus == .disconnected {
-                    showSplitTunnelSheet = true
-                }
+                splitTunnelSnapshot = SplitTunnelStorage.load()
+                showSplitTunnelSheet = true
             }) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(.title3)
-                    .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
+                    .foregroundColor(toolbarForegroundColor())
             }
 
             Button(action: {
-                if vpnStatus == .disconnected {
-                    showDeploySheet = true
-                }
+                showDeploySheet = true
             }) {
                 Image(systemName: "server.rack")
                     .font(.title3)
-                    .foregroundColor(toolbarForegroundColor(isEnabled: vpnStatus == .disconnected))
+                    .foregroundColor(toolbarForegroundColor())
             }
 
             NavigationLink(destination: GlobalSettingsView()) {
@@ -957,59 +965,97 @@ struct ContentView: View {
 #endif
         } else {
             guard let profile = store.selectedProfile else { return }
-            if resetCaptchaRecoveryState {
-                captchaRecoveryRestartCount = 0
-                clearCaptchaRecoveryRequest()
-            }
-            if let errorMessage = validateConfig(profile) {
-                SharedLogger.warning("Config validation failed: \(errorMessage)")
-                showAlert(title: "Configuration Required", message: errorMessage)
-                return
-            }
+            connectTunnel(using: profile, resetCaptchaRecoveryState: resetCaptchaRecoveryState)
+        }
+    }
 
-            SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
-            isUserInitiatedDisconnect = false
-            UserNotificationDispatcher.shared.clearConnectionIssueNotification()
-            resetSpeedTelemetry()
-            let configuredThreadCount = max(profile.nValue, 1)
-            vpnStatus = .connecting
-            isPreparingTunnelStart = true
-            connectionStartedAt = Date()
-            refreshConnectionProgress()
-            beginLiveActivity(for: profile, targetWorkers: configuredThreadCount)
-            let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
-            tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
-            SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
-            Task {
-                do {
-                    let seededTURN = try await prepareSeededTURNIfNeeded(for: profile)
-                    await MainActor.run {
-                        guard vpnStatus == .connecting else { return }
-                        isPreparingTunnelStart = false
-                        startConfiguredTunnel(
-                            profile: profile,
-                            listenAddr: effectiveListenAddr,
-                            configuredThreadCount: configuredThreadCount,
-                            seededTURN: seededTURN
-                        )
-                    }
-                } catch {
-                    await MainActor.run {
-                        isPreparingTunnelStart = false
-                        cancelConnectWatchdog()
-                        resetSpeedTelemetry()
-                        vpnStatus = .disconnected
-                        SharedLogger.error("Pre-bootstrap failed: \(error.localizedDescription)")
-                        endLiveActivity(profileName: profile.name, immediate: true)
-                        presentConnectionIssue(
-                            title: "Connection Failed",
-                            message: error.localizedDescription
-                        )
-                        refreshWidgetTimelines()
-                    }
+    private func connectTunnel(using profile: VPNProfile, resetCaptchaRecoveryState: Bool) {
+        if resetCaptchaRecoveryState {
+            captchaRecoveryRestartCount = 0
+            clearCaptchaRecoveryRequest()
+        }
+        if let errorMessage = validateConfig(profile) {
+            SharedLogger.warning("Config validation failed: \(errorMessage)")
+            showAlert(title: "Configuration Required", message: errorMessage)
+            return
+        }
+
+        SharedLogger.info("User requested connect with profile \"\(profile.name)\"")
+        isUserInitiatedDisconnect = false
+        UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+        resetSpeedTelemetry()
+        let configuredThreadCount = max(profile.nValue, 1)
+        vpnStatus = .connecting
+        isPreparingTunnelStart = true
+        connectionStartedAt = Date()
+        refreshConnectionProgress()
+        beginLiveActivity(for: profile, targetWorkers: configuredThreadCount)
+        let effectiveListenAddr = resolvedListenAddress(from: profile.listenAddr)
+        tetherProxyPort = extractPort(from: effectiveListenAddr) ?? 9000
+        SharedLogger.info("Proxy listen mode: \(tetherProxyEnabled ? "tether" : "local"), addr=\(effectiveListenAddr)")
+        Task {
+            do {
+                let seededTURN = try await prepareSeededTURNIfNeeded(for: profile)
+                await MainActor.run {
+                    guard vpnStatus == .connecting else { return }
+                    isPreparingTunnelStart = false
+                    startConfiguredTunnel(
+                        profile: profile,
+                        listenAddr: effectiveListenAddr,
+                        configuredThreadCount: configuredThreadCount,
+                        seededTURN: seededTURN
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    isPreparingTunnelStart = false
+                    cancelConnectWatchdog()
+                    resetSpeedTelemetry()
+                    vpnStatus = .disconnected
+                    SharedLogger.error("Pre-bootstrap failed: \(error.localizedDescription)")
+                    endLiveActivity(profileName: profile.name, immediate: true)
+                    presentConnectionIssue(
+                        title: "Connection Failed",
+                        message: error.localizedDescription
+                    )
+                    refreshWidgetTimelines()
                 }
             }
         }
+    }
+
+    private func queueActiveTunnelRestart(using profile: VPNProfile, reason: String) {
+        pendingTunnelRestartProfile = profile
+        pendingTunnelRestartReason = reason
+
+        switch vpnStatus {
+        case .connected, .connecting, .reasserting:
+            SharedLogger.info("Queued active tunnel restart: \(reason)")
+            toggleTunnel(resetCaptchaRecoveryState: false)
+        case .disconnected, .invalid:
+            SharedLogger.info("Applying tunnel configuration immediately: \(reason)")
+            connectTunnel(using: profile, resetCaptchaRecoveryState: false)
+            pendingTunnelRestartProfile = nil
+            pendingTunnelRestartReason = ""
+        default:
+            SharedLogger.info("Waiting for current tunnel transition before restart: \(reason)")
+        }
+    }
+
+    private func handleProfileSettingsCommit(profile: VPNProfile, changed: Bool) {
+        defer { settingsProfileSnapshot = nil }
+        guard changed else { return }
+        guard store.selectedProfileID == profile.id else { return }
+        guard vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting else { return }
+        queueActiveTunnelRestart(using: profile, reason: "profile settings changed")
+    }
+
+    private func handleSplitTunnelSettingsCommit() {
+        let current = SplitTunnelStorage.load()
+        guard current != splitTunnelSnapshot else { return }
+        guard let profile = store.selectedProfile else { return }
+        guard vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting else { return }
+        queueActiveTunnelRestart(using: profile, reason: "split tunneling settings changed")
     }
 
     private func startConfiguredTunnel(
@@ -1376,12 +1422,22 @@ struct ContentView: View {
             captchaRecoveryRestartCount = 0
             clearCaptchaRecoveryRequest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
+            pendingTunnelRestartProfile = nil
+            pendingTunnelRestartReason = ""
         } else if newStatus == .disconnected, isUserInitiatedDisconnect {
             isUserInitiatedDisconnect = false
             captchaRecoveryRestartCount = 0
             clearCaptchaRecoveryRequest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             endLiveActivity(immediate: true)
+            if let profile = pendingTunnelRestartProfile {
+                let reason = pendingTunnelRestartReason
+                pendingTunnelRestartProfile = nil
+                pendingTunnelRestartReason = ""
+                SharedLogger.info("Restarting active tunnel after settings change: \(reason)")
+                connectTunnel(using: profile, resetCaptchaRecoveryState: false)
+                return
+            }
         } else if newStatus == .disconnected,
                   previousStatus == .connecting || previousStatus == .reasserting {
             handleCaptchaRecoveryIfNeeded()

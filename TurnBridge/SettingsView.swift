@@ -6,9 +6,11 @@ struct SettingsView: View {
     @ObservedObject var store: ProfileStore
     var profileID: UUID
     var isNewProfile: Bool = false
+    var onCommit: ((VPNProfile, Bool) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft: VPNProfile?
+    @State private var originalProfile: VPNProfile?
     @State private var showDeleteConfirmation = false
     @State private var showExportError = false
     @State private var exportErrorMessage = ""
@@ -204,6 +206,9 @@ struct SettingsView: View {
             if draft == nil {
                 draft = store.profiles.first(where: { $0.id == profileID })
             }
+            if originalProfile == nil {
+                originalProfile = store.profiles.first(where: { $0.id == profileID })
+            }
         }
         .alert("Delete Profile?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -245,9 +250,12 @@ struct SettingsView: View {
         }
         .onDisappear {
             guard let draft else { return }
-            if store.profiles.contains(where: { $0.id == profileID }) {
-                store.selectedProfile = draft
+            let changed = originalProfile != draft
+            if let idx = store.profiles.firstIndex(where: { $0.id == profileID }) {
+                store.profiles[idx] = draft
+                store.save()
             }
+            onCommit?(draft, changed)
         }
     }
 

@@ -398,6 +398,7 @@ struct SplitTunnelSettingsView: View {
     @Environment(\.openURL) private var openURL
 
     let showsDoneButton: Bool
+    var onCommit: ((SplitTunnelSettings) -> Void)? = nil
 
     @State private var settings = SplitTunnelStorage.load()
     @State private var isPullingGitHubList = false
@@ -538,6 +539,9 @@ struct SplitTunnelSettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage)
+        }
+        .onDisappear {
+            onCommit?(settings)
         }
     }
 
