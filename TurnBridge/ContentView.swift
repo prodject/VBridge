@@ -1658,8 +1658,29 @@ struct ContentView: View {
             if vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting {
                 toggleTunnel()
             }
+        case .reconnect:
+            reconnectTunnel()
         }
         return true
+    }
+
+    private func reconnectTunnel() {
+        guard let profile = store.selectedProfile else { return }
+
+        switch vpnStatus {
+        case .connected, .connecting, .reasserting:
+            pendingTunnelRestartProfile = profile
+            pendingTunnelRestartReason = "Reconnect requested from Live Activity"
+            SharedLogger.info("Queued tunnel reconnect from Live Activity")
+            toggleTunnel(resetCaptchaRecoveryState: false)
+        case .disconnected, .invalid:
+            SharedLogger.info("Starting tunnel reconnect from disconnected state")
+            connectTunnel(using: profile, resetCaptchaRecoveryState: false)
+        default:
+            SharedLogger.info("Reconnect requested while tunnel is transitioning; waiting for disconnect")
+            pendingTunnelRestartProfile = profile
+            pendingTunnelRestartReason = "Reconnect requested from Live Activity"
+        }
     }
 
     private func latestConnectionProgressFromLogs() -> (active: Int, total: Int)? {

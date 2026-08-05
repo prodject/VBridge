@@ -4,6 +4,7 @@ enum PendingShortcutAction: String {
     case toggle
     case connect
     case disconnect
+    case reconnect
 }
 
 extension Notification.Name {

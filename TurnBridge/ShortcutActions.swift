@@ -41,6 +41,19 @@ struct DisconnectVPNIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
+struct ReconnectVPNIntent: AppIntent {
+    static var title: LocalizedStringResource = "Reconnect VBridge VPN"
+    static var description = IntentDescription("Opens VBridge, disconnects the current tunnel, and connects it again.")
+    static var openAppWhenRun = true
+    static var isDiscoverable = true
+
+    func perform() async throws -> some IntentResult {
+        PendingShortcutActionStore.store(.reconnect)
+        return .result()
+    }
+}
+
+@available(iOS 16.0, *)
 struct VBridgeAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -69,6 +82,15 @@ struct VBridgeAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Disconnect VPN",
             systemImageName: "lock.open"
+        )
+        AppShortcut(
+            intent: ReconnectVPNIntent(),
+            phrases: [
+                "Reconnect VPN in \(.applicationName)",
+                "Restart VPN in \(.applicationName)"
+            ],
+            shortTitle: "Reconnect VPN",
+            systemImageName: "arrow.clockwise"
         )
     }
 }

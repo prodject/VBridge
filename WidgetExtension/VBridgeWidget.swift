@@ -25,6 +25,11 @@ private enum WidgetActionStore {
         defaults?.set("disconnect", forKey: key)
         defaults?.synchronize()
     }
+
+    static func storeReconnectAction() {
+        defaults?.set("reconnect", forKey: key)
+        defaults?.synchronize()
+    }
 }
 
 @available(iOS 17.0, *)
@@ -62,6 +67,19 @@ private struct DisconnectVBridgeWidgetIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         WidgetActionStore.storeDisconnectAction()
+        return .result()
+    }
+}
+
+@available(iOS 17.0, *)
+private struct ReconnectVBridgeWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Reconnect VBridge VPN"
+    static var description = IntentDescription("Opens VBridge, disconnects the current tunnel, and connects it again.")
+    static var openAppWhenRun = true
+    static var isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        WidgetActionStore.storeReconnectAction()
         return .result()
     }
 }
@@ -1358,7 +1376,7 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "network")
                     .font(.system(size: 10, weight: .semibold))
@@ -1386,7 +1404,41 @@ private struct VBridgeLiveActivityWidget: Widget {
 
                 Spacer(minLength: 0)
             }
+
+            if #available(iOS 17.0, *) {
+                HStack(spacing: 8) {
+                    Button(intent: DisconnectVBridgeWidgetIntent()) {
+                        liveActivityActionButtonLabel(title: "Disconnect", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(intent: ReconnectVBridgeWidgetIntent()) {
+                        liveActivityActionButtonLabel(title: "Reconnect", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
+    }
+
+    private func liveActivityActionButtonLabel(title: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+
+            Text(title)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 9)
+        .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func liveActivityTint(for phase: VBridgeLiveActivityPhase) -> Color {
