@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var showScannerError = false
     @State private var scannerErrorMessage = ""
     @State private var showLinkGeneratedAlert = false
+    @State private var showVKCallCreator = false
+    @State private var vkCallCreatorStatus: String?
 
     private var profile: VPNProfile {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
@@ -105,6 +107,25 @@ struct SettingsView: View {
                         .disableAutocorrection(true)
 
                     Text("WireGuard settings are provisioned by the WDTT server after bootstrap.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section {
+                    Button {
+                        vkCallCreatorStatus = nil
+                        showVKCallCreator = true
+                    } label: {
+                        Label("Get VK Call URL", systemImage: "phone.badge.plus")
+                    }
+
+                    if let vkCallCreatorStatus, !vkCallCreatorStatus.isEmpty {
+                        Text(vkCallCreatorStatus)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Text("Creates a new VK call from the VK account you confirm on the next screen and inserts its link at the top of this profile.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -248,6 +269,14 @@ struct SettingsView: View {
             )
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $showVKCallCreator) {
+            VKCallURLCreatorView(
+                onSuccess: { link in
+                    applyCreatedVKCallLink(link)
+                },
+                onCancel: {}
+            )
+        }
         .onDisappear {
             guard let draft else { return }
             let changed = originalProfile != draft
@@ -388,6 +417,22 @@ struct SettingsView: View {
         let link = "vbridge://\(base64)"
         UIPasteboard.general.string = link
         showLinkGeneratedAlert = true
+    }
+
+    private func applyCreatedVKCallLink(_ link: String) {
+        let trimmedLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLink.isEmpty else {
+            vkCallCreatorStatus = "VK returned an empty call link."
+            return
+        }
+
+        let existingLines = profile.vkLink
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != trimmedLink }
+
+        binding(\.vkLink).wrappedValue = ([trimmedLink] + existingLines).joined(separator: "\n")
+        vkCallCreatorStatus = "Call created and added as the first link."
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {
