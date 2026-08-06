@@ -1554,6 +1554,8 @@ struct ContentView: View {
             PendingShortcutActionStore.store(.connect)
         case "disconnect":
             PendingShortcutActionStore.store(.disconnect)
+        case "reconnect":
+            PendingShortcutActionStore.store(.reconnect)
         default:
             return false
         }

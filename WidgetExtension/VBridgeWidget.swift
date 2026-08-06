@@ -1384,15 +1384,13 @@ private struct VBridgeLiveActivityWidget: Widget {
 
             if #available(iOS 17.0, *) {
                 HStack(spacing: 8) {
-                    Button(intent: DisconnectVBridgeWidgetIntent()) {
+                    Link(destination: URL(string: "vbridge://disconnect")!) {
                         liveActivityActionButtonLabel(title: "Disconnect", systemImage: "xmark.circle")
                     }
-                    .buttonStyle(.plain)
 
-                    Button(intent: ReconnectVBridgeWidgetIntent()) {
+                    Link(destination: URL(string: "vbridge://reconnect")!) {
                         liveActivityActionButtonLabel(title: "Reconnect", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1423,22 +1421,16 @@ private struct VBridgeLiveActivityWidget: Widget {
         showsRelayAndProgress: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(state.progressText ?? "0/0")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-
-                if showsRelayAndProgress {
+            if showsRelayAndProgress {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(state.relayText)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.75))
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
-                }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
 
             if showsRelayAndProgress {
