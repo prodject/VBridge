@@ -385,12 +385,13 @@ struct ContentView: View {
                         store: store,
                         profileID: sheet.profileID,
                         isNewProfile: sheet.isNew,
+                        onCommit: { profile, changed in
+                            handleProfileSettingsCommit(profile: profile, changed: changed)
+                        },
                         onAutodetectWDTTMtu: { profileID in
                             try await autodetectWDTTMtu(for: profileID)
                         }
-                    ) { profile, changed in
-                        handleProfileSettingsCommit(profile: profile, changed: changed)
-                    }
+                    )
                 }
             }
             .sheet(isPresented: $showSplitTunnelSheet) {
