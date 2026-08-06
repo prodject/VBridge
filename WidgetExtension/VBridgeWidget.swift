@@ -1075,32 +1075,9 @@ private struct VBridgeLiveActivityWidget: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(context.state.progressText ?? "0/0")
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-
-                            Text(context.state.relayText)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.55)
-
-                            Spacer(minLength: 0)
-                        }
-
-                        ProgressView(value: context.state.progressFraction ?? 1)
-                            .tint(.white)
-                            .progressViewStyle(.linear)
-                            .scaleEffect(x: 1, y: 0.72, anchor: .center)
-
-                        liveActivitySpeedRow(
-                            download: context.state.downloadSpeedText ?? "DL --",
-                            upload: context.state.uploadSpeedText ?? "UL --"
-                        )
+                    ViewThatFits(in: .vertical) {
+                        liveActivityExpandedCenterView(state: context.state, showsRelayAndProgress: true)
+                        liveActivityExpandedCenterView(state: context.state, showsRelayAndProgress: false)
                     }
                     .padding(.horizontal, 2)
                 }
@@ -1439,6 +1416,43 @@ private struct VBridgeLiveActivityWidget: Widget {
         .padding(.horizontal, 9)
         .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func liveActivityExpandedCenterView(
+        state: VBridgeVPNLiveActivityAttributes.ContentState,
+        showsRelayAndProgress: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(state.progressText ?? "0/0")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                if showsRelayAndProgress {
+                    Text(state.relayText)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if showsRelayAndProgress {
+                ProgressView(value: state.progressFraction ?? 1)
+                    .tint(.white)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(x: 1, y: 0.72, anchor: .center)
+            }
+
+            liveActivitySpeedRow(
+                download: state.downloadSpeedText ?? "DL --",
+                upload: state.uploadSpeedText ?? "UL --"
+            )
+        }
     }
 
     private func liveActivityTint(for phase: VBridgeLiveActivityPhase) -> Color {
