@@ -1071,7 +1071,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                         statusSymbol: liveActivityStatusSymbol(phase: context.state.phase),
                         statusAccent: liveActivityStatusAccent(phase: context.state.phase)
                     )
-                        .padding(.leading, 2)
+                        .padding(.leading, 1)
                 }
 
                 DynamicIslandExpandedRegion(.center) {
@@ -1263,11 +1263,11 @@ private struct VBridgeLiveActivityWidget: Widget {
     ) -> some View {
         HStack(spacing: 6) {
             Image(systemName: statusSymbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(statusAccent)
 
             Text(phase.displayTitle)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -1353,7 +1353,7 @@ private struct VBridgeLiveActivityWidget: Widget {
     }
 
     private func liveActivityExpandedBottomView(state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "network")
                     .font(.system(size: 10, weight: .semibold))
@@ -1383,35 +1383,43 @@ private struct VBridgeLiveActivityWidget: Widget {
             }
 
             if #available(iOS 17.0, *) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Link(destination: URL(string: "vbridge://disconnect")!) {
-                        liveActivityActionButtonLabel(title: "Disconnect", systemImage: "xmark.circle")
+                        liveActivityActionButtonLabel(
+                            title: "Disconnect",
+                            systemImage: "xmark.circle",
+                            tint: Color(red: 1.0, green: 20.0 / 255.0, blue: 147.0 / 255.0)
+                        )
                     }
 
                     Link(destination: URL(string: "vbridge://reconnect")!) {
-                        liveActivityActionButtonLabel(title: "Reconnect", systemImage: "arrow.clockwise")
+                        liveActivityActionButtonLabel(
+                            title: "Reconnect",
+                            systemImage: "arrow.clockwise",
+                            tint: Color(red: 30.0 / 255.0, green: 144.0 / 255.0, blue: 1.0)
+                        )
                     }
                 }
             }
         }
     }
 
-    private func liveActivityActionButtonLabel(title: String, systemImage: String) -> some View {
+    private func liveActivityActionButtonLabel(title: String, systemImage: String, tint: Color) -> some View {
         HStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tint)
 
             Text(title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 7)
         .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
