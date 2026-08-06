@@ -7,6 +7,7 @@ struct SettingsView: View {
     var profileID: UUID
     var isNewProfile: Bool = false
     var onCommit: ((VPNProfile, Bool) -> Void)? = nil
+    var onAutodetectWDTTMtu: ((UUID) async throws -> Int)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft: VPNProfile?
@@ -132,46 +133,18 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Section(header: Text("Advanced WDTT")) {
-                    Toggle(isOn: binding(\.wdttUseVKCallsPreflight)) {
-                        VStack(alignment: .leading) {
-                            Text("VK Calls Preflight")
-                            Text("Disable only if you need the legacy captcha path instead of the VK Calls bootstrap path.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                Section {
+                    NavigationLink {
+                        WDTTAdvancedSettingsView(
+                            profile: bindingToDraftProfile(),
+                            presets: wdttTunnelMTUPresets,
+                            onAutodetectMTU: onAutodetectWDTTMtu.map { callback in
+                                { try await callback(profileID) }
+                            }
+                        )
+                    } label: {
+                        Label("Advanced WDTT", systemImage: "slider.horizontal.3")
                     }
-
-                    Picker("Fingerprint", selection: binding(\.wdttFingerprint)) {
-                        Text("Auto").tag("auto")
-                        Text("Safari").tag("safari")
-                        Text("Chrome").tag("chrome")
-                    }
-                    .pickerStyle(.menu)
-
-                    Picker("Client ID Filter", selection: binding(\.wdttClientIDMode)) {
-                        Text("Default Rotation").tag("default")
-                        Text("6287487").tag("6287487")
-                        Text("8202606").tag("8202606")
-                    }
-                    .pickerStyle(.menu)
-
-                    Picker("Tunnel MTU", selection: binding(\.wdttTunnelMTU)) {
-                        ForEach(wdttTunnelMTUPresets, id: \.self) { mtu in
-                            Text(mtuLabel(mtu)).tag(mtu as Int?)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Auto uses the MTU provisioned by the server.")
-                        Text("1280: safest default for unstable mobile paths.")
-                        Text("1360: balanced choice for most LTE and Wi-Fi networks.")
-                        Text("1420: use on clean paths when you want lower overhead.")
-                        Text("1500: only for LAN or very clean full-MTU routes.")
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
                 }
             }
 
@@ -467,6 +440,134 @@ struct SettingsView: View {
                 draft?[keyPath: keyPath] = newValue
             }
         )
+    }
+
+    private func bindingToDraftProfile() -> Binding<VPNProfile> {
+        Binding(
+            get: { profile },
+            set: { newValue in
+                if draft == nil {
+                    draft = store.profiles.first(where: { $0.id == profileID })
+                }
+                draft = newValue
+            }
+        )
+    }
+
+    private func mtuLabel(_ value: Int?) -> String {
+        guard let value else { return "Auto (Server Suggested)" }
+        return "\(value)"
+    }
+}
+
+private struct WDTTAdvancedSettingsView: View {
+    @Binding var profile: VPNProfile
+    let presets: [Int?]
+    var onAutodetectMTU: (() async throws -> Int)? = nil
+
+    @State private var isDetectingMTU = false
+    @State private var mtuStatusMessage: String?
+    @State private var showMTUAlert = false
+    @State private var mtuAlertTitle = ""
+    @State private var mtuAlertMessage = ""
+
+    var body: some View {
+        Form {
+            Section(header: Text("Runtime")) {
+                Toggle(isOn: $profile.wdttUseVKCallsPreflight) {
+                    VStack(alignment: .leading) {
+                        Text("VK Calls Preflight")
+                        Text("Disable only if you need the legacy captcha path instead of the VK Calls bootstrap path.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Picker("Fingerprint", selection: $profile.wdttFingerprint) {
+                    Text("Auto").tag("auto")
+                    Text("Safari").tag("safari")
+                    Text("Chrome").tag("chrome")
+                }
+                .pickerStyle(.menu)
+
+                Picker("Client ID Filter", selection: $profile.wdttClientIDMode) {
+                    Text("Default Rotation").tag("default")
+                    Text("6287487").tag("6287487")
+                    Text("8202606").tag("8202606")
+                }
+                .pickerStyle(.menu)
+            }
+
+            Section(header: Text("Tunnel MTU")) {
+                Picker("Tunnel MTU", selection: $profile.wdttTunnelMTU) {
+                    ForEach(presets, id: \.self) { mtu in
+                        Text(mtuLabel(mtu)).tag(mtu as Int?)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if let mtuStatusMessage, !mtuStatusMessage.isEmpty {
+                    Text(mtuStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Button {
+                    guard !isDetectingMTU else { return }
+                    Task {
+                        await autodetectMTU()
+                    }
+                } label: {
+                    HStack {
+                        if isDetectingMTU {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        }
+                        Text(isDetectingMTU ? "Detecting..." : "Autodetect MTU")
+                    }
+                }
+                .disabled(isDetectingMTU || onAutodetectMTU == nil)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Auto uses the MTU provisioned by the server.")
+                    Text("1280: safest default for unstable mobile paths.")
+                    Text("1360: balanced choice for most LTE and Wi-Fi networks.")
+                    Text("1420: use on clean paths when you want lower overhead.")
+                    Text("1500: only for LAN or very clean full-MTU routes.")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("Advanced WDTT")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(mtuAlertTitle, isPresented: $showMTUAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(mtuAlertMessage)
+        }
+    }
+
+    @MainActor
+    private func autodetectMTU() async {
+        guard let onAutodetectMTU else { return }
+        isDetectingMTU = true
+        mtuStatusMessage = "Testing MTU presets. The tunnel will reconnect several times."
+        defer { isDetectingMTU = false }
+
+        do {
+            let detected = try await onAutodetectMTU()
+            profile.wdttTunnelMTU = detected
+            mtuStatusMessage = "Best MTU detected: \(detected)"
+            mtuAlertTitle = "MTU Detected"
+            mtuAlertMessage = "Best MTU: \(detected)"
+            showMTUAlert = true
+        } catch {
+            mtuStatusMessage = "Autodetect failed: \(error.localizedDescription)"
+            mtuAlertTitle = "Autodetect Failed"
+            mtuAlertMessage = error.localizedDescription
+            showMTUAlert = true
+        }
     }
 
     private func mtuLabel(_ value: Int?) -> String {

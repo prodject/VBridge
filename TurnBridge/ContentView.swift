@@ -384,7 +384,10 @@ struct ContentView: View {
                     SettingsView(
                         store: store,
                         profileID: sheet.profileID,
-                        isNewProfile: sheet.isNew
+                        isNewProfile: sheet.isNew,
+                        onAutodetectWDTTMtu: { profileID in
+                            try await autodetectWDTTMtu(for: profileID)
+                        }
                     ) { profile, changed in
                         handleProfileSettingsCommit(profile: profile, changed: changed)
                     }
@@ -1683,6 +1686,119 @@ struct ContentView: View {
             pendingTunnelRestartProfile = profile
             pendingTunnelRestartReason = "Reconnect requested from Live Activity"
         }
+    }
+
+    private enum MTUDetectionError: LocalizedError {
+        case profileNotFound
+        case notWDTT
+        case connectFailed(Int)
+        case speedTestFailed(Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .profileNotFound:
+                return "The selected profile was not found."
+            case .notWDTT:
+                return "Autodetect MTU is available only for WDTT profiles."
+            case .connectFailed(let mtu):
+                return "Failed to reconnect the tunnel with MTU \(mtu)."
+            case .speedTestFailed(let mtu):
+                return "Speed test failed for MTU \(mtu)."
+            }
+        }
+    }
+
+    private func autodetectWDTTMtu(for profileID: UUID) async throws -> Int {
+        let candidates = [1280, 1320, 1360, 1420, 1440]
+        let originalSelection = await MainActor.run { store.selectedProfileID }
+
+        guard var profile = await MainActor.run(body: {
+            store.profiles.first(where: { $0.id == profileID })
+        }) else {
+            throw MTUDetectionError.profileNotFound
+        }
+        guard profile.transportMode == .wdtt else {
+            throw MTUDetectionError.notWDTT
+        }
+
+        var bestMTU = profile.wdttTunnelMTU ?? candidates[0]
+        var bestDownload = -1.0
+        var bestUpload = -1.0
+
+        for mtu in candidates {
+            profile.wdttTunnelMTU = mtu
+            await MainActor.run {
+                if let idx = store.profiles.firstIndex(where: { $0.id == profile.id }) {
+                    store.profiles[idx] = profile
+                    store.selectedProfileID = profile.id
+                    store.save()
+                }
+            }
+
+            try await applyAutodetectProfile(profile)
+            let connected = try await waitForTunnelConnected(timeoutSeconds: 150)
+            guard connected else {
+                throw MTUDetectionError.connectFailed(mtu)
+            }
+
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            let result = await runSpeedTest()
+            guard hasMeasuredSpeed(result) else {
+                throw MTUDetectionError.speedTestFailed(mtu)
+            }
+
+            let download = result.downloadMbps ?? 0
+            let upload = result.uploadMbps ?? 0
+            if download > bestDownload || (download == bestDownload && upload > bestUpload) {
+                bestDownload = download
+                bestUpload = upload
+                bestMTU = mtu
+            }
+        }
+
+        profile.wdttTunnelMTU = bestMTU
+        await MainActor.run {
+            if let idx = store.profiles.firstIndex(where: { $0.id == profile.id }) {
+                store.profiles[idx] = profile
+                if let originalSelection {
+                    store.selectedProfileID = originalSelection
+                }
+                store.save()
+            }
+        }
+        try await applyAutodetectProfile(profile)
+        _ = try await waitForTunnelConnected(timeoutSeconds: 150)
+        return bestMTU
+    }
+
+    private func applyAutodetectProfile(_ profile: VPNProfile) async throws {
+        await MainActor.run {
+            switch vpnStatus {
+            case .connected, .connecting, .reasserting:
+                queueActiveTunnelRestart(using: profile, reason: "WDTT MTU autodetect")
+            case .disconnected, .invalid:
+                connectTunnel(using: profile, resetCaptchaRecoveryState: false)
+            default:
+                queueActiveTunnelRestart(using: profile, reason: "WDTT MTU autodetect")
+            }
+        }
+    }
+
+    private func waitForTunnelConnected(timeoutSeconds: Int) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        while Date() < deadline {
+            let status = await MainActor.run { vpnStatus }
+            switch status {
+            case .connected:
+                return true
+            case .invalid:
+                return false
+            default:
+                break
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        return false
     }
 
     private func latestConnectionProgressFromLogs() -> (active: Int, total: Int)? {
