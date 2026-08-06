@@ -163,9 +163,15 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.menu)
 
-                    Text("Auto uses the MTU provisioned by the server. Set an override only if you need to tune the client-side tunnel path.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Auto uses the MTU provisioned by the server.")
+                        Text("1280: safest default for unstable mobile paths.")
+                        Text("1360: balanced choice for most LTE and Wi-Fi networks.")
+                        Text("1420: use on clean paths when you want lower overhead.")
+                        Text("1500: only for LAN or very clean full-MTU routes.")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 }
             }
 
