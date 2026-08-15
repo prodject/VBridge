@@ -640,6 +640,9 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
 
 #if targetEnvironment(macCatalyst)
     private struct EmptyHelperRequest: Encodable {}
+    private struct HelperStatusResponse: Decodable {
+        let status: String
+    }
 
     private func post<T: Encodable>(_ path: String, body: T, completionHandler: @escaping (Bool) -> Void) throws {
         let url = helperBaseURL.appendingPathComponent(path)
@@ -677,6 +680,47 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
         DispatchQueue.main.async {
             completionHandler(value)
         }
+    }
+
+    static func fetchStatus(completionHandler: @escaping (NEVPNStatus?) -> Void) {
+        let url = URL(string: "http://127.0.0.1:41737/v1/tunnel/status")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 5
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if error != nil {
+                DispatchQueue.main.async {
+                    completionHandler(nil)
+                }
+                return
+            }
+
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard (200..<300).contains(statusCode),
+                  let data,
+                  let payload = try? JSONDecoder().decode(HelperStatusResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    completionHandler(nil)
+                }
+                return
+            }
+
+            let resolvedStatus: NEVPNStatus
+            switch payload.status.lowercased() {
+            case "started":
+                resolvedStatus = .connected
+            case "stopped":
+                resolvedStatus = .disconnected
+            default:
+                resolvedStatus = .invalid
+            }
+
+            DispatchQueue.main.async {
+                completionHandler(resolvedStatus)
+            }
+        }
+        .resume()
     }
 #endif
 }

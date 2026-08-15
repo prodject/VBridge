@@ -1358,12 +1358,17 @@ struct ContentView: View {
 
     private func refreshVBridgeStatus(markInitialLoadComplete: Bool = false) {
 #if targetEnvironment(macCatalyst)
-        if markInitialLoadComplete || !hasLoadedInitialStatus {
-            hasLoadedInitialStatus = true
-            refreshConnectionProgress()
-            refreshWidgetTimelines()
-            lastWidgetRefreshSignature = widgetRefreshSignature()
-            schedulePendingShortcutActionConsumption()
+        let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
+        MacPrivilegedHelperTunnelBackend.fetchStatus { helperStatus in
+            let resolvedStatus = helperStatus ?? self.vpnStatus
+            self.applyVPNStatus(resolvedStatus)
+            if shouldCompleteInitialLoad {
+                self.hasLoadedInitialStatus = true
+                self.refreshConnectionProgress()
+                self.refreshWidgetTimelines()
+                self.lastWidgetRefreshSignature = self.widgetRefreshSignature()
+                self.schedulePendingShortcutActionConsumption()
+            }
         }
 #else
         let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
@@ -1458,6 +1463,14 @@ struct ContentView: View {
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(nanoseconds: 1_000_000_000)
+#if targetEnvironment(macCatalyst)
+                    await MainActor.run {
+                        refreshConnectionProgress()
+                    }
+                    await MainActor.run {
+                        refreshVBridgeStatus()
+                    }
+#else
                     await MainActor.run {
                         let signature = widgetRefreshSignature()
                         if signature != lastWidgetRefreshSignature {
@@ -1466,6 +1479,7 @@ struct ContentView: View {
                         }
                         refreshConnectionProgress()
                     }
+#endif
                 } catch {
                     break
                 }
