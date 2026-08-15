@@ -17,6 +17,7 @@ private enum DeployAction: String, Sendable {
 }
 
 private struct DeployRequest: Encodable, Sendable {
+    var deployKind: String
     var action: String
     var host: String
     var user: String
@@ -59,6 +60,7 @@ private struct DeployResponse: Decodable, Sendable {
 struct DeployView: View {
     @Environment(\.dismiss) private var dismiss
 
+    @AppStorage("deploy.kind") private var deployKind = DeployServerKind.wdtt.rawValue
     @AppStorage("deploy.host") private var host = ""
     @AppStorage("deploy.user") private var user = "root"
     @AppStorage("deploy.password") private var password = ""
@@ -95,7 +97,7 @@ struct DeployView: View {
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
-    private let serverArchitectures = ["amd64", "arm64"]
+    private let wdttServerArchitectures = ["amd64", "arm64"]
     private let maxPasswordsOptions = [10, 25, 50, 75, 100, 150, 200, 300, 500]
     private let maxWorkersPerAccessOptions = [0, 9, 18, 27, 36, 45, 54, 72, 90, 108]
     private let maxHandshakesOptions = [8, 16, 24, 32, 48, 64, 96, 128]
@@ -104,6 +106,15 @@ struct DeployView: View {
 
     var body: some View {
         Form {
+            Section(header: Text("What to Deploy")) {
+                Picker("Server Type", selection: $deployKind) {
+                    ForEach(DeployServerKind.allCases) { kind in
+                        Text(kind.title).tag(kind.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             Section(header: Text("Server")) {
                 TextField("IP server or domain", text: $host)
                     .textInputAutocapitalization(.never)
@@ -129,25 +140,27 @@ struct DeployView: View {
             if hasSavedServerSettings {
                 Section(header: Text("Server Status")) {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
-                    DeployStatusRow(title: "WDTT installed", value: wdttInstalled, isChecking: isCheckingServerStatus)
+                    DeployStatusRow(title: installedStatusTitle, value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
                 }
             }
 
-            Section(header: Text("DNS")) {
-                TextField("Primary DNS", text: $dns1)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.numbersAndPunctuation)
+            if selectedDeployKind == .wdtt {
+                Section(header: Text("DNS")) {
+                    TextField("Primary DNS", text: $dns1)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.numbersAndPunctuation)
 
-                TextField("Secondary DNS", text: $dns2)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.numbersAndPunctuation)
+                    TextField("Secondary DNS", text: $dns2)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.numbersAndPunctuation)
+                }
             }
 
-            Section(header: Text("Secrets")) {
-                secretField("WDTT Main Password", text: $mainPassword)
+            Section(header: Text(selectedDeployKind == .wdtt ? "Secrets" : "Web Panel")) {
+                secretField(selectedDeployKind == .wdtt ? "WDTT Main Password" : "CSQTT Web Password", text: $mainPassword)
 
                 if !mainPassword.isEmpty && !isMainPasswordValid {
                     Text("Allowed: letters, digits, and _ . ! ? : # - /")
@@ -155,28 +168,29 @@ struct DeployView: View {
                         .foregroundColor(.red)
                 }
 
-                copyableTextField("Telegram Admin ID", text: $adminId, keyboardType: .numberPad)
-
-                secretField("Telegram Bot Token", text: $botToken)
+                if selectedDeployKind == .wdtt {
+                    copyableTextField("Telegram Admin ID", text: $adminId, keyboardType: .numberPad)
+                    secretField("Telegram Bot Token", text: $botToken)
+                }
             }
 
             Section(header: Text("Ports")) {
                 Toggle("Manual port control", isOn: $manualPorts)
 
                 if manualPorts {
-                    TextField("DTLS Port", value: $dtlsPort, format: .number)
+                    TextField(primaryPortTitle, value: $dtlsPort, format: .number)
                         .keyboardType(.numberPad)
-                    TextField("WireGuard Port", value: $wgPort, format: .number)
+                    TextField(secondaryPortTitle, value: $wgPort, format: .number)
                         .keyboardType(.numberPad)
 
                     if !isValidPort(dtlsPort) {
-                        Text("DTLS port must be between 1 and 65535")
+                        Text("\(primaryPortTitle) must be between 1 and 65535")
                             .font(.caption)
                             .foregroundColor(.red)
                     }
 
                     if !isValidPort(wgPort) {
-                        Text("WireGuard port must be between 1 and 65535")
+                        Text("\(secondaryPortTitle) must be between 1 and 65535")
                             .font(.caption)
                             .foregroundColor(.red)
                     }
@@ -193,30 +207,32 @@ struct DeployView: View {
             }
 
             Section {
-                NavigationLink {
-                    ServerManagementView(
-                        target: serverAdminTarget,
-                        canConnect: canConnect
-                    )
-                } label: {
-                    Label("Management", systemImage: "person.3")
-                }
+                if selectedDeployKind == .wdtt {
+                    NavigationLink {
+                        ServerManagementView(
+                            target: serverAdminTarget,
+                            canConnect: canConnect
+                        )
+                    } label: {
+                        Label("Management", systemImage: "person.3")
+                    }
 
-                NavigationLink {
-                    OutboundManagementView(
-                        target: serverOutboundTarget,
-                        canConnect: canConnect
-                    )
-                } label: {
-                    Label("Outbound IP / Proxy", systemImage: "network")
-                }
+                    NavigationLink {
+                        OutboundManagementView(
+                            target: serverOutboundTarget,
+                            canConnect: canConnect
+                        )
+                    } label: {
+                        Label("Outbound IP / Proxy", systemImage: "network")
+                    }
 
-                Button {
-                    showExportConfirmation = true
-                } label: {
-                    Label("Export Server", systemImage: "link.badge.plus")
+                    Button {
+                        showExportConfirmation = true
+                    } label: {
+                        Label("Export Server", systemImage: "link.badge.plus")
+                    }
+                    .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
                 }
-                .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
 
                 Button {
                     run(.exportLogs)
@@ -230,14 +246,14 @@ struct DeployView: View {
                 } label: {
                     Label(isRunning && currentAction == .exportState ? "Creating Backup..." : "Backup Server", systemImage: "externaldrive.badge.icloud")
                 }
-                .disabled(!canConnect)
+                .disabled(!canUseStateArchive)
 
                 Button {
                     showImportStatePicker = true
                 } label: {
                     Label(isRunning && currentAction == .importState ? "Restoring Backup..." : "Restore Server", systemImage: "arrow.clockwise.icloud")
                 }
-                .disabled(!canConnect)
+                .disabled(!canUseStateArchive)
 
                 Button {
                     run(.install)
@@ -251,7 +267,7 @@ struct DeployView: View {
                 } label: {
                     Label(isRunning && currentAction == .updatePreserve ? "Updating..." : "Update With Preserve", systemImage: "arrow.clockwise.circle")
                 }
-                .disabled(!canInstall)
+                .disabled(!canUpdatePreserve)
 
                 Button {
                     run(.status)
@@ -265,7 +281,7 @@ struct DeployView: View {
                 } label: {
                     Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
                 }
-                .disabled(!canConnect)
+                .disabled(!canCleanupDevices)
 
                 Button(role: .destructive) {
                     showReinstallConfirmation = true
@@ -282,34 +298,36 @@ struct DeployView: View {
                 .disabled(!canConnect)
             }
 
-            Section(header: Text("Advanced Server")) {
-                Picker("Max Passwords", selection: $maxPasswords) {
-                    ForEach(maxPasswordsOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
+            if selectedDeployKind == .wdtt {
+                Section(header: Text("Advanced Server")) {
+                    Picker("Max Passwords", selection: $maxPasswords) {
+                        ForEach(maxPasswordsOptions, id: \.self) { value in
+                            Text("\(value)").tag(value)
+                        }
                     }
-                }
 
-                Picker("Max Workers Per Access", selection: $maxWorkersPerAccess) {
-                    ForEach(maxWorkersPerAccessOptions, id: \.self) { value in
-                        Text(value == 0 ? "Unlimited" : "\(value)").tag(value)
+                    Picker("Max Workers Per Access", selection: $maxWorkersPerAccess) {
+                        ForEach(maxWorkersPerAccessOptions, id: \.self) { value in
+                            Text(value == 0 ? "Unlimited" : "\(value)").tag(value)
+                        }
                     }
-                }
 
-                Picker("Max Handshakes", selection: $maxHandshakes) {
-                    ForEach(maxHandshakesOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
+                    Picker("Max Handshakes", selection: $maxHandshakes) {
+                        ForEach(maxHandshakesOptions, id: \.self) { value in
+                            Text("\(value)").tag(value)
+                        }
                     }
-                }
 
-                Picker("Handshake Rate", selection: $handshakeRate) {
-                    ForEach(handshakeRateOptions, id: \.self) { value in
-                        Text("\(value)").tag(value)
+                    Picker("Handshake Rate", selection: $handshakeRate) {
+                        ForEach(handshakeRateOptions, id: \.self) { value in
+                            Text("\(value)").tag(value)
+                        }
                     }
-                }
 
-                Picker("Max Client Mbps", selection: $maxClientMbps) {
-                    ForEach(maxClientMbpsOptions, id: \.self) { value in
-                        Text(value == 0 ? "Unlimited" : "\(value) Mbps").tag(value)
+                    Picker("Max Client Mbps", selection: $maxClientMbps) {
+                        ForEach(maxClientMbpsOptions, id: \.self) { value in
+                            Text(value == 0 ? "Unlimited" : "\(value) Mbps").tag(value)
+                        }
                     }
                 }
             }
@@ -372,7 +390,7 @@ struct DeployView: View {
             Text("The link contains the SSH password, WDTT password, and Telegram credentials. Share it only through a trusted private channel.")
         }
         .confirmationDialog(
-            "Reinstall WDTT on the server?",
+            "Reinstall \(selectedDeployKind.title) on the server?",
             isPresented: $showReinstallConfirmation,
             titleVisibility: .visible
         ) {
@@ -381,10 +399,25 @@ struct DeployView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The app will uninstall WDTT from the server and then install it again using the current Deploy settings, including ports, DNS, and saved secrets.")
+            Text("The app will uninstall \(selectedDeployKind.title) from the server and then install it again using the current Deploy settings.")
         }
         .task {
             await refreshSavedServerStatus()
+        }
+        .onChange(of: deployKind) { newValue in
+            guard let kind = DeployServerKind(rawValue: newValue) else { return }
+            if kind == .csqtt {
+                if serverArch != "amd64" {
+                    serverArch = "amd64"
+                }
+                if !manualPorts {
+                    dtlsPort = 46000
+                    wgPort = 46002
+                }
+            } else if !manualPorts {
+                dtlsPort = 56000
+                wgPort = 56001
+            }
         }
         .sheet(isPresented: Binding(
             get: { shareLogsURL != nil },
@@ -425,11 +458,39 @@ struct DeployView: View {
     }
 
     private var effectiveDTLSPort: Int {
-        manualPorts ? dtlsPort : 56000
+        manualPorts ? dtlsPort : defaultPrimaryPort
     }
 
     private var effectiveWGPort: Int {
-        manualPorts ? wgPort : 56001
+        manualPorts ? wgPort : defaultSecondaryPort
+    }
+
+    private var selectedDeployKind: DeployServerKind {
+        DeployServerKind(rawValue: deployKind) ?? .wdtt
+    }
+
+    private var serverArchitectures: [String] {
+        selectedDeployKind == .wdtt ? wdttServerArchitectures : ["amd64"]
+    }
+
+    private var defaultPrimaryPort: Int {
+        selectedDeployKind == .wdtt ? 56000 : 46000
+    }
+
+    private var defaultSecondaryPort: Int {
+        selectedDeployKind == .wdtt ? 56001 : 46002
+    }
+
+    private var primaryPortTitle: String {
+        selectedDeployKind == .wdtt ? "DTLS Port" : "Peer Port"
+    }
+
+    private var secondaryPortTitle: String {
+        selectedDeployKind == .wdtt ? "WireGuard Port" : "Web Port"
+    }
+
+    private var installedStatusTitle: String {
+        selectedDeployKind == .wdtt ? "WDTT installed" : "CSQTT installed"
     }
 
     private var canConnect: Bool {
@@ -441,7 +502,19 @@ struct DeployView: View {
     }
 
     private var canInstall: Bool {
-        canConnect && isMainPasswordValid && isValidPort(effectiveDTLSPort) && isValidPort(effectiveWGPort)
+        canConnect && isValidPort(effectiveDTLSPort) && isValidPort(effectiveWGPort) && (selectedDeployKind == .csqtt || isMainPasswordValid)
+    }
+
+    private var canUpdatePreserve: Bool {
+        selectedDeployKind == .wdtt && canInstall
+    }
+
+    private var canUseStateArchive: Bool {
+        selectedDeployKind == .wdtt && canConnect
+    }
+
+    private var canCleanupDevices: Bool {
+        selectedDeployKind == .wdtt && canConnect
     }
 
     private var isMainPasswordValid: Bool {
@@ -498,12 +571,12 @@ struct DeployView: View {
                 showAlert = true
 
                 if response.ok {
-                    SharedLogger.info("WDTT deploy \(action.rawValue) completed")
+                    SharedLogger.info("\(selectedDeployKind.title) deploy \(action.rawValue) completed")
                 } else {
-                    SharedLogger.error("WDTT deploy \(action.rawValue) failed: \(response.message)")
+                    SharedLogger.error("\(selectedDeployKind.title) deploy \(action.rawValue) failed: \(response.message)")
                 }
                 if !response.output.isEmpty {
-                    SharedLogger.info("WDTT deploy output:\n\(response.output)")
+                    SharedLogger.info("\(selectedDeployKind.title) deploy output:\n\(response.output)")
                 }
             }
         }
@@ -547,9 +620,9 @@ struct DeployView: View {
                     resultTitle = "Reinstall Failed"
                     resultMessage = "Uninstall step failed: \(uninstallResponse.message)"
                     showAlert = true
-                    SharedLogger.error("WDTT reinstall failed during uninstall: \(uninstallResponse.message)")
+                    SharedLogger.error("\(selectedDeployKind.title) reinstall failed during uninstall: \(uninstallResponse.message)")
                     if !combinedOutput.isEmpty {
-                        SharedLogger.info("WDTT reinstall output:\n\(combinedOutput)")
+                        SharedLogger.info("\(selectedDeployKind.title) reinstall output:\n\(combinedOutput)")
                     }
                 }
                 return
@@ -571,16 +644,16 @@ struct DeployView: View {
                 if installResponse.ok {
                     applyDiscoveredServerSettings(installResponse)
                     resultTitle = "Reinstall Complete"
-                    resultMessage = "WDTT was reinstalled with the current Deploy settings."
-                    SharedLogger.info("WDTT reinstall completed")
+                    resultMessage = "\(selectedDeployKind.title) was reinstalled with the current Deploy settings."
+                    SharedLogger.info("\(selectedDeployKind.title) reinstall completed")
                 } else {
                     resultTitle = "Reinstall Failed"
                     resultMessage = "Install step failed: \(installResponse.message)"
-                    SharedLogger.error("WDTT reinstall failed during install: \(installResponse.message)")
+                    SharedLogger.error("\(selectedDeployKind.title) reinstall failed during install: \(installResponse.message)")
                 }
                 showAlert = true
                 if !combinedOutput.isEmpty {
-                    SharedLogger.info("WDTT reinstall output:\n\(combinedOutput)")
+                    SharedLogger.info("\(selectedDeployKind.title) reinstall output:\n\(combinedOutput)")
                 }
             }
         }
@@ -590,6 +663,7 @@ struct DeployView: View {
         let settings = DeploySettingsLink(
             version: 1,
             nonce: UUID(),
+            deployKind: selectedDeployKind,
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             user: user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "root" : user.trimmingCharacters(in: .whitespacesAndNewlines),
             password: password,
@@ -664,12 +738,13 @@ struct DeployView: View {
     }
 
     private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
-        let scriptURL = Bundle.main.url(forResource: "wdtt-deploy", withExtension: "sh")
+        let scriptName = selectedDeployKind == .wdtt ? "wdtt-deploy" : "csqtt-deploy"
+        let scriptURL = Bundle.main.url(forResource: scriptName, withExtension: "sh")
         if (action == .install || action == .updatePreserve || action == .uninstall), scriptURL == nil {
-            throw DeployError.missingAsset("wdtt-deploy.sh")
+            throw DeployError.missingAsset("\(scriptName).sh")
         }
 
-        let binaryName = "wdtt-server-linux-\(serverArch)"
+        let binaryName = selectedDeployKind == .wdtt ? "wdtt-server-linux-\(serverArch)" : "csqtt-linux-\(serverArch)"
         let binaryURL = Bundle.main.url(forResource: binaryName, withExtension: nil)
 
         if (action == .install || action == .updatePreserve), binaryURL == nil {
@@ -677,6 +752,7 @@ struct DeployView: View {
         }
 
         return DeployRequest(
+            deployKind: selectedDeployKind.rawValue,
             action: action.rawValue,
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             user: user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "root" : user.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -824,7 +900,8 @@ struct DeployView: View {
         let safeHost = host
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        let filename = "wdtt-server-logs-\(safeHost.isEmpty ? "server" : safeHost)-\(stamp).log"
+        let prefix = selectedDeployKind == .wdtt ? "wdtt-server-logs" : "csqtt-server-logs"
+        let filename = "\(prefix)-\(safeHost.isEmpty ? "server" : safeHost)-\(stamp).log"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         do {
             try contents.write(to: url, atomically: true, encoding: .utf8)

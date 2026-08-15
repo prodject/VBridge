@@ -4,6 +4,22 @@
 
 import Foundation
 
+enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
+    case wdtt
+    case csqtt
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .wdtt:
+            return "WDTT"
+        case .csqtt:
+            return "CSQTT"
+        }
+    }
+}
+
 struct TurnConfigImport: Codable {
     let mode: String?
     let turn: String
@@ -57,6 +73,7 @@ struct WDTTConfigImport {
 struct DeploySettingsLink: Codable {
     let version: Int
     let nonce: UUID
+    let deployKind: DeployServerKind
     let host: String
     let user: String
     let password: String
@@ -70,6 +87,81 @@ struct DeploySettingsLink: Codable {
     let dtlsPort: Int
     let wgPort: Int
     let serverArch: String
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case nonce
+        case deployKind
+        case host
+        case user
+        case password
+        case sshPort
+        case dns1
+        case dns2
+        case mainPassword
+        case adminId
+        case botToken
+        case manualPorts
+        case dtlsPort
+        case wgPort
+        case serverArch
+    }
+
+    init(
+        version: Int,
+        nonce: UUID,
+        deployKind: DeployServerKind,
+        host: String,
+        user: String,
+        password: String,
+        sshPort: Int,
+        dns1: String,
+        dns2: String,
+        mainPassword: String,
+        adminId: String,
+        botToken: String,
+        manualPorts: Bool,
+        dtlsPort: Int,
+        wgPort: Int,
+        serverArch: String
+    ) {
+        self.version = version
+        self.nonce = nonce
+        self.deployKind = deployKind
+        self.host = host
+        self.user = user
+        self.password = password
+        self.sshPort = sshPort
+        self.dns1 = dns1
+        self.dns2 = dns2
+        self.mainPassword = mainPassword
+        self.adminId = adminId
+        self.botToken = botToken
+        self.manualPorts = manualPorts
+        self.dtlsPort = dtlsPort
+        self.wgPort = wgPort
+        self.serverArch = serverArch
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        nonce = try container.decode(UUID.self, forKey: .nonce)
+        deployKind = try container.decodeIfPresent(DeployServerKind.self, forKey: .deployKind) ?? .wdtt
+        host = try container.decode(String.self, forKey: .host)
+        user = try container.decode(String.self, forKey: .user)
+        password = try container.decode(String.self, forKey: .password)
+        sshPort = try container.decode(Int.self, forKey: .sshPort)
+        dns1 = try container.decode(String.self, forKey: .dns1)
+        dns2 = try container.decode(String.self, forKey: .dns2)
+        mainPassword = try container.decode(String.self, forKey: .mainPassword)
+        adminId = try container.decode(String.self, forKey: .adminId)
+        botToken = try container.decode(String.self, forKey: .botToken)
+        manualPorts = try container.decode(Bool.self, forKey: .manualPorts)
+        dtlsPort = try container.decode(Int.self, forKey: .dtlsPort)
+        wgPort = try container.decode(Int.self, forKey: .wgPort)
+        serverArch = try container.decode(String.self, forKey: .serverArch)
+    }
 }
 
 enum ConfigParseError: LocalizedError {

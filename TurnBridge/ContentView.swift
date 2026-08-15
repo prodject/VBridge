@@ -2588,6 +2588,7 @@ struct ContentView: View {
 
     private func applyDeploySettings(_ settings: DeploySettingsLink) {
         let defaults = UserDefaults.standard
+        defaults.set(settings.deployKind.rawValue, forKey: "deploy.kind")
         defaults.set(settings.host, forKey: "deploy.host")
         defaults.set(settings.user, forKey: "deploy.user")
         defaults.set(settings.password, forKey: "deploy.password")

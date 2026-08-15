@@ -22,6 +22,7 @@ import (
 )
 
 type deployRequest struct {
+	DeployKind       string `json:"deployKind"`
 	Action           string `json:"action"`
 	Host             string `json:"host"`
 	User             string `json:"user"`
@@ -87,6 +88,17 @@ type deployStateArchive struct {
 	WGKeysData    string `json:"wgKeysData,omitempty"`
 }
 
+func (r deployRequest) isCSQTT() bool {
+	return r.DeployKind == "csqtt"
+}
+
+func (r deployRequest) deployLabel() string {
+	if r.isCSQTT() {
+		return "CSQTT"
+	}
+	return "WDTT"
+}
+
 //export VBridgeWGDeployServer
 func VBridgeWGDeployServer(configJSON *C.char) *C.char {
 	if configJSON == nil {
@@ -122,6 +134,8 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 	defer client.Close()
 
+	deployLabel := req.deployLabel()
+
 	var output strings.Builder
 	appendOutput := func(label, text string) {
 		if strings.TrimSpace(text) == "" {
@@ -137,12 +151,27 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "status" {
+		if req.isCSQTT() {
+			checks, text := checkCSQTTStatus(client)
+			appendOutput(req.Action, text)
+			return deployResponse{
+				OK:              true,
+				Status:          "success",
+				Message:         deployLabel + " status checked",
+				Output:          output.String(),
+				ServerConnected: checks.ServerConnected,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+				DTLSPort:        checks.DTLSPort,
+				WGPort:          checks.WGPort,
+			}
+		}
 		checks, text := checkDeployStatus(client)
 		appendOutput(req.Action, text)
 		return deployResponse{
 			OK:              true,
 			Status:          "success",
-			Message:         "WDTT status checked",
+			Message:         deployLabel + " status checked",
 			Output:          output.String(),
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
@@ -158,6 +187,41 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "export_logs" {
+		if req.isCSQTT() {
+			checks, text := checkCSQTTStatus(client)
+			appendOutput("status", text)
+
+			logText, commandErr := runSSHCommand(
+				client,
+				rootDeployCommand(exportCSQTTLogsCommand(), req.Password),
+				45*time.Second,
+			)
+			appendOutput("export logs", logText)
+			if commandErr != nil {
+				return deployResponse{
+					OK:              false,
+					Status:          "error",
+					Message:         "server log export failed: " + commandErr.Error(),
+					Output:          output.String(),
+					ServerConnected: true,
+					WDTTInstalled:   checks.WDTTInstalled,
+					ReadyToConnect:  checks.ReadyToConnect,
+					DTLSPort:        checks.DTLSPort,
+					WGPort:          checks.WGPort,
+				}
+			}
+			return deployResponse{
+				OK:              true,
+				Status:          "success",
+				Message:         deployLabel + " logs exported",
+				Output:          output.String(),
+				ServerConnected: true,
+				WDTTInstalled:   checks.WDTTInstalled,
+				ReadyToConnect:  checks.ReadyToConnect,
+				DTLSPort:        checks.DTLSPort,
+				WGPort:          checks.WGPort,
+			}
+		}
 		checks, text := checkDeployStatus(client)
 		appendOutput("status", text)
 
@@ -188,7 +252,7 @@ func runDeploy(req deployRequest) deployResponse {
 		return deployResponse{
 			OK:              true,
 			Status:          "success",
-			Message:         "Server logs exported",
+			Message:         deployLabel + " logs exported",
 			Output:          output.String(),
 			ServerConnected: true,
 			WDTTInstalled:   checks.WDTTInstalled,
@@ -204,6 +268,9 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "export_state" {
+		if req.isCSQTT() {
+			return deployResponse{OK: false, Status: "error", Message: "CSQTT backup export is not supported yet"}
+		}
 		checks, text := checkDeployStatus(client)
 		appendOutput("status", text)
 
@@ -248,6 +315,9 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "import_state" {
+		if req.isCSQTT() {
+			return deployResponse{OK: false, Status: "error", Message: "CSQTT backup restore is not supported yet"}
+		}
 		checks, text := checkDeployStatus(client)
 		appendOutput("status", text)
 
@@ -306,6 +376,9 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "cleanup_devices" {
+		if req.isCSQTT() {
+			return deployResponse{OK: false, Status: "error", Message: "CSQTT device cleanup is not supported"}
+		}
 		text, commandErr := runSSHCommand(
 			client,
 			rootDeployCommand(cleanupOrphanDevicesCommand(), req.Password),
@@ -329,7 +402,11 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
-	if err := uploadDeployFile(client, req.DeployScript, "/tmp/vbridge-wdtt-deploy.sh", 0o755); err != nil {
+	remoteScriptPath := "/tmp/vbridge-wdtt-deploy.sh"
+	if req.isCSQTT() {
+		remoteScriptPath = "/tmp/vbridge-csqtt-deploy.sh"
+	}
+	if err := uploadDeployFile(client, req.DeployScript, remoteScriptPath, 0o755); err != nil {
 		return deployResponse{
 			OK:              false,
 			Status:          "error",
@@ -340,7 +417,11 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "install" || req.Action == "update_preserve" {
-		if err := uploadDeployFile(client, req.ServerBinary, "/tmp/wdtt-server", 0o755); err != nil {
+		remoteBinaryPath := "/tmp/wdtt-server"
+		if req.isCSQTT() {
+			remoteBinaryPath = "/tmp/csqtt"
+		}
+		if err := uploadDeployFile(client, req.ServerBinary, remoteBinaryPath, 0o755); err != nil {
 			return deployResponse{
 				OK:              false,
 				Status:          "error",
@@ -397,7 +478,7 @@ func runDeploy(req deployRequest) deployResponse {
 	return deployResponse{
 		OK:              true,
 		Status:          "success",
-		Message:         "WDTT deploy completed",
+		Message:         deployLabel + " deploy completed",
 		Output:          output.String(),
 		ServerConnected: checks.ServerConnected,
 		WDTTInstalled:  checks.WDTTInstalled,
@@ -413,6 +494,10 @@ func runDeploy(req deployRequest) deployResponse {
 }
 
 func (r *deployRequest) normalize() {
+	r.DeployKind = strings.TrimSpace(strings.ToLower(r.DeployKind))
+	if r.DeployKind == "" {
+		r.DeployKind = "wdtt"
+	}
 	r.Action = strings.TrimSpace(strings.ToLower(r.Action))
 	if r.Action == "" {
 		r.Action = "install"
@@ -426,10 +511,18 @@ func (r *deployRequest) normalize() {
 		r.Port = 22
 	}
 	if r.DTLSPort == 0 {
-		r.DTLSPort = 56000
+		if r.DeployKind == "csqtt" {
+			r.DTLSPort = 46000
+		} else {
+			r.DTLSPort = 56000
+		}
 	}
 	if r.WGPort == 0 {
-		r.WGPort = 56001
+		if r.DeployKind == "csqtt" {
+			r.WGPort = 46002
+		} else {
+			r.WGPort = 56001
+		}
 	}
 	if r.MaxPasswords == 0 {
 		r.MaxPasswords = 50
@@ -445,6 +538,9 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
+	if r.DeployKind != "wdtt" && r.DeployKind != "csqtt" {
+		return fmt.Errorf("unsupported deploy kind %q", r.DeployKind)
+	}
 	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
 		return fmt.Errorf("unsupported deploy action %q", r.Action)
 	}
@@ -481,7 +577,7 @@ func (r deployRequest) validate() error {
 	if (r.Action == "install" || r.Action == "update_preserve" || r.Action == "uninstall") && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
 	}
-	if (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
+	if r.DeployKind == "wdtt" && (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
 		return errors.New("WDTT main password is empty")
 	}
 	if (r.Action == "install" || r.Action == "update_preserve") && r.ServerBinary == "" {
@@ -565,6 +661,35 @@ func uploadDeployFile(client *ssh.Client, localPath, remotePath string, mode os.
 }
 
 func (r deployRequest) remoteCommand() string {
+	if r.isCSQTT() {
+		webPass := strings.TrimSpace(r.MainPassword)
+		switch r.Action {
+		case "uninstall":
+			return fmt.Sprintf(
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh uninstall",
+				r.DTLSPort,
+				r.WGPort,
+				r.Port,
+				shellQuoteDeploy(webPass),
+			)
+		case "update_preserve":
+			return fmt.Sprintf(
+				"env CSQTT_PRESERVE_CONFIG=1 CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				r.DTLSPort,
+				r.WGPort,
+				r.Port,
+				shellQuoteDeploy(webPass),
+			)
+		default:
+			return fmt.Sprintf(
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				r.DTLSPort,
+				r.WGPort,
+				r.Port,
+				shellQuoteDeploy(webPass),
+			)
+		}
+	}
 	switch r.Action {
 	case "uninstall":
 		return fmt.Sprintf(
