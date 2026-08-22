@@ -258,7 +258,11 @@ do_install() {
 do_uninstall() {
     if [ -d "$WORK_DIR" ]; then
         cd "$WORK_DIR"
-        compose_cmd down --remove-orphans || true
+        IMAGE_IDS="$(compose_cmd images -q 2>/dev/null | sort -u | tr '\n' ' ')"
+        compose_cmd down --remove-orphans --rmi local || true
+        if [ -n "${IMAGE_IDS:-}" ]; then
+            docker image rm -f $IMAGE_IDS >/dev/null 2>&1 || true
+        fi
     fi
     cleanup_firewall_rules
     rm -rf "$WORK_DIR"
