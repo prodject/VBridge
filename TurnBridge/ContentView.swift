@@ -1061,6 +1061,21 @@ struct ContentView: View {
         guard changed else { return }
         guard store.selectedProfileID == profile.id else { return }
         guard vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting else { return }
+
+        if let previousProfile = settingsProfileSnapshot,
+           dnsSettingsChanged(from: previousProfile, to: profile),
+           profilesMatchOutsideDNS(previousProfile, profile) {
+            Task {
+                let applied = await applyLiveDNSUpdate(profile: profile)
+                if !applied {
+                    await MainActor.run {
+                        queueActiveTunnelRestart(using: profile, reason: "profile DNS settings changed")
+                    }
+                }
+            }
+            return
+        }
+
         queueActiveTunnelRestart(using: profile, reason: "profile settings changed")
     }
 
@@ -2574,6 +2589,79 @@ struct ContentView: View {
         }
 
         return sawPeer ? (totalDownloadBytes, totalUploadBytes) : nil
+    }
+
+    private func dnsSettingsChanged(from previous: VPNProfile, to current: VPNProfile) -> Bool {
+        previous.dnsMode != current.dnsMode
+            || previous.dnsPrimary != current.dnsPrimary
+            || previous.dnsSecondary != current.dnsSecondary
+    }
+
+    private func profilesMatchOutsideDNS(_ lhs: VPNProfile, _ rhs: VPNProfile) -> Bool {
+        var lhsCopy = lhs
+        var rhsCopy = rhs
+        lhsCopy.dnsMode = .server
+        lhsCopy.dnsPrimary = ""
+        lhsCopy.dnsSecondary = ""
+        rhsCopy.dnsMode = .server
+        rhsCopy.dnsPrimary = ""
+        rhsCopy.dnsSecondary = ""
+        return lhsCopy == rhsCopy
+    }
+
+    private func applyLiveDNSUpdate(profile: VPNProfile) async -> Bool {
+        await withCheckedContinuation { continuation in
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession,
+                  session.status == .connected else {
+                continuation.resume(returning: false)
+                return
+            }
+
+            struct DNSUpdateRequest: Encodable {
+                let command: String
+                let mode: String
+                let primary: String
+                let secondary: String
+            }
+
+            struct DNSUpdateResponse: Decodable {
+                let ok: Bool
+                let requiresRestart: Bool
+                let message: String
+            }
+
+            let request = DNSUpdateRequest(
+                command: "update_dns",
+                mode: profile.dnsMode.rawValue,
+                primary: profile.dnsPrimary,
+                secondary: profile.dnsSecondary
+            )
+
+            guard let payload = try? JSONEncoder().encode(request) else {
+                continuation.resume(returning: false)
+                return
+            }
+
+            do {
+                try session.sendProviderMessage(payload) { response in
+                    guard let response,
+                          let decoded = try? JSONDecoder().decode(DNSUpdateResponse.self, from: response) else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    if decoded.ok {
+                        SharedLogger.info("Applied live DNS update for profile \"\(profile.name)\": \(decoded.message)")
+                    } else {
+                        SharedLogger.warning("Live DNS update fallback for profile \"\(profile.name)\": \(decoded.message)")
+                    }
+                    continuation.resume(returning: decoded.ok)
+                }
+            } catch {
+                SharedLogger.warning("Failed to send live DNS update request: \(error.localizedDescription)")
+                continuation.resume(returning: false)
+            }
+        }
     }
 
     private func formattedSpeed(_ value: Double?) -> String {

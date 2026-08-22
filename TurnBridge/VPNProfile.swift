@@ -20,6 +20,9 @@ enum VPNDNSMode: String, Codable, CaseIterable, Identifiable {
     case google
     case quad9
     case adguard
+    case adguardFamily
+    case cleanBrowsingFamily
+    case cleanBrowsingSecurity
     case custom
 
     var id: String { rawValue }
@@ -31,7 +34,19 @@ enum VPNDNSMode: String, Codable, CaseIterable, Identifiable {
         case .google: return "Google"
         case .quad9: return "Quad9"
         case .adguard: return "AdGuard"
+        case .adguardFamily: return "AdGuard Family"
+        case .cleanBrowsingFamily: return "CleanBrowsing Family"
+        case .cleanBrowsingSecurity: return "CleanBrowsing Security"
         case .custom: return "Custom"
+        }
+    }
+
+    var isSmartDNS: Bool {
+        switch self {
+        case .adguardFamily, .cleanBrowsingFamily, .cleanBrowsingSecurity:
+            return true
+        default:
+            return false
         }
     }
 }

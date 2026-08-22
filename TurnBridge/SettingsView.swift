@@ -101,9 +101,15 @@ struct SettingsView: View {
                         .keyboardType(.numbersAndPunctuation)
                 }
 
-                Text("Overrides the DNS applied inside the VPN for this profile. Server / Profile keeps the current WireGuard or provisioned DNS.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if profile.dnsMode.isSmartDNS {
+                    Text("Smart DNS preset enabled for this profile. The resolver stays inside the VPN and can be updated without a full reconnect when the active tunnel supports it.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Overrides the DNS applied inside the VPN for this profile. Server / Profile keeps the current WireGuard or provisioned DNS.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             if profile.transportMode == .srtpCommunity {

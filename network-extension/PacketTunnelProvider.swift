@@ -198,6 +198,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let pathMonitorQueue = DispatchQueue(label: "com.prodject.vbridge.network-extension.path-monitor")
     private var lastObservedPathSummary: String?
     private var didPauseProxyForSleep = false
+    private var activeSplitTunnel = SplitTunnelConfiguration(enabled: false, mode: .direct, rules: [])
+    private var activeBaseWgQuickConfig = ""
+    private var activeProvisionAddress = ""
+    private var activeProvisionFallbackDNS = ""
+    private var activeProvisionMTU = "1280"
+    private var activeTunnelRemoteAddress = "10.0.0.1"
 
 	    private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { [weak self] _, message in
@@ -648,6 +654,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let isWDTT = transportMode == "wdtt"
         let isCSQTT = transportMode == "csqtt"
         let splitTunnel = splitTunnelConfiguration(providerConfiguration: providerConfiguration)
+        activeSplitTunnel = splitTunnel
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 
@@ -660,6 +667,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             do {
+                let baseConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
+                activeBaseWgQuickConfig = wgQuickConfig
                 let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
                 let dnsMode = (providerConfiguration["dnsMode"] as? String) ?? "server"
                 let dnsPrimary = (providerConfiguration["dnsPrimary"] as? String) ?? ""
@@ -797,6 +806,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             } else {
                 SharedLogger.info("TURN server IP: \(turnServerIP)", source: .tunnel)
             }
+            self.activeTunnelRemoteAddress = turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP
 
             if isWDTT {
                 SharedLogger.info("WDTT waiting for WRAP-A GETCONF provision", source: .tunnel)
@@ -815,11 +825,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 SharedLogger.info("WDTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 effectiveUAPI = provision.uapi
                 let effectiveMTU = wdttTunnelMTU.flatMap { $0 > 0 ? $0 : nil } ?? provision.mtu ?? 1280
+                self.activeProvisionAddress = provision.address
+                self.activeProvisionFallbackDNS = provision.dns
+                self.activeProvisionMTU = String(effectiveMTU)
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
                     dns: effectiveDNSString(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, fallbackDNS: provision.dns),
                     mtu: String(effectiveMTU),
-                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
+                    tunnelRemoteAddress: self.activeTunnelRemoteAddress,
                     splitTunnel: splitTunnel
                 )
             } else if isCSQTT {
@@ -837,11 +850,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
                 SharedLogger.info("CSQTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
+                self.activeProvisionAddress = provision.address
+                self.activeProvisionFallbackDNS = provision.dns
+                self.activeProvisionMTU = String(provision.mtu > 0 ? provision.mtu : 1280)
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
                     dns: effectiveDNSString(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, fallbackDNS: provision.dns),
                     mtu: String(provision.mtu > 0 ? provision.mtu : 1280),
-                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
+                    tunnelRemoteAddress: self.activeTunnelRemoteAddress,
                     splitTunnel: splitTunnel
                 )
             } else if let tunnelConfiguration = tunnelConfiguration {
@@ -894,6 +910,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                         return
                     }
+                    self.lastAppliedNetworkSettings = networkSettings
                     if isCSQTT {
                         SharedLogger.info("Tunnel up with CSQTT runtime", source: .tunnel)
                     } else {
@@ -1218,6 +1235,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return ["9.9.9.9", "149.112.112.112"]
         case "adguard":
             return ["94.140.14.14", "94.140.15.15"]
+        case "adguardFamily":
+            return ["94.140.14.15", "94.140.15.16"]
+        case "cleanBrowsingFamily":
+            return ["185.228.168.168", "185.228.169.168"]
+        case "cleanBrowsingSecurity":
+            return ["185.228.168.9", "185.228.169.9"]
         case "custom":
             return [primary, secondary]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1399,6 +1422,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
+        if let request = try? JSONDecoder().decode(DNSUpdateRequest.self, from: messageData),
+           request.command == "update_dns" {
+            applyDNSUpdate(request, completionHandler: completionHandler)
+            return
+        }
+
         sharedLogger.log("handleAppMessage: received \(messageData.count) bytes")
         if messageData.count == 1, messageData[0] == 0 {
             sharedLogger.log("handleAppMessage: runtime configuration requested")
@@ -1421,6 +1450,99 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             sharedLogger.log("handleAppMessage: unsupported message payload")
             completionHandler(nil)
         }
+    }
+
+    private var lastAppliedNetworkSettings: NEPacketTunnelNetworkSettings?
+
+    private struct DNSUpdateRequest: Decodable {
+        let command: String
+        let mode: String
+        let primary: String
+        let secondary: String
+    }
+
+    private struct DNSUpdateResponse: Encodable {
+        let ok: Bool
+        let requiresRestart: Bool
+        let message: String
+    }
+
+    private func applyDNSUpdate(_ request: DNSUpdateRequest, completionHandler: @escaping (Data?) -> Void) {
+        if activeSplitTunnel.enabled && activeSplitTunnel.mode == .tunnel && activeTransportMode != "wdtt" && activeTransportMode != "csqtt" {
+            completionHandler(encodeDNSUpdateResponse(.init(
+                ok: false,
+                requiresRestart: true,
+                message: "DNS update requires tunnel restart when tunnel-only split routing is active."
+            )))
+            return
+        }
+
+        if activeTransportMode == "wdtt" || activeTransportMode == "csqtt" {
+            let dns = effectiveDNSString(
+                mode: request.mode,
+                primary: request.primary,
+                secondary: request.secondary,
+                fallbackDNS: activeProvisionFallbackDNS
+            )
+            let settings = createTunnelSettings(
+                address: activeProvisionAddress,
+                dns: dns,
+                mtu: activeProvisionMTU,
+                tunnelRemoteAddress: activeTunnelRemoteAddress,
+                splitTunnel: activeSplitTunnel
+            )
+            setTunnelNetworkSettings(settings) { error in
+                if let error {
+                    completionHandler(self.encodeDNSUpdateResponse(.init(
+                        ok: false,
+                        requiresRestart: true,
+                        message: "Failed to apply DNS settings: \(error.localizedDescription)"
+                    )))
+                    return
+                }
+                self.lastAppliedNetworkSettings = settings
+                SharedLogger.info("Applied live DNS update for \(self.activeTransportMode) tunnel", source: .tunnel)
+                completionHandler(self.encodeDNSUpdateResponse(.init(
+                    ok: true,
+                    requiresRestart: false,
+                    message: "DNS updated without reconnect."
+                )))
+            }
+            return
+        }
+
+        guard !activeBaseWgQuickConfig.isEmpty,
+              let updatedConfiguration = try? TunnelConfiguration(fromWgQuickConfig: activeBaseWgQuickConfig) else {
+            completionHandler(encodeDNSUpdateResponse(.init(
+                ok: false,
+                requiresRestart: true,
+                message: "Live DNS update is unavailable for this tunnel state."
+            )))
+            return
+        }
+
+        applyDNSOverride(mode: request.mode, primary: request.primary, secondary: request.secondary, to: updatedConfiguration)
+        applySplitTunnelConfiguration(activeSplitTunnel, to: updatedConfiguration)
+        adapter.update(tunnelConfiguration: updatedConfiguration) { error in
+            if let error {
+                completionHandler(self.encodeDNSUpdateResponse(.init(
+                    ok: false,
+                    requiresRestart: true,
+                    message: "Failed to apply DNS settings: \(error.localizedDescription)"
+                )))
+                return
+            }
+            SharedLogger.info("Applied live DNS update for WireGuard tunnel", source: .tunnel)
+            completionHandler(self.encodeDNSUpdateResponse(.init(
+                ok: true,
+                requiresRestart: false,
+                message: "DNS updated without reconnect."
+            )))
+        }
+    }
+
+    private func encodeDNSUpdateResponse(_ response: DNSUpdateResponse) -> Data? {
+        try? JSONEncoder().encode(response)
     }
 
     override func sleep(completionHandler: @escaping () -> Void) {
