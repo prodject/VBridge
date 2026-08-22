@@ -193,6 +193,11 @@ private let vbridgeGoLoggerCallback: @convention(c) (Int32, UnsafePointer<CChar>
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var vbridgeTunnelHandle: Int32 = -1
+    private var activeTransportMode = "wg"
+    private var pathMonitor: NWPathMonitor?
+    private let pathMonitorQueue = DispatchQueue(label: "com.prodject.vbridge.network-extension.path-monitor")
+    private var lastObservedPathSummary: String?
+    private var didPauseProxyForSleep = false
 
 	    private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { [weak self] _, message in
@@ -549,6 +554,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
+        activeTransportMode = transportMode
         let isWDTT = transportMode == "wdtt"
         let isCSQTT = transportMode == "csqtt"
         let splitTunnel = splitTunnelConfiguration(providerConfiguration: providerConfiguration)
@@ -802,6 +808,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         SharedLogger.info("Tunnel up with CSQTT runtime", source: .tunnel)
                     } else {
                         SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                        self.startPathMonitoringIfNeeded()
                     }
                     SharedLogger.info("Packet tunnel startup completed; reporting Connected to iOS", source: .tunnel)
                     completionHandler(nil)
@@ -997,6 +1004,94 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return settings
     }
 
+    private var usesProxyLifecycleHooks: Bool {
+        vbridgeTunnelHandle >= 0 && activeTransportMode != "csqtt"
+    }
+
+    private func startPathMonitoringIfNeeded() {
+        guard usesProxyLifecycleHooks else { return }
+        guard pathMonitor == nil else { return }
+
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.handlePathUpdate(path)
+        }
+        pathMonitor = monitor
+        lastObservedPathSummary = nil
+        monitor.start(queue: pathMonitorQueue)
+        SharedLogger.info("Started NWPathMonitor for tunnel lifecycle recovery", source: .tunnel)
+    }
+
+    private func stopPathMonitoring() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        lastObservedPathSummary = nil
+    }
+
+    private func handlePathUpdate(_ path: NWPath) {
+        guard usesProxyLifecycleHooks else { return }
+
+        let summary = pathSummary(path)
+        guard summary != lastObservedPathSummary else { return }
+        lastObservedPathSummary = summary
+
+        SharedLogger.info("Network path update: \(summary)", source: .tunnel)
+        logPathSnapshot(label: summary)
+
+        if path.status != .satisfied {
+            SharedLogger.warning("Path became unavailable; marking transport transition", source: .tunnel)
+            VBridgeWGPathInTransition(vbridgeTunnelHandle)
+            return
+        }
+
+        if path.usesInterfaceType(.other) &&
+            !path.usesInterfaceType(.wifi) &&
+            !path.usesInterfaceType(.cellular) &&
+            !path.usesInterfaceType(.wiredEthernet) {
+            SharedLogger.debug("Path is temporarily routed via .other; extending transition pause", source: .tunnel)
+            VBridgeWGPathInTransition(vbridgeTunnelHandle)
+            return
+        }
+
+        VBridgeWGPathChanged(vbridgeTunnelHandle)
+    }
+
+    private func logPathSnapshot(label: String) {
+        guard usesProxyLifecycleHooks else { return }
+        label.withCString { cString in
+            VBridgeWGLogPathSnapshot(vbridgeTunnelHandle, UnsafeMutablePointer(mutating: cString))
+        }
+    }
+
+    private func pathSummary(_ path: NWPath) -> String {
+        let status: String
+        switch path.status {
+        case .satisfied:
+            status = "satisfied"
+        case .requiresConnection:
+            status = "requires-connection"
+        case .unsatisfied:
+            status = "unsatisfied"
+        @unknown default:
+            status = "unknown"
+        }
+
+        var interfaces: [String] = []
+        if path.usesInterfaceType(.wifi) { interfaces.append("wifi") }
+        if path.usesInterfaceType(.cellular) { interfaces.append("cellular") }
+        if path.usesInterfaceType(.wiredEthernet) { interfaces.append("wired") }
+        if path.usesInterfaceType(.loopback) { interfaces.append("loopback") }
+        if path.usesInterfaceType(.other) { interfaces.append("other") }
+        if interfaces.isEmpty { interfaces.append("none") }
+
+        var flags: [String] = []
+        if path.isExpensive { flags.append("expensive") }
+        if path.isConstrained { flags.append("constrained") }
+        if flags.isEmpty { flags.append("standard") }
+
+        return "\(interfaces.joined(separator: "+"))-\(status)-\(flags.joined(separator: "+"))"
+    }
+
     private func applyDNSOverride(
         mode: String,
         primary: String,
@@ -1149,6 +1244,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         sharedLogger.log("Stopping tunnel")
         SharedLogger.info("Stopping tunnel (reason: \(reason.rawValue))", source: .tunnel)
+        stopPathMonitoring()
+        didPauseProxyForSleep = false
+        activeTransportMode = "wg"
         let startedAt = Date()
         let completionLock = NSLock()
         var didComplete = false
@@ -1236,11 +1334,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func sleep(completionHandler: @escaping () -> Void) {
-        // Add code here to get ready to sleep.
+        if usesProxyLifecycleHooks {
+            SharedLogger.info("Extension sleep callback received; pausing proxy runtime", source: .tunnel)
+            VBridgeWGPause(vbridgeTunnelHandle)
+            didPauseProxyForSleep = true
+        }
         completionHandler()
     }
 
     override func wake() {
-        // Add code here to wake up.
+        guard usesProxyLifecycleHooks else { return }
+
+        SharedLogger.info("Extension wake callback received; resuming proxy runtime", source: .tunnel)
+        if didPauseProxyForSleep {
+            VBridgeWGResume(vbridgeTunnelHandle)
+            didPauseProxyForSleep = false
+        }
+        VBridgeWGWakeHealthCheck(vbridgeTunnelHandle)
+        logPathSnapshot(label: "wake")
     }
 }

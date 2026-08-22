@@ -347,6 +347,7 @@ struct ContentView: View {
     @State private var speedTestRerunProfileName: String?
     @State private var currentConnectivityPings: [ConnectionPingSample] = ConnectionPingSample.placeholderSamples
     @State private var pendingShortcutActionTask: Task<Void, Never>?
+    @State private var sceneActivationRefreshTask: Task<Void, Never>?
     @State private var captchaRecoveryRestartCount = 0
     @State private var lastHandledCaptchaRecoveryID: String?
     @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
@@ -469,7 +470,11 @@ struct ContentView: View {
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
                     refreshVBridgeStatus()
+                    scheduleSceneActivationRecoveryRefreshes()
                     schedulePendingShortcutActionConsumption()
+                } else {
+                    sceneActivationRefreshTask?.cancel()
+                    sceneActivationRefreshTask = nil
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShortcutActionDidChange)) { _ in
@@ -479,6 +484,8 @@ struct ContentView: View {
                 stopLogMonitoring()
                 pendingShortcutActionTask?.cancel()
                 pendingShortcutActionTask = nil
+                sceneActivationRefreshTask?.cancel()
+                sceneActivationRefreshTask = nil
             }
             .onReceive(tunnelManagerStore.$status) { status in
                 // The store observes only its retained manager's connection,
@@ -1430,6 +1437,20 @@ struct ContentView: View {
             }
         }
 #endif
+    }
+
+    private func scheduleSceneActivationRecoveryRefreshes() {
+        sceneActivationRefreshTask?.cancel()
+        sceneActivationRefreshTask = Task {
+            let delays: [UInt64] = [1, 3, 7]
+            for delay in delays {
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    refreshVBridgeStatus()
+                }
+            }
+        }
     }
 
     private func reconcileLiveActivityIfNeeded(for status: NEVPNStatus) {
