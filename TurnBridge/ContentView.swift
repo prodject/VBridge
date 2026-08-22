@@ -1361,6 +1361,7 @@ struct ContentView: View {
         let shouldCompleteInitialLoad = markInitialLoadComplete || !hasLoadedInitialStatus
         MacPrivilegedHelperTunnelBackend.fetchStatus { helperStatus in
             let resolvedStatus = helperStatus ?? self.vpnStatus
+            self.reconcileLiveActivityIfNeeded(for: resolvedStatus)
             self.applyVPNStatus(resolvedStatus)
             if shouldCompleteInitialLoad {
                 self.hasLoadedInitialStatus = true
@@ -1379,9 +1380,11 @@ struct ContentView: View {
                    self.vpnStatus == .connecting,
                    currentStatus == .disconnected {
                     SharedLogger.debug("Ignoring disconnected manager status while preparing tunnel startup")
+                    self.reconcileLiveActivityIfNeeded(for: currentStatus)
                     return
                 }
                 let selectedProfileName = self.store.selectedProfile?.name ?? "VBridge"
+                self.reconcileLiveActivityIfNeeded(for: currentStatus)
                 self.applyVPNStatus(currentStatus)
                 if currentStatus == .connected, let snapshot = VBridgeLiveActivityStore.load() {
                     self.downloadSpeedMbps = snapshot.content.downloadSpeedMbps
@@ -1404,6 +1407,21 @@ struct ContentView: View {
             }
         }
 #endif
+    }
+
+    private func reconcileLiveActivityIfNeeded(for status: NEVPNStatus) {
+        guard #available(iOS 16.1, *), !targetEnvironment(macCatalyst) else { return }
+        guard status == .disconnected || status == .invalid else { return }
+
+        guard let snapshot = VBridgeLiveActivityStore.load(),
+              snapshot.content.phase.isActiveSession || snapshot.content.phase == .unknown else {
+            return
+        }
+
+        SharedLogger.info(
+            "Ending stale Live Activity during status refresh: vpnStatus=\(status.rawValue), activityPhase=\(snapshot.content.phase.rawValue)"
+        )
+        endLiveActivity(profileName: snapshot.profileName, immediate: true)
     }
 
     private func applyVPNStatus(_ newStatus: NEVPNStatus) {
