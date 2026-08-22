@@ -27,6 +27,7 @@ private struct DeployRequest: Encodable, Sendable {
     var deployScriptPath: String
     var serverBinaryPath: String
     var mainPassword: String
+    var csqttTunnelPassword: String
     var csqttWebUser: String
     var csqttWebPassword: String
     var adminId: String
@@ -59,6 +60,7 @@ private struct DeployResponse: Decodable, Sendable {
     var dns1: String?
     var dns2: String?
     var mainPassword: String?
+    var csqttTunnelPassword: String?
     var csqttWebUser: String?
     var csqttWebPassword: String?
     var adminId: String?
@@ -78,6 +80,7 @@ struct DeployView: View {
     @AppStorage("deploy.dns1") private var dns1 = "1.1.1.1"
     @AppStorage("deploy.dns2") private var dns2 = "1.0.0.1"
     @AppStorage("deploy.mainPassword") private var mainPassword = ""
+    @AppStorage("deploy.csqttTunnelPassword") private var csqttTunnelPassword = ""
     @AppStorage("deploy.csqttWebUser") private var csqttWebUser = "admin"
     @AppStorage("deploy.csqttWebPassword") private var csqttWebPassword = ""
     @AppStorage("deploy.adminId") private var adminId = ""
@@ -196,15 +199,25 @@ struct DeployView: View {
                     secretField("Telegram Bot Token", text: $botToken)
                 }
             } else {
-                Section(header: Text("Web Panel")) {
-                    copyableTextField("CSQTT Web Login", text: $csqttWebUser)
+                Section(header: Text("Secrets")) {
+                    secretField("CSQTT Tunnel Password", text: $csqttTunnelPassword)
                     secretField("CSQTT Web Password", text: $csqttWebPassword)
+
+                    if !csqttTunnelPassword.isEmpty && !isSecretValueValid(csqttTunnelPassword) {
+                        Text("Allowed: letters, digits, and _ . ! ? : # - /")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
 
                     if !csqttWebPassword.isEmpty && !isSecretValueValid(csqttWebPassword) {
                         Text("Allowed: letters, digits, and _ . ! ? : # - /")
                             .font(.caption)
                             .foregroundColor(.red)
                     }
+                }
+
+                Section(header: Text("Web Panel")) {
+                    copyableTextField("CSQTT Web Login", text: $csqttWebUser)
 
                     Button {
                         openCSQTTWebPanel()
@@ -588,7 +601,9 @@ struct DeployView: View {
         canConnect &&
         isValidPort(effectiveDTLSPort) &&
         isValidPort(effectiveWGPort) &&
-        (selectedDeployKind == .wdtt ? isSecretValueValid(mainPassword) : isSecretValueValid(csqttWebPassword))
+        (selectedDeployKind == .wdtt
+            ? isSecretValueValid(mainPassword)
+            : isSecretValueValid(csqttTunnelPassword) && isSecretValueValid(csqttWebPassword))
     }
 
     private var canUpdatePreserve: Bool {
@@ -768,6 +783,7 @@ struct DeployView: View {
             dns1: dns1,
             dns2: dns2,
             mainPassword: mainPassword,
+            csqttTunnelPassword: csqttTunnelPassword,
             csqttWebUser: csqttWebUser,
             csqttWebPassword: csqttWebPassword,
             adminId: adminId,
@@ -895,6 +911,7 @@ struct DeployView: View {
             deployScriptPath: scriptURL?.path ?? "",
             serverBinaryPath: binaryURL?.path ?? "",
             mainPassword: mainPassword,
+            csqttTunnelPassword: csqttTunnelPassword,
             csqttWebUser: csqttWebUser.trimmingCharacters(in: .whitespacesAndNewlines),
             csqttWebPassword: csqttWebPassword,
             adminId: adminId.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -937,6 +954,9 @@ struct DeployView: View {
         }
         if selectedDeployKind == .wdtt, mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
             mainPassword = value
+        }
+        if selectedDeployKind == .csqtt, csqttTunnelPassword.isEmpty, let value = nonEmpty(response.csqttTunnelPassword) {
+            csqttTunnelPassword = value
         }
         if selectedDeployKind == .csqtt, csqttWebPassword.isEmpty, let value = nonEmpty(response.csqttWebPassword) {
             csqttWebPassword = value

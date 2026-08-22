@@ -118,6 +118,7 @@ struct DeploySettingsLink: Codable {
     let dns1: String
     let dns2: String
     let mainPassword: String
+    let csqttTunnelPassword: String?
     let csqttWebUser: String?
     let csqttWebPassword: String?
     let adminId: String
@@ -140,6 +141,7 @@ struct DeploySettingsLink: Codable {
         case dns1
         case dns2
         case mainPassword
+        case csqttTunnelPassword
         case csqttWebUser
         case csqttWebPassword
         case adminId
@@ -163,6 +165,7 @@ struct DeploySettingsLink: Codable {
         dns1: String,
         dns2: String,
         mainPassword: String,
+        csqttTunnelPassword: String? = nil,
         csqttWebUser: String? = nil,
         csqttWebPassword: String? = nil,
         adminId: String,
@@ -184,6 +187,7 @@ struct DeploySettingsLink: Codable {
         self.dns1 = dns1
         self.dns2 = dns2
         self.mainPassword = mainPassword
+        self.csqttTunnelPassword = csqttTunnelPassword
         self.csqttWebUser = csqttWebUser
         self.csqttWebPassword = csqttWebPassword
         self.adminId = adminId
@@ -208,6 +212,7 @@ struct DeploySettingsLink: Codable {
         dns1 = try container.decode(String.self, forKey: .dns1)
         dns2 = try container.decode(String.self, forKey: .dns2)
         mainPassword = try container.decode(String.self, forKey: .mainPassword)
+        csqttTunnelPassword = try container.decodeIfPresent(String.self, forKey: .csqttTunnelPassword)
         csqttWebUser = try container.decodeIfPresent(String.self, forKey: .csqttWebUser)
         csqttWebPassword = try container.decodeIfPresent(String.self, forKey: .csqttWebPassword)
         adminId = try container.decode(String.self, forKey: .adminId)

@@ -31,6 +31,7 @@ type deployRequest struct {
 	DeployScript     string `json:"deployScriptPath"`
 	ServerBinary     string `json:"serverBinaryPath"`
 	MainPassword     string `json:"mainPassword"`
+	CSQTTTunnelPassword string `json:"csqttTunnelPassword"`
 	CSQTTWebUser     string `json:"csqttWebUser"`
 	CSQTTWebPassword string `json:"csqttWebPassword"`
 	AdminID          string `json:"adminId"`
@@ -63,6 +64,7 @@ type deployResponse struct {
 	DNS1           string `json:"dns1,omitempty"`
 	DNS2           string `json:"dns2,omitempty"`
 	MainPassword   string `json:"mainPassword,omitempty"`
+	CSQTTTunnelPassword string `json:"csqttTunnelPassword,omitempty"`
 	CSQTTWebUser   string `json:"csqttWebUser,omitempty"`
 	CSQTTWebPassword string `json:"csqttWebPassword,omitempty"`
 	AdminID        string `json:"adminId,omitempty"`
@@ -79,6 +81,7 @@ type deployStatusChecks struct {
 	DNS1           string
 	DNS2           string
 	MainPassword   string
+	CSQTTTunnelPassword string
 	CSQTTWebUser   string
 	CSQTTWebPassword string
 	AdminID        string
@@ -622,6 +625,9 @@ func (r deployRequest) validate() error {
 	if r.DeployKind == "wdtt" && (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
 		return errors.New("WDTT main password is empty")
 	}
+	if r.DeployKind == "csqtt" && (r.Action == "install" || r.Action == "update_preserve") && strings.TrimSpace(r.CSQTTTunnelPassword) == "" {
+		return errors.New("CSQTT tunnel password is empty")
+	}
 	if (r.Action == "install" || r.Action == "update_preserve") && r.ServerBinary == "" {
 		return errors.New("server binary path is empty")
 	}
@@ -708,32 +714,36 @@ func (r deployRequest) remoteCommand() string {
 		if webUser == "" {
 			webUser = "admin"
 		}
+		tunnelPass := strings.TrimSpace(r.CSQTTTunnelPassword)
 		webPass := strings.TrimSpace(r.CSQTTWebPassword)
 		switch r.Action {
 		case "uninstall":
 			return fmt.Sprintf(
-				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh uninstall",
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_PASSWORD=%s CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh uninstall",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(tunnelPass),
 				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
 		case "update_preserve":
 			return fmt.Sprintf(
-				"env CSQTT_PRESERVE_CONFIG=1 CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				"env CSQTT_PRESERVE_CONFIG=1 CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_PASSWORD=%s CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(tunnelPass),
 				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
 		default:
 			return fmt.Sprintf(
-				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_PASSWORD=%s CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(tunnelPass),
 				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
