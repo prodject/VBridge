@@ -51,6 +51,7 @@ private struct DeployResponse: Decodable, Sendable {
     var serverConnected: Bool?
     var wdttInstalled: Bool?
     var readyToConnect: Bool?
+    var serverVersion: String?
     var dtlsPort: Int?
     var wgPort: Int?
     var dns1: String?
@@ -66,6 +67,7 @@ struct DeployView: View {
     @Environment(\.openURL) private var openURL
 
     @AppStorage("deploy.kind") private var deployKind = DeployServerKind.wdtt.rawValue
+    @AppStorage("deploy.launchAction") private var launchActionRaw = ""
     @AppStorage("deploy.host") private var host = ""
     @AppStorage("deploy.user") private var user = "root"
     @AppStorage("deploy.password") private var password = ""
@@ -102,6 +104,7 @@ struct DeployView: View {
     @State private var shareLogsURL: URL?
     @State private var shareStateURL: URL?
     @State private var isCheckingServerStatus = false
+    @State private var didConsumeLaunchAction = false
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
@@ -454,6 +457,7 @@ struct DeployView: View {
         }
         .task {
             await refreshSavedServerStatus()
+            consumePendingLaunchActionIfNeeded()
         }
         .onChange(of: deployKind) { newValue in
             guard let kind = DeployServerKind(rawValue: newValue) else { return }
@@ -473,6 +477,7 @@ struct DeployView: View {
             clearStatusIndicators()
             Task {
                 await refreshSavedServerStatus()
+                consumePendingLaunchActionIfNeeded()
             }
         }
         .sheet(isPresented: Binding(
@@ -888,6 +893,28 @@ struct DeployView: View {
         serverConnected = nil
         wdttInstalled = nil
         readyToConnect = nil
+    }
+
+    private func consumePendingLaunchActionIfNeeded() {
+        guard !didConsumeLaunchAction else { return }
+        didConsumeLaunchAction = true
+
+        let actionValue = launchActionRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !actionValue.isEmpty else { return }
+        launchActionRaw = ""
+
+        guard selectedDeployKind == .wdtt, let action = DeployAction(rawValue: actionValue) else {
+            return
+        }
+
+        switch action {
+        case .updatePreserve:
+            run(.updatePreserve)
+        case .reinstall:
+            run(.reinstall)
+        default:
+            break
+        }
     }
 
     private var serverAdminTarget: ServerAdminTarget? {

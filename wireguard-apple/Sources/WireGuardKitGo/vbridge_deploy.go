@@ -55,6 +55,7 @@ type deployResponse struct {
 	ServerConnected bool   `json:"serverConnected"`
 	WDTTInstalled  bool   `json:"wdttInstalled"`
 	ReadyToConnect bool   `json:"readyToConnect"`
+	ServerVersion  string `json:"serverVersion,omitempty"`
 	DTLSPort       int    `json:"dtlsPort,omitempty"`
 	WGPort         int    `json:"wgPort,omitempty"`
 	DNS1           string `json:"dns1,omitempty"`
@@ -68,6 +69,7 @@ type deployStatusChecks struct {
 	ServerConnected bool
 	WDTTInstalled  bool
 	ReadyToConnect bool
+	ServerVersion  string
 	DTLSPort       int
 	WGPort         int
 	DNS1           string
@@ -164,6 +166,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: checks.ServerConnected,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
+				ServerVersion:   checks.ServerVersion,
 				DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
 			}
@@ -178,6 +181,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			ServerVersion:  checks.ServerVersion,
 			DTLSPort:       checks.DTLSPort,
 			WGPort:         checks.WGPort,
 			DNS1:           checks.DNS1,
@@ -854,6 +858,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		"if [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ]; then printf 'WDTT installed: yes\\n'; else printf 'WDTT installed: no\\n'; fi",
 		"if [ \"$service_active\" = \"1\" ] && [ \"$binary_installed\" = \"1\" ] && [ \"$service_file\" = \"1\" ] && [ \"$iface_active\" = \"1\" ]; then printf 'Ready to connect: yes\\n'; else printf 'Ready to connect: no\\n'; fi",
 		"printf 'WDTT_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
+		"if [ \"$binary_installed\" = \"1\" ]; then /usr/local/bin/wdtt-server --version 2>/dev/null | head -n 1 | sed 's/^/WDTT_VERSION|/'; fi",
 		"if [ -f /etc/systemd/system/wdtt.service ]; then sed -n 's/^ExecStart=//p' /etc/systemd/system/wdtt.service | tail -n 1 | sed 's/^/WDTT_EXECSTART|/'; fi",
 	}, "; ")
 
@@ -864,6 +869,10 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 
 	checks := deployStatusChecks{ServerConnected: true}
 	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "WDTT_VERSION|") {
+			checks.ServerVersion = strings.TrimSpace(strings.TrimPrefix(line, "WDTT_VERSION|"))
+			continue
+		}
 		if strings.HasPrefix(line, "WDTT_EXECSTART|") {
 			mergeDeployStatusConfig(&checks, parseWDTTExecStart(strings.TrimPrefix(line, "WDTT_EXECSTART|")))
 			continue

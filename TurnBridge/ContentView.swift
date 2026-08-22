@@ -127,6 +127,43 @@ private struct ConnectionPingSample: Equatable {
     }
 }
 
+private struct WDTTDeployStatusRequest: Encodable, Sendable {
+    var deployKind: String
+    var action: String
+    var host: String
+    var user: String
+    var password: String
+    var port: Int
+    var deployScriptPath: String
+    var serverBinaryPath: String
+    var mainPassword: String
+    var adminId: String
+    var botToken: String
+    var dtlsPort: Int
+    var wgPort: Int
+    var dns1: String
+    var dns2: String
+    var maxPasswords: Int
+    var maxWorkersPerAccess: Int
+    var maxHandshakes: Int
+    var handshakeRate: Int
+    var maxClientMbps: Int
+    var wdttExistingTunEnabled: Bool
+    var wdttExistingTunName: String
+    var stateArchiveBase64: String
+}
+
+private struct WDTTDeployStatusResponse: Decodable, Sendable {
+    var ok: Bool
+    var status: String
+    var message: String
+    var output: String
+    var serverConnected: Bool?
+    var wdttInstalled: Bool?
+    var readyToConnect: Bool?
+    var serverVersion: String?
+}
+
 private struct PreBootstrapCaptchaView: View {
     let url: String
     let onToken: (String) -> Void
@@ -326,6 +363,7 @@ struct ContentView: View {
     @State private var settingsSheet: SettingsSheet?
     @State private var showSplitTunnelSheet = false
     @State private var showDeploySheet = false
+    @State private var showWDTTServerUpdatePrompt = false
     @StateObject private var captchaBridge = CaptchaBridge()
     @State private var didCheckForUpdates = false
     @State private var isDownloadingUpdate = false
@@ -356,6 +394,9 @@ struct ContentView: View {
     @State private var splitTunnelSnapshot = SplitTunnelStorage.load(profileID: SplitTunnelStorage.currentProfileID())
     @State private var pendingTunnelRestartProfile: VPNProfile?
     @State private var pendingTunnelRestartReason = ""
+    @AppStorage("deploy.launchAction") private var deployLaunchActionRaw = ""
+    @AppStorage("deploy.lastPromptedWDTTUpdateKey") private var lastPromptedWDTTUpdateKey = ""
+    private let bundledWDTTServerVersion = 15
 
     // PacketTunnelProvider may spend up to 120s in VK/TURN bootstrap and
     // another 30s waiting for WDTT provisioning. Keep the UI watchdog beyond
@@ -458,6 +499,7 @@ struct ContentView: View {
             }
             .onAppear(perform: checkInitialStatus)
             .onAppear {
+                Task { await checkWDTTServerUpdatePrompt() }
                 if !didCheckForUpdates {
                     didCheckForUpdates = true
                     Task { await checkForUpdates(manual: false) }
@@ -470,6 +512,7 @@ struct ContentView: View {
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
                     refreshVBridgeStatus()
+                    Task { await checkWDTTServerUpdatePrompt() }
                     scheduleSceneActivationRecoveryRefreshes()
                     schedulePendingShortcutActionConsumption()
                 } else {
@@ -500,6 +543,19 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(alertMessage)
+            }
+            .alert("Update Server Available", isPresented: $showWDTTServerUpdatePrompt) {
+                Button("Update With Safe Data") {
+                    deployLaunchActionRaw = "update_preserve"
+                    showDeploySheet = true
+                }
+                Button("Clean Reinstall", role: .destructive) {
+                    deployLaunchActionRaw = "reinstall"
+                    showDeploySheet = true
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("VBridge was updated and your WDTT server may need a matching server update. You can apply a safe update with data preservation or reinstall the server cleanly.")
             }
         }
     }
@@ -2940,6 +2996,100 @@ struct ContentView: View {
         alertTitle = title
         alertMessage = message
         showingAlert = true
+    }
+
+    private func checkWDTTServerUpdatePrompt() async {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
+        guard let serverVersion = await fetchWDTTServerVersionIfNeeded() else { return }
+        let updateKey = "\(currentVersion)|\(serverVersion)"
+        guard shouldSuggestWDTTServerUpdate(serverVersion: serverVersion, updateKey: updateKey) else { return }
+        lastPromptedWDTTUpdateKey = updateKey
+        showWDTTServerUpdatePrompt = true
+    }
+
+    private func shouldSuggestWDTTServerUpdate(serverVersion: String, updateKey: String) -> Bool {
+        let defaults = UserDefaults.standard
+        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdtt.rawValue
+        guard deployKind == DeployServerKind.wdtt.rawValue else { return false }
+
+        let host = (defaults.string(forKey: "deploy.host") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = defaults.string(forKey: "deploy.password") ?? ""
+        let mainPassword = defaults.string(forKey: "deploy.mainPassword") ?? ""
+        guard !host.isEmpty && !password.isEmpty && !mainPassword.isEmpty else { return false }
+        guard let parsedServerVersion = Int(serverVersion.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        guard parsedServerVersion < bundledWDTTServerVersion else { return false }
+        return lastPromptedWDTTUpdateKey != updateKey
+    }
+
+    private func fetchWDTTServerVersionIfNeeded() async -> String? {
+        let defaults = UserDefaults.standard
+        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdtt.rawValue
+        guard deployKind == DeployServerKind.wdtt.rawValue else { return nil }
+
+        let host = (defaults.string(forKey: "deploy.host") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = (defaults.string(forKey: "deploy.user") ?? "root").trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = defaults.string(forKey: "deploy.password") ?? ""
+        let mainPassword = defaults.string(forKey: "deploy.mainPassword") ?? ""
+        let sshPort = defaults.object(forKey: "deploy.sshPort") as? Int ?? 22
+        guard !host.isEmpty, !password.isEmpty, !mainPassword.isEmpty, (1...65535).contains(sshPort) else { return nil }
+
+        let request = WDTTDeployStatusRequest(
+            deployKind: DeployServerKind.wdtt.rawValue,
+            action: "status",
+            host: host,
+            user: user.isEmpty ? "root" : user,
+            password: password,
+            port: sshPort,
+            deployScriptPath: "",
+            serverBinaryPath: "",
+            mainPassword: mainPassword,
+            adminId: "",
+            botToken: "",
+            dtlsPort: defaults.object(forKey: "deploy.dtlsPort") as? Int ?? 56000,
+            wgPort: defaults.object(forKey: "deploy.wgPort") as? Int ?? 56001,
+            dns1: defaults.string(forKey: "deploy.dns1") ?? "",
+            dns2: defaults.string(forKey: "deploy.dns2") ?? "",
+            maxPasswords: defaults.object(forKey: "deploy.maxPasswords") as? Int ?? 50,
+            maxWorkersPerAccess: defaults.object(forKey: "deploy.maxWorkersPerAccess") as? Int ?? 0,
+            maxHandshakes: defaults.object(forKey: "deploy.maxHandshakes") as? Int ?? 32,
+            handshakeRate: defaults.object(forKey: "deploy.handshakeRate") as? Int ?? 24,
+            maxClientMbps: defaults.object(forKey: "deploy.maxClientMbps") as? Int ?? 0,
+            wdttExistingTunEnabled: defaults.bool(forKey: "deploy.wdttExistingTunEnabled"),
+            wdttExistingTunName: defaults.string(forKey: "deploy.wdttExistingTunName") ?? "",
+            stateArchiveBase64: ""
+        )
+
+        let response = await performWDTTDeployStatusRequest(request)
+        guard response.ok, response.serverConnected == true, response.wdttInstalled == true else { return nil }
+        let version = response.serverVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return version.isEmpty ? nil : version
+    }
+
+    private func performWDTTDeployStatusRequest(_ request: WDTTDeployStatusRequest) async -> WDTTDeployStatusResponse {
+        await Task.detached(priority: .utility) {
+            do {
+                let data = try JSONEncoder().encode(request)
+                guard let json = String(data: data, encoding: .utf8) else {
+                    throw NSError(domain: "ContentView", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode WDTT status request."])
+                }
+
+                let pointer = json.withCString {
+                    VBridgeWGDeployServer(UnsafeMutablePointer(mutating: $0))
+                }
+                guard let pointer else {
+                    throw NSError(domain: "ContentView", code: 2, userInfo: [NSLocalizedDescriptionKey: "Deploy bridge returned an empty response."])
+                }
+                defer { VBridgeWGFreeCString(pointer) }
+
+                let responseJSON = String(cString: pointer)
+                guard let responseData = responseJSON.data(using: .utf8) else {
+                    throw NSError(domain: "ContentView", code: 3, userInfo: [NSLocalizedDescriptionKey: "Deploy bridge returned invalid UTF-8."])
+                }
+                return try JSONDecoder().decode(WDTTDeployStatusResponse.self, from: responseData)
+            } catch {
+                return WDTTDeployStatusResponse(ok: false, status: "error", message: error.localizedDescription, output: "", serverConnected: false, wdttInstalled: false, readyToConnect: false, serverVersion: nil)
+            }
+        }.value
     }
 
     private func loadCaptchaRecoveryRequest() -> CaptchaRecoveryRequest? {
