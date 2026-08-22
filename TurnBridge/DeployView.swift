@@ -26,6 +26,7 @@ private struct DeployRequest: Encodable, Sendable {
     var deployScriptPath: String
     var serverBinaryPath: String
     var mainPassword: String
+    var csqttWebPassword: String
     var adminId: String
     var botToken: String
     var dtlsPort: Int
@@ -55,6 +56,7 @@ private struct DeployResponse: Decodable, Sendable {
     var dns1: String?
     var dns2: String?
     var mainPassword: String?
+    var csqttWebPassword: String?
     var adminId: String?
     var botToken: String?
 }
@@ -71,6 +73,7 @@ struct DeployView: View {
     @AppStorage("deploy.dns1") private var dns1 = "1.1.1.1"
     @AppStorage("deploy.dns2") private var dns2 = "1.0.0.1"
     @AppStorage("deploy.mainPassword") private var mainPassword = ""
+    @AppStorage("deploy.csqttWebPassword") private var csqttWebPassword = ""
     @AppStorage("deploy.adminId") private var adminId = ""
     @AppStorage("deploy.botToken") private var botToken = ""
     @AppStorage("deploy.manualPorts") private var manualPorts = false
@@ -181,9 +184,9 @@ struct DeployView: View {
                 }
             } else {
                 Section(header: Text("Web Panel")) {
-                    secretField("CSQTT Web Password", text: $mainPassword)
+                    secretField("CSQTT Web Password", text: $csqttWebPassword)
 
-                    if !mainPassword.isEmpty && !isMainPasswordValid {
+                    if !csqttWebPassword.isEmpty && !isMainPasswordValid {
                         Text("Allowed: letters, digits, and _ . ! ? : # - /")
                             .font(.caption)
                             .foregroundColor(.red)
@@ -724,6 +727,7 @@ struct DeployView: View {
             dns1: dns1,
             dns2: dns2,
             mainPassword: mainPassword,
+            csqttWebPassword: csqttWebPassword,
             adminId: adminId,
             botToken: botToken,
             manualPorts: manualPorts,
@@ -816,6 +820,7 @@ struct DeployView: View {
             deployScriptPath: scriptURL?.path ?? "",
             serverBinaryPath: binaryURL?.path ?? "",
             mainPassword: mainPassword,
+            csqttWebPassword: csqttWebPassword,
             adminId: adminId.trimmingCharacters(in: .whitespacesAndNewlines),
             botToken: botToken.trimmingCharacters(in: .whitespacesAndNewlines),
             dtlsPort: effectiveDTLSPort,
@@ -854,8 +859,11 @@ struct DeployView: View {
         if dns2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.dns2) {
             dns2 = value
         }
-        if mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
+        if selectedDeployKind == .wdtt, mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
             mainPassword = value
+        }
+        if selectedDeployKind == .csqtt, csqttWebPassword.isEmpty, let value = nonEmpty(response.csqttWebPassword) {
+            csqttWebPassword = value
         }
         if adminId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.adminId) {
             adminId = value

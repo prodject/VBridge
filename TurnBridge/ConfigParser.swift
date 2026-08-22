@@ -118,6 +118,7 @@ struct DeploySettingsLink: Codable {
     let dns1: String
     let dns2: String
     let mainPassword: String
+    let csqttWebPassword: String?
     let adminId: String
     let botToken: String
     let manualPorts: Bool
@@ -138,6 +139,7 @@ struct DeploySettingsLink: Codable {
         case dns1
         case dns2
         case mainPassword
+        case csqttWebPassword
         case adminId
         case botToken
         case manualPorts
@@ -159,6 +161,7 @@ struct DeploySettingsLink: Codable {
         dns1: String,
         dns2: String,
         mainPassword: String,
+        csqttWebPassword: String? = nil,
         adminId: String,
         botToken: String,
         manualPorts: Bool,
@@ -178,6 +181,7 @@ struct DeploySettingsLink: Codable {
         self.dns1 = dns1
         self.dns2 = dns2
         self.mainPassword = mainPassword
+        self.csqttWebPassword = csqttWebPassword
         self.adminId = adminId
         self.botToken = botToken
         self.manualPorts = manualPorts
@@ -200,6 +204,7 @@ struct DeploySettingsLink: Codable {
         dns1 = try container.decode(String.self, forKey: .dns1)
         dns2 = try container.decode(String.self, forKey: .dns2)
         mainPassword = try container.decode(String.self, forKey: .mainPassword)
+        csqttWebPassword = try container.decodeIfPresent(String.self, forKey: .csqttWebPassword)
         adminId = try container.decode(String.self, forKey: .adminId)
         botToken = try container.decode(String.self, forKey: .botToken)
         manualPorts = try container.decode(Bool.self, forKey: .manualPorts)

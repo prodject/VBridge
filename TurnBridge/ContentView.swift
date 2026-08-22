@@ -2757,6 +2757,7 @@ struct ContentView: View {
         defaults.set(settings.dns1, forKey: "deploy.dns1")
         defaults.set(settings.dns2, forKey: "deploy.dns2")
         defaults.set(settings.mainPassword, forKey: "deploy.mainPassword")
+        defaults.set(settings.csqttWebPassword ?? "", forKey: "deploy.csqttWebPassword")
         defaults.set(settings.adminId, forKey: "deploy.adminId")
         defaults.set(settings.botToken, forKey: "deploy.botToken")
         defaults.set(settings.manualPorts, forKey: "deploy.manualPorts")
