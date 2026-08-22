@@ -46,6 +46,7 @@ struct VBridge: App {
     }
 
     func turnOnTunnel(
+        profileID: UUID?,
         vkLink: String,
         peerAddr: String,
         listenAddr: String,
@@ -77,6 +78,7 @@ struct VBridge: App {
         completionHandler: @escaping (Bool) -> Void
     ) {
         let configuration = TunnelStartConfiguration(
+            profileID: profileID,
             vkLink: vkLink,
             peerAddr: peerAddr,
             listenAddr: listenAddr,

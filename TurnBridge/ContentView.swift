@@ -353,7 +353,7 @@ struct ContentView: View {
     @State private var preBootstrapCaptcha: PreBootstrapCaptchaChallenge?
     @State private var preBootstrapCaptchaContinuation: CheckedContinuation<PreBootstrapCaptchaResult, Never>?
     @State private var settingsProfileSnapshot: VPNProfile?
-    @State private var splitTunnelSnapshot = SplitTunnelStorage.load()
+    @State private var splitTunnelSnapshot = SplitTunnelStorage.load(profileID: SplitTunnelStorage.currentProfileID())
     @State private var pendingTunnelRestartProfile: VPNProfile?
     @State private var pendingTunnelRestartReason = ""
 
@@ -397,7 +397,7 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showSplitTunnelSheet) {
                 NavigationStack {
-                    SplitTunnelSettingsView(showsDoneButton: true) { _ in
+                    SplitTunnelSettingsView(profileID: store.selectedProfileID, showsDoneButton: true) { _ in
                         handleSplitTunnelSettingsCommit()
                     }
                 }
@@ -746,7 +746,7 @@ struct ContentView: View {
             }
 
             Button(action: {
-                splitTunnelSnapshot = SplitTunnelStorage.load()
+                splitTunnelSnapshot = SplitTunnelStorage.load(profileID: store.selectedProfileID)
                 showSplitTunnelSheet = true
             }) {
                 Image(systemName: "arrow.triangle.branch")
@@ -1065,7 +1065,7 @@ struct ContentView: View {
     }
 
     private func handleSplitTunnelSettingsCommit() {
-        let current = SplitTunnelStorage.load()
+        let current = SplitTunnelStorage.load(profileID: store.selectedProfileID)
         guard current != splitTunnelSnapshot else { return }
         guard let profile = store.selectedProfile else { return }
         guard vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting else { return }
@@ -1080,6 +1080,7 @@ struct ContentView: View {
     ) {
         startConnectWatchdog()
         app.turnOnTunnel(
+            profileID: profile.id,
             vkLink: profile.vkLink,
             peerAddr: profile.peerAddr,
             listenAddr: listenAddr,

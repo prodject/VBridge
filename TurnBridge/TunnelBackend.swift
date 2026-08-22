@@ -54,6 +54,7 @@ enum TunnelOnDemandController {
 }
 
 struct TunnelStartConfiguration: Codable {
+    var profileID: UUID?
     var vkLink: String
     var peerAddr: String
     var listenAddr: String
@@ -88,7 +89,7 @@ struct TunnelStartConfiguration: Codable {
     }
 
     var providerConfiguration: [String: Any] {
-        let splitTunnel = SplitTunnelStorage.load()
+        let splitTunnel = SplitTunnelStorage.load(profileID: profileID)
         var configuration: [String: Any] = [
             "wgQuickConfig": normalizedWgQuickConfig,
             "vkLink": vkLink,

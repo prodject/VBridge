@@ -82,6 +82,7 @@ enum SplitTunnelStorage {
     static let enabledKey = "splitTunnelEnabled"
     static let modeKey = "splitTunnelMode"
     static let rulesKey = "splitTunnelRules"
+    static let selectedProfileIDKey = "selectedProfileID"
     static let createListURL = "https://iplist.opencck.org/"
     static let githubCIDRSourceKey = "splitTunnelSource.githubCIDR"
     static let githubIPSourceKey = "splitTunnelSource.githubIP"
@@ -100,29 +101,34 @@ enum SplitTunnelStorage {
     private static let rulesFileName = "split-tunnel-rules.txt"
     private static let migrationLock = NSLock()
 
-    static func load() -> SplitTunnelSettings {
+    static func currentProfileID() -> UUID? {
+        guard let rawValue = UserDefaults.standard.string(forKey: selectedProfileIDKey) else { return nil }
+        return UUID(uuidString: rawValue)
+    }
+
+    static func load(profileID: UUID? = currentProfileID()) -> SplitTunnelSettings {
         ensureStorageDirectoryExists()
-        migrateLegacyStorageIfNeeded()
-        let metadata = loadMetadata()
+        migrateLegacyStorageIfNeeded(selectedProfileID: profileID)
+        let metadata = loadMetadata(profileID: profileID)
         return SplitTunnelSettings(
             enabled: metadata.enabled,
             mode: metadata.mode,
-            rules: loadRules(from: rulesFileURL())
+            rules: loadRules(from: rulesFileURL(profileID: profileID))
         )
     }
 
-    static func save(_ settings: SplitTunnelSettings) {
+    static func save(_ settings: SplitTunnelSettings, profileID: UUID? = currentProfileID()) {
         let normalizedRules = deduplicatedRules(settings.rules)
-        writeRules(normalizedRules, to: rulesFileURL())
-        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: normalizedRules.count))
+        writeRules(normalizedRules, to: rulesFileURL(profileID: profileID))
+        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: normalizedRules.count), profileID: profileID)
     }
 
-    static func saveConfiguration(_ settings: SplitTunnelSettings) {
-        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: settings.rules.count))
+    static func saveConfiguration(_ settings: SplitTunnelSettings, profileID: UUID? = currentProfileID()) {
+        writeMetadata(Metadata(enabled: settings.enabled, mode: settings.mode, ruleCount: settings.rules.count), profileID: profileID)
     }
 
-    static func ruleCountSummary() -> String {
-        let count = loadMetadata().ruleCount
+    static func ruleCountSummary(profileID: UUID? = currentProfileID()) -> String {
+        let count = loadMetadata(profileID: profileID).ruleCount
         return count == 1 ? "1 rule" : "\(count) rules"
     }
 
@@ -135,49 +141,51 @@ enum SplitTunnelStorage {
         deduplicatedRules(settings.rules).joined(separator: "\n")
     }
 
-    static func exportURL(for settings: SplitTunnelSettings) -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vbridge-split-data.txt")
+    static func exportURL(for settings: SplitTunnelSettings, profileID: UUID? = currentProfileID()) -> URL {
+        let suffix = profileID?.uuidString.prefix(8) ?? "default"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vbridge-routing-\(suffix).txt")
         let text = exportedText(from: settings)
         try? text.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
-    static func merge(_ incomingRules: [String], into settings: inout SplitTunnelSettings) {
+    static func merge(_ incomingRules: [String], into settings: inout SplitTunnelSettings, profileID: UUID? = currentProfileID()) {
         settings.rules = deduplicatedRules(settings.rules + incomingRules)
-        save(settings)
+        save(settings, profileID: profileID)
     }
 
     static func replaceRules(
         fromSource sourceKey: String,
         with incomingRules: [String],
-        into settings: inout SplitTunnelSettings
+        into settings: inout SplitTunnelSettings,
+        profileID: UUID? = currentProfileID()
     ) {
-        let sourceURL = sourceRulesFileURL(for: sourceKey)
+        let sourceURL = sourceRulesFileURL(for: sourceKey, profileID: profileID)
         let previousRules = loadRules(from: sourceURL)
         let previousRuleSet = Set(deduplicatedRules(previousRules))
         let filteredExisting = settings.rules.filter { !previousRuleSet.contains($0) }
         let normalizedIncoming = deduplicatedRules(incomingRules)
 
         settings.rules = deduplicatedRules(filteredExisting + normalizedIncoming)
-        save(settings)
+        save(settings, profileID: profileID)
         writeRules(normalizedIncoming, to: sourceURL)
     }
 
-    static func removeRule(at offsets: IndexSet, from settings: inout SplitTunnelSettings) {
+    static func removeRule(at offsets: IndexSet, from settings: inout SplitTunnelSettings, profileID: UUID? = currentProfileID()) {
         settings.rules.remove(atOffsets: offsets)
-        save(settings)
+        save(settings, profileID: profileID)
     }
 
-    static func clearRules(from settings: inout SplitTunnelSettings) {
+    static func clearRules(from settings: inout SplitTunnelSettings, profileID: UUID? = currentProfileID()) {
         settings.rules.removeAll()
-        save(settings)
+        save(settings, profileID: profileID)
     }
 
-    static func addRule(_ rawValue: String, to settings: inout SplitTunnelSettings) throws {
+    static func addRule(_ rawValue: String, to settings: inout SplitTunnelSettings, profileID: UUID? = currentProfileID()) throws {
         guard let normalized = normalizedRule(rawValue) else {
             throw SplitTunnelValidationError.invalidRule
         }
-        merge([normalized], into: &settings)
+        merge([normalized], into: &settings, profileID: profileID)
     }
 
     static func rules(fromFileURL url: URL) throws -> [String] {
@@ -220,7 +228,8 @@ enum SplitTunnelStorage {
     }
 
     static func rules(fromRawText text: String) throws -> [String] {
-        let lines = text.replacingOccurrences(of: "\r", with: "\n").components(separatedBy: .newlines)
+        let separators = CharacterSet.newlines.union(CharacterSet(charactersIn: ","))
+        let lines = text.replacingOccurrences(of: "\r", with: "\n").components(separatedBy: separators)
         let normalized = lines.compactMap(normalizedRule)
         guard !normalized.isEmpty else {
             throw SplitTunnelValidationError.noValidRules
@@ -235,6 +244,14 @@ enum SplitTunnelStorage {
 
         if let normalizedIP = normalizedIPAddressRule(trimmed) {
             return normalizedIP
+        }
+
+        if let normalizedRange = normalizedIPv4RangeRule(trimmed) {
+            return normalizedRange
+        }
+
+        if let normalizedURL = normalizedURLRule(trimmed) {
+            return normalizedURL
         }
 
         let lowered = trimmed.lowercased()
@@ -267,6 +284,52 @@ enum SplitTunnelStorage {
         }
 
         return nil
+    }
+
+    private static func normalizedIPv4RangeRule(_ rawValue: String) -> String? {
+        let cleaned = rawValue.replacingOccurrences(of: " ", with: "")
+        let separators = ["-", "–", "—"]
+
+        for separator in separators where cleaned.contains(separator) {
+            let parts = cleaned.components(separatedBy: separator)
+            guard parts.count == 2,
+                  let start = IPv4Address(parts[0]),
+                  let end = IPv4Address(parts[1]) else {
+                return nil
+            }
+
+            let startValue = ipv4NumericValue(start)
+            let endValue = ipv4NumericValue(end)
+            guard startValue <= endValue else { return nil }
+            return "\(start)-\(end)"
+        }
+
+        return nil
+    }
+
+    private static func normalizedURLRule(_ rawValue: String) -> String? {
+        guard let components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host?.lowercased() else {
+            return nil
+        }
+
+        guard isValidDomain(host) || IPv4Address(host) != nil || IPv6Address(host) != nil else {
+            return nil
+        }
+
+        var normalized = "\(scheme)://\(host)"
+        if let port = components.port {
+            normalized += ":\(port)"
+        }
+        if let path = components.percentEncodedPath.isEmpty ? nil : components.percentEncodedPath {
+            normalized += path
+        }
+        if let query = components.percentEncodedQuery, !query.isEmpty {
+            normalized += "?\(query)"
+        }
+        return normalized
     }
 
     private static func isValidDomain(_ value: String) -> Bool {
@@ -320,10 +383,11 @@ enum SplitTunnelStorage {
         return result
     }
 
-    static func migrateLegacyStorageIfNeeded() {
+    static func migrateLegacyStorageIfNeeded(selectedProfileID: UUID? = currentProfileID()) {
         migrationLock.lock()
         defer { migrationLock.unlock() }
-        guard !FileManager.default.fileExists(atPath: metadataFileURL().path) else { return }
+        guard let selectedProfileID else { return }
+        guard !FileManager.default.fileExists(atPath: metadataFileURL(profileID: selectedProfileID).path) else { return }
 
         let sharedDefaults = SharedLogger.appGroupID.flatMap { UserDefaults(suiteName: $0) }
         let candidates = [sharedDefaults, UserDefaults.standard].compactMap { $0 }
@@ -336,13 +400,13 @@ enum SplitTunnelStorage {
         let enabled = source?.object(forKey: enabledKey) as? Bool ?? false
         let mode = SplitTunnelMode(rawValue: source?.string(forKey: modeKey) ?? "") ?? .direct
         let rules = source?.stringArray(forKey: rulesKey) ?? []
-        writeRules(rules, to: rulesFileURL())
-        writeMetadata(Metadata(enabled: enabled, mode: mode, ruleCount: rules.count))
+        writeRules(rules, to: rulesFileURL(profileID: selectedProfileID))
+        writeMetadata(Metadata(enabled: enabled, mode: mode, ruleCount: rules.count), profileID: selectedProfileID)
 
         for sourceKey in [githubCIDRSourceKey, githubIPSourceKey, githubDomainSourceKey] {
             let sourceRules = source?.stringArray(forKey: sourceKey) ?? []
             if !sourceRules.isEmpty {
-                writeRules(sourceRules, to: sourceRulesFileURL(for: sourceKey))
+                writeRules(sourceRules, to: sourceRulesFileURL(for: sourceKey, profileID: selectedProfileID))
             }
         }
 
@@ -370,15 +434,21 @@ enum SplitTunnelStorage {
         )
     }
 
-    private static func metadataFileURL() -> URL {
-        storageDirectoryURL().appendingPathComponent(metadataFileName)
+    private static func profileStorageDirectoryURL(profileID: UUID?) -> URL {
+        let base = storageDirectoryURL().appendingPathComponent("routing-profiles", isDirectory: true)
+        guard let profileID else { return base.appendingPathComponent("default", isDirectory: true) }
+        return base.appendingPathComponent(profileID.uuidString.lowercased(), isDirectory: true)
     }
 
-    private static func rulesFileURL() -> URL {
-        storageDirectoryURL().appendingPathComponent(rulesFileName)
+    private static func metadataFileURL(profileID: UUID?) -> URL {
+        profileStorageDirectoryURL(profileID: profileID).appendingPathComponent(metadataFileName)
     }
 
-    private static func sourceRulesFileURL(for sourceKey: String) -> URL {
+    private static func rulesFileURL(profileID: UUID?) -> URL {
+        profileStorageDirectoryURL(profileID: profileID).appendingPathComponent(rulesFileName)
+    }
+
+    private static func sourceRulesFileURL(for sourceKey: String, profileID: UUID?) -> URL {
         let name: String
         switch sourceKey {
         case githubCIDRSourceKey: name = "split-tunnel-source-cidr.txt"
@@ -386,21 +456,22 @@ enum SplitTunnelStorage {
         case githubDomainSourceKey: name = "split-tunnel-source-domain.txt"
         default: name = "split-tunnel-source-custom.txt"
         }
-        return storageDirectoryURL().appendingPathComponent(name)
+        return profileStorageDirectoryURL(profileID: profileID).appendingPathComponent(name)
     }
 
-    private static func loadMetadata() -> Metadata {
-        guard let data = try? Data(contentsOf: metadataFileURL()),
+    private static func loadMetadata(profileID: UUID?) -> Metadata {
+        guard let data = try? Data(contentsOf: metadataFileURL(profileID: profileID)),
               let metadata = try? JSONDecoder().decode(Metadata.self, from: data) else {
             return Metadata(enabled: false, mode: .direct, ruleCount: 0)
         }
         return metadata
     }
 
-    private static func writeMetadata(_ metadata: Metadata) {
+    private static func writeMetadata(_ metadata: Metadata, profileID: UUID?) {
         ensureStorageDirectoryExists()
+        try? FileManager.default.createDirectory(at: profileStorageDirectoryURL(profileID: profileID), withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(metadata) else { return }
-        try? data.write(to: metadataFileURL(), options: .atomic)
+        try? data.write(to: metadataFileURL(profileID: profileID), options: .atomic)
     }
 
     private static func loadRules(from url: URL) -> [String] {
@@ -410,8 +481,13 @@ enum SplitTunnelStorage {
 
     private static func writeRules(_ rules: [String], to url: URL) {
         ensureStorageDirectoryExists()
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let text = rules.joined(separator: "\n")
         try? text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func ipv4NumericValue(_ address: IPv4Address) -> UInt32 {
+        address.rawValue.reduce(0) { ($0 << 8) | UInt32($1) }
     }
 }
 
@@ -425,7 +501,7 @@ enum SplitTunnelValidationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidRule:
-            return "Invalid rule. Supported formats: `*.domain`, `example.com`, `IP`, `IP/MASK`."
+            return "Invalid rule. Supported formats: `*.domain`, `example.com`, `IP`, `IP/MASK`, `IP-IP`, `https://host/path`."
         case .invalidURL:
             return "Enter a valid http or https URL."
         case .unreadableFile:
@@ -442,20 +518,24 @@ struct SplitTunnelSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
+    let profileID: UUID?
     let showsDoneButton: Bool
     var onCommit: ((SplitTunnelSettings) -> Void)? = nil
 
-    @State private var settings = SplitTunnelStorage.load()
+    @State private var settings: SplitTunnelSettings
     @State private var isPullingGitHubList = false
     @State private var errorMessage = ""
     @State private var showErrorAlert = false
 
     init(
+        profileID: UUID? = SplitTunnelStorage.currentProfileID(),
         showsDoneButton: Bool = false,
         onCommit: ((SplitTunnelSettings) -> Void)? = nil
     ) {
+        self.profileID = profileID
         self.showsDoneButton = showsDoneButton
         self.onCommit = onCommit
+        _settings = State(initialValue: SplitTunnelStorage.load(profileID: profileID))
     }
 
     var body: some View {
@@ -477,16 +557,16 @@ struct SplitTunnelSettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(settings.mode.summary)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("IP and CIDR rules are applied directly. Domain rules are resolved to IPs when the tunnel starts.")
+                        Text(settings.mode.summary)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    Text("Domains and URL hosts are resolved to IPs when the tunnel starts. IPv4 ranges are expanded into route blocks automatically.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 .padding(.vertical, 2)
 
-                NavigationLink(destination: SplitTunnelRuleListView(settings: $settings)) {
+                NavigationLink(destination: SplitTunnelRuleListView(settings: $settings, profileID: profileID)) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Open List")
                         Text(SplitTunnelStorage.ruleCountSummary(settings))
@@ -568,7 +648,7 @@ struct SplitTunnelSettingsView: View {
             }
 
             Section(header: Text("Formats")) {
-                Text("Supported masks: `*.domain`, exact domains, `IP`, `IP/MASK`.")
+                Text("Supported masks: exact domains, `*.domain`, `IP`, `IP/MASK`, `IPv4-IPv4`, `http://...`, `https://...`.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -599,7 +679,7 @@ struct SplitTunnelSettingsView: View {
             get: { settings.enabled },
             set: { newValue in
                 settings.enabled = newValue
-                SplitTunnelStorage.saveConfiguration(settings)
+                SplitTunnelStorage.saveConfiguration(settings, profileID: profileID)
             }
         )
     }
@@ -609,7 +689,7 @@ struct SplitTunnelSettingsView: View {
             get: { settings.mode },
             set: { newValue in
                 settings.mode = newValue
-                SplitTunnelStorage.saveConfiguration(settings)
+                SplitTunnelStorage.saveConfiguration(settings, profileID: profileID)
             }
         )
     }
@@ -629,7 +709,7 @@ struct SplitTunnelSettingsView: View {
             do {
                 let rules = try await SplitTunnelStorage.rules(fromRemoteURLString: urlString)
                 await MainActor.run {
-                    SplitTunnelStorage.replaceRules(fromSource: sourceKey, with: rules, into: &settings)
+                    SplitTunnelStorage.replaceRules(fromSource: sourceKey, with: rules, into: &settings, profileID: profileID)
                     isPullingGitHubList = false
                 }
             } catch {
@@ -755,6 +835,7 @@ struct TrustedWiFiSettingsView: View {
 
 private struct SplitTunnelRuleListView: View {
     @Binding var settings: SplitTunnelSettings
+    let profileID: UUID?
 
     @State private var showAddRulePrompt = false
     @State private var newRuleText = ""
@@ -775,7 +856,7 @@ private struct SplitTunnelRuleListView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("No split-tunneling rules yet")
                             .font(.headline)
-                        Text("Add domains, wildcard domains, IPs, or CIDR ranges. Imported lists are merged into the same app-wide list.")
+                        Text("Add domains, URL hosts, IPs, CIDR ranges, or IPv4 ranges. Imported lists are merged into this profile's routing set.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -841,7 +922,7 @@ private struct SplitTunnelRuleListView: View {
                     Image(systemName: "square.and.arrow.down")
                 }
 
-                ShareLink(item: SplitTunnelStorage.exportURL(for: settings)) {
+                ShareLink(item: SplitTunnelStorage.exportURL(for: settings, profileID: profileID)) {
                     Image(systemName: "square.and.arrow.up")
                 }
 
@@ -861,13 +942,13 @@ private struct SplitTunnelRuleListView: View {
             Button("Cancel", role: .cancel) {}
             Button("Add") {
                 do {
-                    try SplitTunnelStorage.addRule(newRuleText, to: &settings)
+                    try SplitTunnelStorage.addRule(newRuleText, to: &settings, profileID: profileID)
                 } catch {
                     show(error)
                 }
             }
         } message: {
-            Text("Supported formats: `*.domain`, exact domains, `IP`, `IP/MASK`.")
+            Text("Supported formats: exact domains, `*.domain`, `IP`, `IP/MASK`, `IPv4-IPv4`, `https://host/path`.")
         }
         .alert("Import from URL", isPresented: $showURLImportPrompt) {
             TextField("https://example.com/list.txt", text: $importURLText)
@@ -885,7 +966,7 @@ private struct SplitTunnelRuleListView: View {
         }
         .alert("Clear List?", isPresented: $showClearConfirmation) {
             Button("Clear", role: .destructive) {
-                SplitTunnelStorage.clearRules(from: &settings)
+                SplitTunnelStorage.clearRules(from: &settings, profileID: profileID)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -909,7 +990,7 @@ private struct SplitTunnelRuleListView: View {
     private func importFromFile(_ url: URL) {
         do {
             let rules = try SplitTunnelStorage.rules(fromFileURL: url)
-            SplitTunnelStorage.merge(rules, into: &settings)
+            SplitTunnelStorage.merge(rules, into: &settings, profileID: profileID)
         } catch {
             show(error)
         }
@@ -921,7 +1002,7 @@ private struct SplitTunnelRuleListView: View {
             do {
                 let rules = try await SplitTunnelStorage.rules(fromRemoteURLString: rawURL)
                 await MainActor.run {
-                    SplitTunnelStorage.merge(rules, into: &settings)
+                    SplitTunnelStorage.merge(rules, into: &settings, profileID: profileID)
                     isImportingRemoteList = false
                 }
             } catch {
@@ -934,7 +1015,7 @@ private struct SplitTunnelRuleListView: View {
     }
 
     private func deleteRules(at offsets: IndexSet) {
-        SplitTunnelStorage.removeRule(at: offsets, from: &settings)
+        SplitTunnelStorage.removeRule(at: offsets, from: &settings, profileID: profileID)
     }
 
     private func show(_ error: Error) {
@@ -943,15 +1024,21 @@ private struct SplitTunnelRuleListView: View {
     }
 
     private func isIPAddressRule(_ rule: String) -> Bool {
-        rule.contains("/") || IPv4Address(rule) != nil || IPv6Address(rule) != nil
+        rule.contains("/") || rule.contains("-") || IPv4Address(rule) != nil || IPv6Address(rule) != nil
     }
 
     private func ruleDescription(_ rule: String) -> String {
         if rule.hasPrefix("*.") {
             return "Wildcard domain suffix"
         }
+        if rule.lowercased().hasPrefix("http://") || rule.lowercased().hasPrefix("https://") {
+            return "URL host rule"
+        }
         if IPv4Address(rule) != nil || IPv6Address(rule) != nil {
             return "Single IP address"
+        }
+        if rule.contains("-") {
+            return "IPv4 address range"
         }
         if rule.contains("/") {
             return "IP network range"

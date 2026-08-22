@@ -371,6 +371,22 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 continue
             }
 
+            if let expandedRanges = ipv4Ranges(from: rule) {
+                ipRanges.append(contentsOf: expandedRanges)
+                continue
+            }
+
+            if let urlHost = hostFromURLRule(rule) {
+                if let range = IPAddressRange(from: urlHost) {
+                    ipRanges.append(range)
+                } else if isValidDomain(urlHost) {
+                    exactDomains.append(urlHost)
+                } else {
+                    ignoredRules.append(rule)
+                }
+                continue
+            }
+
             let lowered = rule.lowercased()
             if lowered.hasPrefix("*.") {
                 let suffix = String(lowered.dropFirst(2))
@@ -419,6 +435,80 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         queue.waitUntilAllOperationsAreFinished()
         return deduplicatedRanges(results)
+    }
+
+    private func hostFromURLRule(_ value: String) -> String? {
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host?.lowercased(),
+              !host.isEmpty else {
+            return nil
+        }
+        return host
+    }
+
+    private func ipv4Ranges(from value: String) -> [IPAddressRange]? {
+        let separators = ["-", "–", "—"]
+        let compact = value.replacingOccurrences(of: " ", with: "")
+
+        for separator in separators where compact.contains(separator) {
+            let parts = compact.components(separatedBy: separator)
+            guard parts.count == 2,
+                  let start = IPv4Address(parts[0]),
+                  let end = IPv4Address(parts[1]) else {
+                return nil
+            }
+
+            let startValue = ipv4NumericValue(start)
+            let endValue = ipv4NumericValue(end)
+            guard startValue <= endValue else { return nil }
+            return cidrRangesCoveringIPv4Range(start: startValue, end: endValue)
+        }
+
+        return nil
+    }
+
+    private func cidrRangesCoveringIPv4Range(start: UInt32, end: UInt32) -> [IPAddressRange] {
+        var ranges: [IPAddressRange] = []
+        var current = start
+
+        while current <= end {
+            let zeroBits = current == 0 ? 32 : current.trailingZeroBitCount
+            var prefix = max(0, 32 - Int(zeroBits))
+            var blockSize: UInt64 = 1 << UInt64(32 - prefix)
+
+            while UInt64(current) + blockSize - 1 > UInt64(end) {
+                prefix += 1
+                blockSize >>= 1
+            }
+
+            let cidr = "\(ipv4String(from: current))/\(prefix)"
+            if let range = IPAddressRange(from: cidr) {
+                ranges.append(range)
+            }
+
+            if end - current + 1 <= UInt32(blockSize) {
+                break
+            }
+            current += UInt32(blockSize)
+        }
+
+        return ranges
+    }
+
+    private func ipv4NumericValue(_ address: IPv4Address) -> UInt32 {
+        address.rawValue.reduce(0) { ($0 << 8) | UInt32($1) }
+    }
+
+    private func ipv4String(from value: UInt32) -> String {
+        let octets = [
+            String((value >> 24) & 0xff),
+            String((value >> 16) & 0xff),
+            String((value >> 8) & 0xff),
+            String(value & 0xff)
+        ]
+        return octets.joined(separator: ".")
     }
 
     private func resolveDomain(_ domain: String) -> [IPAddressRange] {
