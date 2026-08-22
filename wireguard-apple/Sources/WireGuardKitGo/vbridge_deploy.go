@@ -447,7 +447,13 @@ func runDeploy(req deployRequest) deployResponse {
 	command := req.remoteCommand()
 	text, err := runSSHCommand(client, rootDeployCommand(command, req.Password), 15*time.Minute)
 	appendOutput(req.Action, text)
-	checks, checkText := checkDeployStatus(client)
+	var checks deployStatusChecks
+	var checkText string
+	if req.isCSQTT() {
+		checks, checkText = checkCSQTTStatus(client)
+	} else {
+		checks, checkText = checkDeployStatus(client)
+	}
 	appendOutput("status", checkText)
 	if err != nil {
 		return deployResponse{

@@ -19,6 +19,27 @@ log() {
     printf '%s\n' "$*" | tee -a "$LOG_FILE"
 }
 
+setup_docker_apt_repo() {
+    if [ -f /etc/apt/sources.list.d/docker.list ]; then
+        return 0
+    fi
+
+    log "[*] Adding Docker APT repository"
+    apt-get update
+    apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+
+    . /etc/os-release
+    ARCH="$(dpkg --print-architecture)"
+    curl -fsSL "https://download.docker.com/linux/$ID/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/%s %s stable\n' \
+        "$ARCH" \
+        "$ID" \
+        "$VERSION_CODENAME" >/etc/apt/sources.list.d/docker.list
+    apt-get update
+}
+
 ensure_root() {
     if [ "$(id -u)" -ne 0 ]; then
         echo "error: run as root"
@@ -30,12 +51,28 @@ ensure_docker() {
     if ! command -v docker >/dev/null 2>&1; then
         log "[*] Installing Docker"
         apt-get update
-        apt-get install -y curl ca-certificates git
+        apt-get install -y curl ca-certificates git gnupg
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
         sh /tmp/get-docker.sh
     fi
-    apt-get install -y docker-compose-plugin
+    if ! docker compose version >/dev/null 2>&1; then
+        apt-get update
+        if ! apt-get install -y docker-compose-plugin; then
+            setup_docker_apt_repo
+            if ! apt-get install -y docker-compose-plugin; then
+                apt-get install -y docker-compose || true
+            fi
+        fi
+    fi
     systemctl enable --now docker
+}
+
+compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+    else
+        docker-compose "$@"
+    fi
 }
 
 cleanup_firewall_rules() {
@@ -201,14 +238,14 @@ do_install() {
     ensure_docker
     write_assets
     cd "$WORK_DIR"
-    docker compose up -d --build
+    compose_cmd up -d --build
     log "[ok] CSQTT installed"
 }
 
 do_uninstall() {
     if [ -d "$WORK_DIR" ]; then
         cd "$WORK_DIR"
-        docker compose down --remove-orphans || true
+        compose_cmd down --remove-orphans || true
     fi
     cleanup_firewall_rules
     rm -rf "$WORK_DIR"
