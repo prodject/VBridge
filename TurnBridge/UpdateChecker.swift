@@ -66,7 +66,7 @@ enum UpdateChecker {
 #endif
     }
 
-    private static func latestRelease(from releases: [GitHubRelease]) -> (version: AppVersion, url: URL, asset: GitHubAsset)? {
+    nonisolated private static func latestRelease(from releases: [GitHubRelease]) -> (version: AppVersion, url: URL, asset: GitHubAsset)? {
         var best: (version: AppVersion, url: URL, asset: GitHubAsset)?
 
         for release in releases where !release.draft {
@@ -90,7 +90,7 @@ enum UpdateChecker {
         return best
     }
 
-    private static func parseVersion(_ raw: String) -> AppVersion? {
+    nonisolated private static func parseVersion(_ raw: String) -> AppVersion? {
         let pattern = "\\d+(?:\\.\\d+)+"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)

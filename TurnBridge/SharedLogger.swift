@@ -251,7 +251,7 @@ public struct SharedLogger {
     }
 #endif
 
-    private static func normalizedWidgetState(from rawValue: String) -> VBridgeLiveActivityPhase? {
+    nonisolated private static func normalizedWidgetState(from rawValue: String) -> VBridgeLiveActivityPhase? {
         let lowered = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lowered.contains("disconnecting") || lowered.contains("disconnected") {
             return .disconnected

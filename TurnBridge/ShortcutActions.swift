@@ -9,7 +9,9 @@ struct ToggleVPNIntent: AppIntent {
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
-        PendingShortcutActionStore.store(.toggle)
+        await MainActor.run {
+            PendingShortcutActionStore.store(.toggle)
+        }
         return .result()
     }
 }
@@ -22,7 +24,9 @@ struct ConnectVPNIntent: AppIntent {
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
-        PendingShortcutActionStore.store(.connect)
+        await MainActor.run {
+            PendingShortcutActionStore.store(.connect)
+        }
         return .result()
     }
 }
@@ -35,7 +39,9 @@ struct DisconnectVPNIntent: AppIntent {
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
-        PendingShortcutActionStore.store(.disconnect)
+        await MainActor.run {
+            PendingShortcutActionStore.store(.disconnect)
+        }
         return .result()
     }
 }
@@ -48,7 +54,9 @@ struct ReconnectVPNIntent: AppIntent {
     static var isDiscoverable = true
 
     func perform() async throws -> some IntentResult {
-        PendingShortcutActionStore.store(.reconnect)
+        await MainActor.run {
+            PendingShortcutActionStore.store(.reconnect)
+        }
         return .result()
     }
 }
