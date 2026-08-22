@@ -1470,7 +1470,8 @@ struct ContentView: View {
     }
 
     private func reconcileLiveActivityIfNeeded(for status: NEVPNStatus) {
-        guard #available(iOS 16.1, *), !targetEnvironment(macCatalyst) else { return }
+#if !targetEnvironment(macCatalyst)
+        guard #available(iOS 16.1, *) else { return }
         guard status == .disconnected || status == .invalid else { return }
 
         guard let snapshot = VBridgeLiveActivityStore.load(),
@@ -1482,6 +1483,7 @@ struct ContentView: View {
             "Ending stale Live Activity during status refresh: vpnStatus=\(status.rawValue), activityPhase=\(snapshot.content.phase.rawValue)"
         )
         endLiveActivity(profileName: snapshot.profileName, immediate: true)
+#endif
     }
 
     private func applyVPNStatus(_ newStatus: NEVPNStatus) {
@@ -1683,13 +1685,13 @@ struct ContentView: View {
         }
 
         do {
-            let profile: VPNProfile
+            let importedProfile: VPNProfile
             if lowered.hasPrefix(ConfigParser.csqttScheme) {
-                profile = profile(fromCSQTT: try ConfigParser.parseCSQTT(from: raw), fallbackName: "CSQTT")
+                importedProfile = profile(fromCSQTT: try ConfigParser.parseCSQTT(from: raw), fallbackName: "CSQTT")
             } else {
-                profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: raw), fallbackName: "WDTT")
+                importedProfile = profile(fromWDTT: try ConfigParser.parseWDTT(from: raw), fallbackName: "WDTT")
             }
-            store.addProfile(profile)
+            store.addProfile(importedProfile)
             SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from URL")
             showAlert(title: "Success", message: "Profile \"\(store.selectedProfile?.name ?? "")\" imported.")
         } catch {
