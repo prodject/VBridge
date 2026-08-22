@@ -37,6 +37,37 @@ ensure_docker() {
     systemctl enable --now docker
 }
 
+cleanup_firewall_rules() {
+    if ! command -v iptables >/dev/null 2>&1; then
+        return 0
+    fi
+
+    WAN_IFACE=$(ip -o route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
+    if [ -z "$WAN_IFACE" ]; then
+        WAN_IFACE="eth0"
+    fi
+
+    iptables -t nat -C POSTROUTING -s "$CSQTT_CLIENT_CIDR" -o "$WAN_IFACE" -j MASQUERADE 2>/dev/null && \
+        iptables -t nat -D POSTROUTING -s "$CSQTT_CLIENT_CIDR" -o "$WAN_IFACE" -j MASQUERADE || true
+
+    iptables -C INPUT -p udp --dport "$CSQTT_PEER_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT 2>/dev/null && \
+        iptables -D INPUT -p udp --dport "$CSQTT_PEER_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT || true
+
+    iptables -C INPUT -p tcp --dport "$CSQTT_WEB_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT 2>/dev/null && \
+        iptables -D INPUT -p tcp --dport "$CSQTT_WEB_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT || true
+
+    if [ -n "$CSQTT_SSH_PORT" ]; then
+        iptables -C INPUT -p tcp --dport "$CSQTT_SSH_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT 2>/dev/null && \
+            iptables -D INPUT -p tcp --dport "$CSQTT_SSH_PORT" -m comment --comment CSQTT_DOCKER -j ACCEPT || true
+    fi
+
+    iptables -t mangle -C FORWARD -s "$CSQTT_CLIENT_CIDR" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null && \
+        iptables -t mangle -D FORWARD -s "$CSQTT_CLIENT_CIDR" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
+
+    iptables -t mangle -C FORWARD -d "$CSQTT_CLIENT_CIDR" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null && \
+        iptables -t mangle -D FORWARD -d "$CSQTT_CLIENT_CIDR" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
+}
+
 write_assets() {
     mkdir -p "$WORK_DIR" "$CONFIG_DIR"
     install -m 755 /tmp/csqtt "$WORK_DIR/csqtt"
@@ -174,6 +205,7 @@ do_uninstall() {
         cd "$WORK_DIR"
         docker compose down --remove-orphans || true
     fi
+    cleanup_firewall_rules
     rm -rf "$WORK_DIR"
     log "[ok] CSQTT uninstalled"
 }
