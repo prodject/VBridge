@@ -930,10 +930,10 @@ struct ContentView: View {
         if profile.peerAddr.isEmpty {
             return "Please provide a valid Peer Address."
         }
-        if profile.transportMode != .wdtt, profile.listenAddr.isEmpty {
+        if profile.transportMode != .wdtt && profile.transportMode != .csqtt, profile.listenAddr.isEmpty {
             return "Please provide a valid Listen Address."
         }
-        if profile.transportMode != .wdtt, profile.wgQuickConfig.isEmpty {
+        if profile.transportMode != .wdtt && profile.transportMode != .csqtt, profile.wgQuickConfig.isEmpty {
             return "Please provide a valid WireGuard configuration."
         }
         if profile.transportMode == .srtpCommunity, profile.wrapKeyHex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -941,6 +941,9 @@ struct ContentView: View {
         }
         if profile.transportMode == .wdtt, profile.wdttPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Please provide a valid WDTT password."
+        }
+        if profile.transportMode == .csqtt, profile.csqttPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Please provide a valid CSQTT password."
         }
         return nil
     }
@@ -1088,6 +1091,9 @@ struct ContentView: View {
             wdttClientIDMode: profile.wdttClientIDMode,
             wdttUseVKCallsPreflight: profile.wdttUseVKCallsPreflight,
             wdttTunnelMTU: profile.wdttTunnelMTU,
+            csqttPassword: profile.csqttPassword,
+            csqttWebPort: profile.csqttWebPort,
+            csqttClientTag: profile.csqttClientTag,
             seededTURN: seededTURN
         ) { isSuccess in
             if isSuccess {

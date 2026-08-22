@@ -21,6 +21,9 @@ struct TunnelStartConfiguration: Codable {
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
     var wdttTunnelMTU: Int?
+    var csqttPassword: String
+    var csqttWebPort: Int?
+    var csqttClientTag: String
     var seededTURN: SeededTURNCredentials?
 
     var normalizedWgQuickConfig: String {
@@ -48,6 +51,8 @@ struct TunnelStartConfiguration: Codable {
             "wdttFingerprint": wdttFingerprint,
             "wdttClientIDMode": wdttClientIDMode,
             "wdttUseVKCallsPreflight": wdttUseVKCallsPreflight,
+            "csqttPassword": csqttPassword,
+            "csqttClientTag": csqttClientTag,
             // PacketTunnel cannot read the app's Application Support directory,
             // and sideloaded builds often have no App Group entitlement. Pass the
             // current snapshot through NetworkExtension preferences so both signed
@@ -68,6 +73,10 @@ struct TunnelStartConfiguration: Codable {
 
         if let wdttTunnelMTU, wdttTunnelMTU > 0 {
             configuration["wdttTunnelMTU"] = wdttTunnelMTU
+        }
+
+        if let csqttWebPort, csqttWebPort > 0 {
+            configuration["csqttWebPort"] = csqttWebPort
         }
 
         return configuration
@@ -242,6 +251,8 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         SharedLogger.info("Connecting... mode=\(configuration.transportMode.rawValue), peer=\(configuration.peerAddr), listen=\(configuration.listenAddr), n=\(configuration.nValue)")
         if configuration.transportMode == .wdtt {
             SharedLogger.info("WDTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.wdttPassword.isEmpty), primaryHashLen=\(configuration.wdttClientKey.count), extraHashesLen=\(configuration.wdttServerKey.count)")
+        } else if configuration.transportMode == .csqtt {
+            SharedLogger.info("CSQTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.csqttPassword.isEmpty), webPort=\(configuration.csqttWebPort ?? 0), clientTagLen=\(configuration.csqttClientTag.count)")
         }
 
         let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"

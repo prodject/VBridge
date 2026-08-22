@@ -550,11 +550,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
         let isWDTT = transportMode == "wdtt"
+        let isCSQTT = transportMode == "csqtt"
         let splitTunnel = splitTunnelConfiguration(providerConfiguration: providerConfiguration)
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 
-        if !isWDTT {
+        if !isWDTT && !isCSQTT {
             guard let wgQuickConfig = providerConfiguration["wgQuickConfig"] as? String else {
                 sharedLogger.error("wgQuickConfig missing from provider configuration")
                 SharedLogger.error("WireGuard config missing from provider configuration", source: .wireguard)
@@ -600,6 +601,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let wdttClientIDMode = (providerConfiguration["wdttClientIDMode"] as? String) ?? "default"
         let wdttUseVKCallsPreflight = (providerConfiguration["wdttUseVKCallsPreflight"] as? Bool) ?? true
         let wdttTunnelMTU = providerConfiguration["wdttTunnelMTU"] as? Int
+        let csqttPassword = (providerConfiguration["csqttPassword"] as? String) ?? ""
+        let csqttWebPort = providerConfiguration["csqttWebPort"] as? Int
+        let csqttClientTag = (providerConfiguration["csqttClientTag"] as? String) ?? ""
         let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
 
         if useSingleProxyWorker && requestedNValue != 1 {
@@ -612,6 +616,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if isWDTT {
             SharedLogger.info(
                 "WDTT config: vkLinkLen=\(vkLink.count), passwordSet=\(!wdttPassword.isEmpty), primaryHashLen=\(wdttClientKey.count), extraHashesLen=\(wdttServerKey.count)",
+                source: .tunnel
+            )
+        } else if isCSQTT {
+            SharedLogger.info(
+                "CSQTT config: vkLinkLen=\(vkLink.count), passwordSet=\(!csqttPassword.isEmpty), webPort=\(csqttWebPort ?? 0), clientTagLen=\(csqttClientTag.count)",
                 source: .tunnel
             )
         }
@@ -629,6 +638,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             wdttFingerprint: wdttFingerprint,
             wdttClientIDMode: wdttClientIDMode,
             wdttUseVKCallsPreflight: wdttUseVKCallsPreflight,
+            csqttPassword: csqttPassword,
+            csqttWebPort: csqttWebPort,
+            csqttClientTag: csqttClientTag,
             seededTURN: seededTURN
         ) else {
             SharedLogger.error("Failed to encode proxy config", source: .tunnel)
@@ -699,6 +711,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
                     splitTunnel: splitTunnel
                 )
+            } else if isCSQTT {
+                VBridgeWGTurnOff(handle)
+                self.vbridgeTunnelHandle = -1
+                SharedLogger.error("CSQTT tunnel runtime is not implemented yet in PacketTunnelProvider", source: .tunnel)
+                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                return
             } else if let tunnelConfiguration = tunnelConfiguration {
                 networkSettings = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: tunnelConfiguration,
@@ -768,16 +786,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         wdttFingerprint: String,
         wdttClientIDMode: String,
         wdttUseVKCallsPreflight: Bool,
+        csqttPassword: String,
+        csqttWebPort: Int?,
+        csqttClientTag: String,
         seededTURN: [String: String]?
     ) -> String? {
         let useWDTT = mode == "wdtt"
+        let useCSQTT = mode == "csqtt"
         let useSRTPCommunity = mode == "srtpCommunity"
         var payload: [String: Any] = [
             "vk_link": vkLink,
             "peer_addr": peerAddr,
             "turn_server": turnHost,
             "turn_port": turnPort,
-            "use_dtls": !useWDTT,
+            "use_dtls": !useWDTT && !useCSQTT,
             "use_udp": useUdp,
             "use_wrap": useSRTPCommunity,
             "wrap_key_hex": wrapKeyHex,
@@ -791,6 +813,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "client_id_only": wdttClientIDMode,
             "force_legacy_captcha": !wdttUseVKCallsPreflight
         ]
+        if useCSQTT {
+            payload["use_csqtt"] = true
+            payload["csqtt_password"] = csqttPassword
+            if let csqttWebPort, csqttWebPort > 0 {
+                payload["csqtt_web_port"] = csqttWebPort
+            }
+            if !csqttClientTag.isEmpty {
+                payload["csqtt_client_tag"] = csqttClientTag
+            }
+        }
         if let seededTURN,
            let address = seededTURN["address"], !address.isEmpty,
            let username = seededTURN["username"], !username.isEmpty,
