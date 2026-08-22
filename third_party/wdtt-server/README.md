@@ -2,9 +2,9 @@
 
 This directory contains the Linux WDTT server sources imported from:
 
-- Repository: https://github.com/amurcanov/proxy-turn-vk-android
-- Commit: `8b26530dfe90ff9b6aa3880ba2c1f070e21e2d3a`
-- Upstream path: `app/src/main/assets/linux-server`
+- Repository: https://github.com/Ivan4537/WDTT-Plus
+- Branch: `main`
+- Commit: `3038b8ddc0306feb21d3c3624e2bc1c3c14639ad`
 - License: GNU GPL v3.0
 
 VBridge builds these sources in GitHub Actions into deploy assets:
