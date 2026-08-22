@@ -1647,13 +1647,13 @@ struct ContentView: View {
         case "refresh":
             refreshWidgetTimelines()
         case "toggle":
-            PendingShortcutActionStore.store(.toggle)
+            Task { @MainActor in PendingShortcutActionStore.store(.toggle) }
         case "connect":
-            PendingShortcutActionStore.store(.connect)
+            Task { @MainActor in PendingShortcutActionStore.store(.connect) }
         case "disconnect":
-            PendingShortcutActionStore.store(.disconnect)
+            Task { @MainActor in PendingShortcutActionStore.store(.disconnect) }
         case "reconnect":
-            PendingShortcutActionStore.store(.reconnect)
+            Task { @MainActor in PendingShortcutActionStore.store(.reconnect) }
         default:
             return false
         }

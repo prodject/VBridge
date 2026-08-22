@@ -1,14 +1,14 @@
 import Foundation
 import WireGuardKitGo
 
-struct ServerOutboundTarget: Encodable {
+struct ServerOutboundTarget: Encodable, Sendable {
     var host: String
     var user: String
     var password: String
     var port: Int
 }
 
-struct ServerOutboundRequest {
+struct ServerOutboundRequest: Sendable {
     var action: String
     var kind: String = ""
     var proxyHost: String = ""
@@ -21,7 +21,7 @@ struct ServerOutboundRequest {
     var mtu: Int = 1280
 }
 
-private struct ServerOutboundBridgeRequest: Encodable {
+private struct ServerOutboundBridgeRequest: Encodable, Sendable {
     var action: String
     var host: String
     var user: String
@@ -38,7 +38,7 @@ private struct ServerOutboundBridgeRequest: Encodable {
     var mtu: Int?
 }
 
-struct ServerOutboundEnvelope: Decodable {
+struct ServerOutboundEnvelope: Decodable, Sendable {
     var ok: Bool
     var status: String
     var message: String

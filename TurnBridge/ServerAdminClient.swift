@@ -2,7 +2,7 @@ import Foundation
 import WireGuardKitGo
 import UIKit
 
-struct ServerAdminTarget: Encodable {
+struct ServerAdminTarget: Encodable, Sendable {
     var host: String
     var user: String
     var password: String
@@ -10,7 +10,7 @@ struct ServerAdminTarget: Encodable {
     var mainPassword: String
 }
 
-struct ServerAdminClientInfo: Decodable, Identifiable {
+struct ServerAdminClientInfo: Decodable, Identifiable, Sendable {
     var password: String
     var label: String?
     var vkHash: String?
@@ -26,11 +26,11 @@ struct ServerAdminClientInfo: Decodable, Identifiable {
     var isActive: Bool { status == "active" }
 }
 
-struct ServerAdminStatePayload: Decodable {
+struct ServerAdminStatePayload: Decodable, Sendable {
     var passwords: [ServerAdminClientInfo]?
 }
 
-struct ServerAdminClientTransferPayload: Codable {
+struct ServerAdminClientTransferPayload: Codable, Sendable {
     var format: String
     var version: Int
     var createdAt: Int64
@@ -41,7 +41,7 @@ struct ServerAdminClientTransferPayload: Codable {
     var deactivated: Bool
 }
 
-struct ServerAdminEnvelope: Decodable {
+struct ServerAdminEnvelope: Decodable, Sendable {
     var ok: Bool
     var status: String
     var message: String
@@ -49,7 +49,7 @@ struct ServerAdminEnvelope: Decodable {
     var state: ServerAdminStatePayload?
 }
 
-struct ServerAdminCreateRequest {
+struct ServerAdminCreateRequest: Sendable {
     var label: String
     var vkHash: String
     var ports: String
@@ -57,7 +57,7 @@ struct ServerAdminCreateRequest {
     var clientPassword: String
 }
 
-struct ServerAdminUpdateRequest {
+struct ServerAdminUpdateRequest: Sendable {
     var clientPassword: String
     var label: String
     var vkHash: String
@@ -84,7 +84,7 @@ enum ServerAdminAction: String {
     case cleanupOrphans = "cleanup-orphans"
 }
 
-private struct ServerAdminBridgeRequest: Encodable {
+private struct ServerAdminBridgeRequest: Encodable, Sendable {
     var action: String
     var host: String
     var user: String

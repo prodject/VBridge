@@ -12,20 +12,24 @@ private enum WidgetActionStore {
     static let suiteName = WidgetAppGroup.identifier
     static let key = "pending.shortcut.action"
 
+    @MainActor
     static var defaults: UserDefaults? {
         UserDefaults(suiteName: suiteName)
     }
 
+    @MainActor
     static func storeConnectAction() {
         defaults?.set("connect", forKey: key)
         defaults?.synchronize()
     }
 
+    @MainActor
     static func storeDisconnectAction() {
         defaults?.set("disconnect", forKey: key)
         defaults?.synchronize()
     }
 
+    @MainActor
     static func storeReconnectAction() {
         defaults?.set("reconnect", forKey: key)
         defaults?.synchronize()
@@ -53,7 +57,9 @@ private struct ConnectVBridgeWidgetIntent: AppIntent {
     static var isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
-        WidgetActionStore.storeConnectAction()
+        await MainActor.run {
+            WidgetActionStore.storeConnectAction()
+        }
         return .result()
     }
 }
@@ -66,7 +72,9 @@ private struct DisconnectVBridgeWidgetIntent: AppIntent {
     static var isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
-        WidgetActionStore.storeDisconnectAction()
+        await MainActor.run {
+            WidgetActionStore.storeDisconnectAction()
+        }
         return .result()
     }
 }
@@ -79,7 +87,9 @@ private struct ReconnectVBridgeWidgetIntent: AppIntent {
     static var isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
-        WidgetActionStore.storeReconnectAction()
+        await MainActor.run {
+            WidgetActionStore.storeReconnectAction()
+        }
         return .result()
     }
 }

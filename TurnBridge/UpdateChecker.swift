@@ -50,7 +50,7 @@ enum UpdateChecker {
         }
     }
 
-    private static var updateAssetKind: String {
+    nonisolated private static var updateAssetKind: String {
 #if targetEnvironment(macCatalyst)
         return "DMG"
 #else
@@ -58,7 +58,7 @@ enum UpdateChecker {
 #endif
     }
 
-    private static var updateAssetExtension: String {
+    nonisolated private static var updateAssetExtension: String {
 #if targetEnvironment(macCatalyst)
         return ".dmg"
 #else
@@ -132,7 +132,7 @@ private struct GitHubAsset: Decodable, Equatable {
     }
 }
 
-private struct AppVersion: Comparable {
+private struct AppVersion: Comparable, Sendable {
     let parts: [Int]
     var display: String { parts.map(String.init).joined(separator: ".") }
 

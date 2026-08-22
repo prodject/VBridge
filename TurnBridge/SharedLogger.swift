@@ -511,7 +511,7 @@ public struct SharedLogger {
             .compactMap { LogEntry.parse($0) }
     }
 
-    public static func readLogs() -> [String] {
+    nonisolated public static func readLogs() -> [String] {
         guard let url = logFileURL,
               let content = try? String(contentsOf: url, encoding: .utf8) else {
             return []

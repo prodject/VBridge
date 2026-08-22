@@ -38,7 +38,9 @@ struct ToggleVPNControlIntent: SetValueIntent {
     var value: Bool
 
     func perform() async throws -> some IntentResult {
-        PendingShortcutActionStore.store(value ? .connect : .disconnect)
+        await MainActor.run {
+            PendingShortcutActionStore.store(value ? .connect : .disconnect)
+        }
         return .result()
     }
 }

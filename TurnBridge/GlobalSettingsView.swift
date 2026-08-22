@@ -237,7 +237,7 @@ enum SplitTunnelStorage {
         return deduplicatedRules(normalized)
     }
 
-    static func normalizedRule(_ rawValue: String) -> String? {
+    nonisolated static func normalizedRule(_ rawValue: String) -> String? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard !trimmed.hasPrefix("#"), !trimmed.hasPrefix("//"), !trimmed.hasPrefix(";") else { return nil }
