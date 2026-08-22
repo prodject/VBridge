@@ -96,6 +96,7 @@ type tunnelEntry struct {
 	device *device.Device
 	proxy  *proxy.Proxy
 	bind   *turnbind.TURNBind
+	csqtt  *csqttRuntime
 }
 
 var (
@@ -145,6 +146,7 @@ func decodeWrapKey(useWrap bool, hexStr string) ([]byte, error) {
 type ProxyConfig struct {
 	VKLink     string `json:"vk_link"`
 	PeerAddr   string `json:"peer_addr"`
+	ListenAddr string `json:"listen_addr,omitempty"`
 	TurnServer string `json:"turn_server,omitempty"`
 	TurnPort   string `json:"turn_port,omitempty"`
 	UseDTLS    bool   `json:"use_dtls"`
@@ -216,6 +218,8 @@ type ProxyConfig struct {
 	// server keys the minted WG device on it). The app should persist one in
 	// the App Group; if empty, the proxy generates a per-session UUID.
 	DeviceID string `json:"device_id,omitempty"`
+	UseCSQTT bool   `json:"use_csqtt,omitempty"`
+	CSQTTPassword string `json:"csqtt_password,omitempty"`
 }
 
 // Legacy single-call entry point: starts VK bootstrap AND attaches WireGuard
@@ -360,6 +364,22 @@ func VBridgeWGStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 		pcfg.NumConns = 1
 	}
 
+	if pcfg.UseCSQTT {
+		runtime, err := newCSQTTRuntime(pcfg)
+		if err != nil {
+			log.Printf("VBridgeWGStartVKBootstrap: invalid CSQTT config: %v", err)
+			return -1
+		}
+		runtime.Start()
+		tunnelsMu.Lock()
+		id := nextID
+		nextID++
+		tunnels[id] = &tunnelEntry{csqtt: runtime}
+		tunnelsMu.Unlock()
+		log.Printf("VBridgeWGStartVKBootstrap: CSQTT tunnel %d bootstrap launched", id)
+		return C.int32_t(id)
+	}
+
 	// Apply pre-resolved VK host IPs (set by main app before startVPNTunnel).
 	if len(pcfg.VKHostIPs) > 0 {
 		log.Printf("VBridgeWGStartVKBootstrap: using %d pre-resolved VK host IPs from main app", len(pcfg.VKHostIPs))
@@ -472,6 +492,19 @@ func VBridgeWGWaitBootstrapReady(tunnelHandle C.int32_t, timeoutMs C.int32_t) C.
 	}
 
 	timeout := time.Duration(int64(timeoutMs)) * time.Millisecond
+	if entry.csqtt != nil {
+		err := entry.csqtt.WaitBootstrap(timeout)
+		if err == nil {
+			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d ready", id)
+			return 1
+		}
+		if strings.Contains(err.Error(), "timeout") {
+			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d timeout after %s", id, timeout)
+			return 0
+		}
+		log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d failed: %v", id, err)
+		return -1
+	}
 	err := entry.proxy.WaitBootstrap(timeout)
 	if err == nil {
 		log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d ready", id)
@@ -577,7 +610,8 @@ func VBridgeWGTurnOff(tunnelHandle C.int32_t) {
 	started := time.Now()
 	hasDevice := entry.device != nil
 	hasProxy := entry.proxy != nil
-	log.Printf("VBridgeWGTurnOff: tunnel %d stopping (device=%v proxy=%v)", id, hasDevice, hasProxy)
+	hasCSQTT := entry.csqtt != nil
+	log.Printf("VBridgeWGTurnOff: tunnel %d stopping (device=%v proxy=%v csqtt=%v)", id, hasDevice, hasProxy, hasCSQTT)
 
 	// Order matters: stop proxy FIRST, device SECOND.
 	//
@@ -602,6 +636,11 @@ func VBridgeWGTurnOff(tunnelHandle C.int32_t) {
 		ps := time.Now()
 		entry.proxy.StopWithTimeout(2 * time.Second)
 		log.Printf("VBridgeWGTurnOff: tunnel %d proxy.Stop took %s", id, time.Since(ps).Round(time.Millisecond))
+	}
+	if hasCSQTT {
+		cs := time.Now()
+		entry.csqtt.Stop()
+		log.Printf("VBridgeWGTurnOff: tunnel %d csqtt.Stop took %s", id, time.Since(cs).Round(time.Millisecond))
 	}
 	if hasDevice {
 		ds := time.Now()
@@ -664,6 +703,9 @@ func VBridgeWGGetTURNServerIP(tunnelHandle C.int32_t) *C.char {
 
 	if !ok {
 		return C.CString("")
+	}
+	if entry.csqtt != nil {
+		return C.CString(entry.csqtt.TURNServerIP())
 	}
 	return C.CString(entry.proxy.TURNServerIP())
 }
@@ -733,6 +775,13 @@ func VBridgeWGGetStats(tunnelHandle C.int32_t) *C.char {
 
 	if !ok {
 		return C.CString("{}")
+	}
+	if entry.csqtt != nil {
+		data, err := json.Marshal(entry.csqtt.Stats())
+		if err != nil {
+			return C.CString("{}")
+		}
+		return C.CString(string(data))
 	}
 
 	stats := entry.proxy.GetStats()

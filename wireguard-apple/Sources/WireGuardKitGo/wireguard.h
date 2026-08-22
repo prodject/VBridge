@@ -28,6 +28,8 @@ extern int32_t VBridgeWGAttachWireGuard(int32_t handle, const char *settings, in
 extern void VBridgeWGTurnOff(int32_t handle);
 extern char *VBridgeWGGetConfig(int32_t handle);
 extern char *VBridgeWGWaitWrapAProvision(int32_t handle, int32_t timeoutMs);
+extern char *VBridgeWGWaitCSQTTProvision(int32_t handle, int32_t timeoutMs);
+extern int32_t VBridgeWGAttachCSQTT(int32_t handle, int32_t tun_fd);
 extern void VBridgeWGSetLogger(vbridge_logger_fn_t logger_fn);
 extern char *VBridgeWGProbeVKCreds(
     const char *linkID,

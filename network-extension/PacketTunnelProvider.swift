@@ -591,6 +591,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let nValue = useSingleProxyWorker ? Int32(1) : requestedNValue
         let turnHost = (providerConfiguration["turnHost"] as? String) ?? ""
         let turnPort = (providerConfiguration["turnPort"] as? String) ?? ""
+        let listenAddr = (providerConfiguration["listenAddr"] as? String) ?? "127.0.0.1:9000"
         let useUdp = (providerConfiguration["useUdp"] as? Bool) ?? true
         let vkLink = (providerConfiguration["vkLink"] as? String) ?? ""
         let wrapKeyHex = (providerConfiguration["wrapKeyHex"] as? String) ?? ""
@@ -629,6 +630,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             mode: transportMode,
             vkLink: vkLink,
             peerAddr: peerAddr,
+            listenAddr: listenAddr,
             turnHost: turnHost,
             turnPort: turnPort,
             useUdp: useUdp,
@@ -712,11 +714,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     splitTunnel: splitTunnel
                 )
             } else if isCSQTT {
-                VBridgeWGTurnOff(handle)
-                self.vbridgeTunnelHandle = -1
-                SharedLogger.error("CSQTT tunnel runtime is not implemented yet in PacketTunnelProvider", source: .tunnel)
-                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
-                return
+                SharedLogger.info("CSQTT waiting for TUNCONF provision", source: .tunnel)
+                let provisionStartedAt = Date()
+                guard let provisionJSON = self.waitForCSQTTProvision(handle: handle, timeoutMs: 30000),
+                      let provision = try? JSONDecoder().decode(CSQTTProvision.self, from: Data(provisionJSON.utf8)),
+                      !provision.address.isEmpty else {
+                    VBridgeWGTurnOff(handle)
+                    self.vbridgeTunnelHandle = -1
+                    let elapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                    SharedLogger.error("CSQTT provision failed or timed out after \(elapsed)ms", source: .tunnel)
+                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    return
+                }
+                let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                SharedLogger.info("CSQTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
+                networkSettings = self.createTunnelSettings(
+                    address: provision.address,
+                    dns: provision.dns,
+                    mtu: String(provision.mtu > 0 ? provision.mtu : 1280),
+                    tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
+                    splitTunnel: splitTunnel
+                )
             } else if let tunnelConfiguration = tunnelConfiguration {
                 networkSettings = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: tunnelConfiguration,
@@ -748,17 +766,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         return
                     }
 
-                    let attachResult = effectiveUAPI.withCString {
-                        VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
+                    let attachResult: Int32
+                    if isCSQTT {
+                        attachResult = VBridgeWGAttachCSQTT(handle, tunFd)
+                    } else {
+                        attachResult = effectiveUAPI.withCString {
+                            VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
+                        }
                     }
                     guard attachResult == 1 else {
                         VBridgeWGTurnOff(handle)
                         self.vbridgeTunnelHandle = -1
-                        SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
+                        if isCSQTT {
+                            SharedLogger.error("VBridgeWGAttachCSQTT failed: \(attachResult)", source: .tunnel)
+                        } else {
+                            SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
+                        }
                         completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                         return
                     }
-                    SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                    if isCSQTT {
+                        SharedLogger.info("Tunnel up with CSQTT runtime", source: .tunnel)
+                    } else {
+                        SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                    }
                     SharedLogger.info("Packet tunnel startup completed; reporting Connected to iOS", source: .tunnel)
                     completionHandler(nil)
                 }
@@ -773,10 +804,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let uapi: String
     }
 
+    private struct CSQTTProvision: Decodable {
+        let address: String
+        let dns: String
+        let mtu: Int
+        let localPort: Int?
+    }
+
     private func makeAntonProxyConfigJSON(
         mode: String,
         vkLink: String,
         peerAddr: String,
+        listenAddr: String,
         turnHost: String,
         turnPort: String,
         useUdp: Bool,
@@ -797,6 +836,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         var payload: [String: Any] = [
             "vk_link": vkLink,
             "peer_addr": peerAddr,
+            "listen_addr": listenAddr,
             "turn_server": turnHost,
             "turn_port": turnPort,
             "use_dtls": !useWDTT && !useCSQTT,
@@ -871,6 +911,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func waitForWrapAProvision(handle: Int32, timeoutMs: Int32) -> String? {
         guard let pointer = VBridgeWGWaitWrapAProvision(handle, timeoutMs) else {
+            return nil
+        }
+        defer { free(UnsafeMutableRawPointer(pointer)) }
+        let json = String(cString: pointer)
+        return json.isEmpty ? nil : json
+    }
+
+    private func waitForCSQTTProvision(handle: Int32, timeoutMs: Int32) -> String? {
+        guard let pointer = VBridgeWGWaitCSQTTProvision(handle, timeoutMs) else {
             return nil
         }
         defer { free(UnsafeMutableRawPointer(pointer)) }
