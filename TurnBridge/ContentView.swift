@@ -1617,15 +1617,21 @@ struct ContentView: View {
 
     private func handleConnectionURL(_ url: URL) -> Bool {
         let raw = url.absoluteString
-        guard raw.lowercased().hasPrefix(ConfigParser.wdttScheme) else {
+        let lowered = raw.lowercased()
+        guard lowered.hasPrefix(ConfigParser.wdttScheme) || lowered.hasPrefix(ConfigParser.csqttScheme) else {
             return false
         }
 
         do {
-            let profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: raw), fallbackName: "WDTT")
+            let profile: VPNProfile
+            if lowered.hasPrefix(ConfigParser.csqttScheme) {
+                profile = profile(fromCSQTT: try ConfigParser.parseCSQTT(from: raw), fallbackName: "CSQTT")
+            } else {
+                profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: raw), fallbackName: "WDTT")
+            }
             store.addProfile(profile)
-            SharedLogger.info("WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported from URL")
-            showAlert(title: "Success", message: "WDTT profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+            SharedLogger.info("Profile \"\(store.selectedProfile?.name ?? "")\" imported from URL")
+            showAlert(title: "Success", message: "Profile \"\(store.selectedProfile?.name ?? "")\" imported.")
         } catch {
             SharedLogger.error("URL import failed: \(error.localizedDescription)")
             showAlert(title: "Import Error", message: error.localizedDescription)
@@ -2583,7 +2589,9 @@ struct ContentView: View {
                 return
             }
             let importedProfile: VPNProfile
-            if trimmed.lowercased().hasPrefix(ConfigParser.wdttScheme) {
+            if trimmed.lowercased().hasPrefix(ConfigParser.csqttScheme) {
+                importedProfile = profile(fromCSQTT: try ConfigParser.parseCSQTT(from: clipboardString), fallbackName: "CSQTT")
+            } else if trimmed.lowercased().hasPrefix(ConfigParser.wdttScheme) {
                 importedProfile = profile(fromWDTT: try ConfigParser.parseWDTT(from: clipboardString), fallbackName: "WDTT")
             } else {
                 importedProfile = profile(fromTurnConfig: try ConfigParser.parse(from: clipboardString), fallbackName: "Profile")
@@ -2637,7 +2645,7 @@ struct ContentView: View {
 
         do {
             let ext = url.pathExtension.lowercased()
-            guard ["conf", "vbridge"].contains(ext) else {
+            guard ["conf", "vbridge", "txt"].contains(ext) else {
                 throw ConfigParseError.invalidScheme
             }
 
@@ -2647,6 +2655,14 @@ struct ContentView: View {
             }
 
             let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix(ConfigParser.csqttScheme) {
+                let profile = profile(fromCSQTT: try ConfigParser.parseCSQTT(from: trimmed), fallbackName: uniqueProfileName(from: url.deletingPathExtension().lastPathComponent))
+                store.addProfile(profile)
+                SharedLogger.info("CSQTT profile \"\(store.selectedProfile?.name ?? "")\" imported from file")
+                showAlert(title: "Success", message: "CSQTT profile \"\(store.selectedProfile?.name ?? "")\" imported.")
+                return
+            }
+
             if trimmed.lowercased().hasPrefix(ConfigParser.wdttScheme) {
                 let profile = profile(fromWDTT: try ConfigParser.parseWDTT(from: trimmed), fallbackName: uniqueProfileName(from: url.deletingPathExtension().lastPathComponent))
                 store.addProfile(profile)
@@ -2708,7 +2724,10 @@ struct ContentView: View {
             wdttFingerprint: config.wdttFingerprint ?? "auto",
             wdttClientIDMode: config.wdttClientIDMode ?? "default",
             wdttUseVKCallsPreflight: config.wdttUseVKCallsPreflight ?? true,
-            wdttTunnelMTU: config.wdttTunnelMTU
+            wdttTunnelMTU: config.wdttTunnelMTU,
+            csqttPassword: config.csqttPassword ?? "",
+            csqttWebPort: config.csqttWebPort,
+            csqttClientTag: config.csqttClientTag ?? ""
         )
     }
 
@@ -2735,6 +2754,23 @@ struct ContentView: View {
             wdttPassword: config.password,
             wdttClientKey: config.hashes.first ?? "",
             wdttServerKey: config.hashes.dropFirst().joined(separator: ",")
+        )
+    }
+
+    private func profile(fromCSQTT config: CSQTTConfigImport, fallbackName: String) -> VPNProfile {
+        VPNProfile(
+            name: fallbackName,
+            transportMode: .csqtt,
+            vkLink: config.vkLink,
+            peerAddr: config.peerAddr,
+            listenAddr: "127.0.0.1:9000",
+            nValue: 18,
+            credsGroupSize: 12,
+            wgQuickConfig: "",
+            turnHost: "",
+            turnPort: "",
+            useUdp: false,
+            csqttPassword: config.password
         )
     }
 

@@ -413,10 +413,15 @@ struct SettingsView: View {
             "wdttServerKey": profile.wdttServerKey,
             "wdttFingerprint": profile.wdttFingerprint,
             "wdttClientIDMode": profile.wdttClientIDMode,
-            "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight
+            "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight,
+            "csqttPassword": profile.csqttPassword,
+            "csqttClientTag": profile.csqttClientTag
         ]
         if let wdttTunnelMTU = profile.wdttTunnelMTU, wdttTunnelMTU > 0 {
             payload["wdttTunnelMTU"] = wdttTunnelMTU
+        }
+        if let csqttWebPort = profile.csqttWebPort, csqttWebPort > 0 {
+            payload["csqttWebPort"] = csqttWebPort
         }
 
         guard JSONSerialization.isValidJSONObject(payload),

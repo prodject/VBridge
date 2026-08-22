@@ -41,6 +41,9 @@ struct TurnConfigImport: Codable {
     let wdttClientIDMode: String?
     let wdttUseVKCallsPreflight: Bool?
     let wdttTunnelMTU: Int?
+    let csqttPassword: String?
+    let csqttWebPort: Int?
+    let csqttClientTag: String?
 }
 
 struct AmneziaConfigImport {
@@ -60,6 +63,27 @@ struct WDTTConfigImport {
 
     var peerAddr: String {
         "\(host):\(serverPort)"
+    }
+
+    var vkLink: String {
+        guard let firstHash = hashes.first, !firstHash.isEmpty else {
+            return ""
+        }
+        return "https://vk.com/call/join/\(firstHash)"
+    }
+}
+
+struct CSQTTConfigImport {
+    let host: String
+    let peerPort: Int
+    let password: String
+    let hashes: [String]
+
+    var peerAddr: String {
+        if host.contains(":") && !host.hasPrefix("[") {
+            return "[\(host)]:\(peerPort)"
+        }
+        return "\(host):\(peerPort)"
     }
 
     var vkLink: String {
@@ -172,6 +196,7 @@ enum ConfigParseError: LocalizedError {
     case missingEndpoint
     case invalidAmneziaConfig(String)
     case invalidWDTTLink(String)
+    case invalidCSQTTLink(String)
     
     var errorDescription: String? {
         switch self {
@@ -189,6 +214,8 @@ enum ConfigParseError: LocalizedError {
             return "Failed to parse Amnezia configuration: \(details)"
         case .invalidWDTTLink(let details):
             return "Failed to parse WDTT link: \(details)"
+        case .invalidCSQTTLink(let details):
+            return "Failed to parse CSQTT link: \(details)"
         }
     }
 }
@@ -199,6 +226,7 @@ struct ConfigParser {
     static let legacySchemes = ["turnbridge://"]
     static let wdttScheme = "wdtt://"
     static let wdttConnectPrefix = "wdtt://connect?"
+    static let csqttScheme = "csqtt://"
 
     static func exportDeploySettings(_ settings: DeploySettingsLink) throws -> String {
         let data = try JSONEncoder().encode(settings)
@@ -345,6 +373,26 @@ struct ConfigParser {
         return try parseLegacyWDTT(trimmed)
     }
 
+    static func parseCSQTT(from string: String) throws -> CSQTTConfigImport {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ConfigParseError.emptyString
+        }
+        guard trimmed.lowercased().hasPrefix(csqttScheme) else {
+            throw ConfigParseError.invalidScheme
+        }
+
+        guard let components = URLComponents(string: trimmed) else {
+            throw ConfigParseError.invalidCSQTTLink("Invalid csqtt:// URL.")
+        }
+
+        let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if host.lowercased() == "connect" {
+            return try parseModernCSQTT(components)
+        }
+        return try parseLegacyCSQTT(components)
+    }
+
     private static func parseLegacyWDTT(_ value: String) throws -> WDTTConfigImport {
         let payload = String(value.dropFirst(wdttScheme.count))
         let parts = payload.split(separator: ":", maxSplits: 5).map(String.init)
@@ -400,6 +448,63 @@ struct ConfigParser {
         )
     }
 
+    private static func parseLegacyCSQTT(_ components: URLComponents) throws -> CSQTTConfigImport {
+        let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = components.user?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let peerPort = components.port ?? -1
+
+        guard !host.isEmpty else {
+            throw ConfigParseError.invalidCSQTTLink("Host is empty.")
+        }
+        guard (1...65535).contains(peerPort) else {
+            throw ConfigParseError.invalidCSQTTLink("Invalid peer port: \(peerPort).")
+        }
+        guard !password.isEmpty else {
+            throw ConfigParseError.invalidCSQTTLink("Password is empty.")
+        }
+
+        return CSQTTConfigImport(
+            host: host,
+            peerPort: peerPort,
+            password: password,
+            hashes: []
+        )
+    }
+
+    private static func parseModernCSQTT(_ components: URLComponents) throws -> CSQTTConfigImport {
+        let queryItems = components.queryItems ?? []
+        let queryMap = Dictionary(uniqueKeysWithValues: queryItems.map { ($0.name.lowercased(), $0.value ?? "") })
+
+        guard queryMap["v"]?.trimmingCharacters(in: .whitespacesAndNewlines) == "2" else {
+            throw ConfigParseError.invalidCSQTTLink("Unsupported csqtt://connect version.")
+        }
+
+        let host = queryMap["host"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = queryMap["password"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !host.isEmpty else {
+            throw ConfigParseError.invalidCSQTTLink("Host is empty.")
+        }
+        guard !password.isEmpty else {
+            throw ConfigParseError.invalidCSQTTLink("Password is empty.")
+        }
+        guard !host.contains(where: \.isWhitespace), !password.contains(where: \.isWhitespace) else {
+            throw ConfigParseError.invalidCSQTTLink("Host and password must not contain whitespace.")
+        }
+        guard let peerPortString = queryMap["peer"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let peerPort = Int(peerPortString),
+              (1...65535).contains(peerPort) else {
+            throw ConfigParseError.invalidCSQTTLink("Invalid peer port.")
+        }
+
+        return CSQTTConfigImport(
+            host: host,
+            peerPort: peerPort,
+            password: password,
+            hashes: try parseCSQTTHashes(queryMap["hashes"])
+        )
+    }
+
     private static func makeWDTTConfig(
         host: String,
         serverPort: String,
@@ -441,5 +546,58 @@ struct ConfigParser {
             profileName: profileName?.isEmpty == false ? profileName : nil,
             maxWorkers: maxWorkers
         )
+    }
+
+    private static func parseCSQTTHashes(_ rawValue: String?) throws -> [String] {
+        guard let rawValue else { return [] }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ConfigParseError.invalidCSQTTLink("hashes is present but empty.")
+        }
+
+        let hashes = trimmed
+            .split(separator: "+", omittingEmptySubsequences: false)
+            .map { stripVKJoinPrefix(String($0)).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        guard (1...6).contains(hashes.count),
+              !hashes.contains(where: { $0.isEmpty || $0.contains(where: \.isWhitespace) || $0.count < 16 }) else {
+            throw ConfigParseError.invalidCSQTTLink("Invalid hashes list.")
+        }
+        guard Set(hashes).count == hashes.count else {
+            throw ConfigParseError.invalidCSQTTLink("Duplicate hashes are not allowed.")
+        }
+        return hashes
+    }
+
+    private static func stripVKJoinPrefix(_ input: String) -> String {
+        var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = value.lowercased()
+        let prefixes = [
+            "https://vk.com/call/join/",
+            "http://vk.com/call/join/",
+            "https://m.vk.com/call/join/",
+            "http://m.vk.com/call/join/",
+            "m.vk.com/call/join/",
+            "vk.com/call/join/",
+            "https://vk.ru/call/join/",
+            "http://vk.ru/call/join/",
+            "https://m.vk.ru/call/join/",
+            "http://m.vk.ru/call/join/",
+            "m.vk.ru/call/join/",
+            "vk.ru/call/join/"
+        ]
+
+        for prefix in prefixes where lowered.hasPrefix(prefix) {
+            value = String(value.dropFirst(prefix.count))
+            break
+        }
+
+        if let questionMark = value.firstIndex(of: "?") {
+            value = String(value[..<questionMark])
+        }
+        if let hashIndex = value.firstIndex(of: "#") {
+            value = String(value[..<hashIndex])
+        }
+        return value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 }
