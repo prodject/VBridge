@@ -605,6 +605,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let csqttPassword = (providerConfiguration["csqttPassword"] as? String) ?? ""
         let csqttWebPort = providerConfiguration["csqttWebPort"] as? Int
         let csqttClientTag = (providerConfiguration["csqttClientTag"] as? String) ?? ""
+        let csqttDeviceID = (providerConfiguration["csqttDeviceID"] as? String) ?? ""
+        let csqttExtraThreads = max((providerConfiguration["csqttExtraThreads"] as? Int) ?? 0, 0)
+        let csqttUseMasking = (providerConfiguration["csqttUseMasking"] as? Bool) ?? true
         let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
 
         if useSingleProxyWorker && requestedNValue != 1 {
@@ -643,6 +646,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             csqttPassword: csqttPassword,
             csqttWebPort: csqttWebPort,
             csqttClientTag: csqttClientTag,
+            csqttDeviceID: csqttDeviceID,
+            csqttExtraThreads: csqttExtraThreads,
+            csqttUseMasking: csqttUseMasking,
             seededTURN: seededTURN
         ) else {
             SharedLogger.error("Failed to encode proxy config", source: .tunnel)
@@ -828,6 +834,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         csqttPassword: String,
         csqttWebPort: Int?,
         csqttClientTag: String,
+        csqttDeviceID: String,
+        csqttExtraThreads: Int,
+        csqttUseMasking: Bool,
         seededTURN: [String: String]?
     ) -> String? {
         let useWDTT = mode == "wdtt"
@@ -846,7 +855,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "use_srtp": false,
             "use_wrap_a": useWDTT,
             "wrap_a_password": wdttPassword,
-            "device_id": persistedDeviceID(),
+            "device_id": resolvedDeviceID(mode: mode, csqttDeviceID: csqttDeviceID),
             "num_conns": max(nValue, 1),
             "cred_pool_cooldown_seconds": 120,
             "browser_fingerprint": wdttFingerprint,
@@ -862,6 +871,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if !csqttClientTag.isEmpty {
                 payload["csqtt_client_tag"] = csqttClientTag
             }
+            payload["csqtt_extra_threads"] = max(csqttExtraThreads, 0)
+            payload["csqtt_use_masking"] = csqttUseMasking
         }
         if let seededTURN,
            let address = seededTURN["address"], !address.isEmpty,
@@ -879,6 +890,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return nil
         }
         return json
+    }
+
+    private func resolvedDeviceID(mode: String, csqttDeviceID: String) -> String {
+        if mode == "csqtt" {
+            let trimmed = csqttDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return persistedDeviceID()
     }
 
     private func persistedDeviceID() -> String {

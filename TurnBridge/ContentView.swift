@@ -1094,6 +1094,9 @@ struct ContentView: View {
             csqttPassword: profile.csqttPassword,
             csqttWebPort: profile.csqttWebPort,
             csqttClientTag: profile.csqttClientTag,
+            csqttDeviceID: profile.csqttDeviceID,
+            csqttExtraThreads: profile.csqttExtraThreads,
+            csqttUseMasking: profile.csqttUseMasking,
             seededTURN: seededTURN
         ) { isSuccess in
             if isSuccess {
@@ -2744,7 +2747,10 @@ struct ContentView: View {
             wdttTunnelMTU: config.wdttTunnelMTU,
             csqttPassword: config.csqttPassword ?? "",
             csqttWebPort: config.csqttWebPort,
-            csqttClientTag: config.csqttClientTag ?? ""
+            csqttClientTag: config.csqttClientTag ?? "",
+            csqttDeviceID: config.csqttDeviceID ?? "",
+            csqttExtraThreads: max(config.csqttExtraThreads ?? 0, 0),
+            csqttUseMasking: config.csqttUseMasking ?? true
         )
     }
 
@@ -2775,19 +2781,27 @@ struct ContentView: View {
     }
 
     private func profile(fromCSQTT config: CSQTTConfigImport, fallbackName: String) -> VPNProfile {
+        let combinedHashes = config.hashes.isEmpty
+            ? config.vkLink
+            : config.hashes.map { "https://vk.com/call/join/\($0)" }.joined(separator: ", ")
         VPNProfile(
-            name: fallbackName,
+            name: config.profileName?.isEmpty == false ? config.profileName! : fallbackName,
             transportMode: .csqtt,
-            vkLink: config.vkLink,
+            vkLink: combinedHashes,
             peerAddr: config.peerAddr,
-            listenAddr: "127.0.0.1:9000",
+            listenAddr: "127.0.0.1:\(config.localPort > 0 ? config.localPort : 9000)",
             nValue: 18,
             credsGroupSize: 12,
             wgQuickConfig: "",
             turnHost: "",
             turnPort: "",
             useUdp: false,
-            csqttPassword: config.password
+            csqttPassword: config.password,
+            csqttWebPort: config.webPort,
+            csqttClientTag: config.clientTag ?? "",
+            csqttDeviceID: config.deviceID ?? "",
+            csqttExtraThreads: max(config.extraThreads ?? 0, 0),
+            csqttUseMasking: config.useMasking ?? true
         )
     }
 

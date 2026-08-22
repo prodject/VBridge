@@ -44,6 +44,9 @@ struct TurnConfigImport: Codable {
     let csqttPassword: String?
     let csqttWebPort: Int?
     let csqttClientTag: String?
+    let csqttDeviceID: String?
+    let csqttExtraThreads: Int?
+    let csqttUseMasking: Bool?
 }
 
 struct AmneziaConfigImport {
@@ -78,6 +81,13 @@ struct CSQTTConfigImport {
     let peerPort: Int
     let password: String
     let hashes: [String]
+    let profileName: String?
+    let webPort: Int?
+    let clientTag: String?
+    let deviceID: String?
+    let localPort: Int
+    let extraThreads: Int?
+    let useMasking: Bool?
 
     var peerAddr: String {
         if host.contains(":") && !host.hasPrefix("[") {
@@ -467,7 +477,14 @@ struct ConfigParser {
             host: host,
             peerPort: peerPort,
             password: password,
-            hashes: []
+            hashes: [],
+            profileName: nil,
+            webPort: nil,
+            clientTag: nil,
+            deviceID: nil,
+            localPort: 9000,
+            extraThreads: nil,
+            useMasking: nil
         )
     }
 
@@ -497,11 +514,62 @@ struct ConfigParser {
             throw ConfigParseError.invalidCSQTTLink("Invalid peer port.")
         }
 
+        let webPort: Int?
+        if let rawWebPort = queryMap["web"]?.trimmingCharacters(in: .whitespacesAndNewlines), !rawWebPort.isEmpty {
+            guard let parsed = Int(rawWebPort), (1...65535).contains(parsed) else {
+                throw ConfigParseError.invalidCSQTTLink("Invalid web port.")
+            }
+            webPort = parsed
+        } else {
+            webPort = nil
+        }
+
+        let localPort: Int
+        if let rawLocalPort = queryMap["local"]?.trimmingCharacters(in: .whitespacesAndNewlines), !rawLocalPort.isEmpty {
+            guard let parsed = Int(rawLocalPort), (1...65535).contains(parsed) else {
+                throw ConfigParseError.invalidCSQTTLink("Invalid local port.")
+            }
+            localPort = parsed
+        } else {
+            localPort = 9000
+        }
+
+        let extraThreads: Int?
+        if let rawExtraThreads = queryMap["extra_threads"]?.trimmingCharacters(in: .whitespacesAndNewlines), !rawExtraThreads.isEmpty {
+            guard let parsed = Int(rawExtraThreads), parsed >= 0, parsed <= 64 else {
+                throw ConfigParseError.invalidCSQTTLink("Invalid extra_threads value.")
+            }
+            extraThreads = parsed
+        } else {
+            extraThreads = nil
+        }
+
+        let useMasking: Bool?
+        if let rawMask = queryMap["mask"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !rawMask.isEmpty {
+            switch rawMask {
+            case "1", "true", "yes", "on":
+                useMasking = true
+            case "0", "false", "no", "off":
+                useMasking = false
+            default:
+                throw ConfigParseError.invalidCSQTTLink("Invalid mask value.")
+            }
+        } else {
+            useMasking = nil
+        }
+
         return CSQTTConfigImport(
             host: host,
             peerPort: peerPort,
             password: password,
-            hashes: try parseCSQTTHashes(queryMap["hashes"])
+            hashes: try parseCSQTTHashes(queryMap["hashes"]),
+            profileName: queryMap["name"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            webPort: webPort,
+            clientTag: queryMap["tag"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            deviceID: queryMap["device_id"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            localPort: localPort,
+            extraThreads: extraThreads,
+            useMasking: useMasking
         )
     }
 

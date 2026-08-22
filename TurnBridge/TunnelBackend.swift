@@ -24,6 +24,9 @@ struct TunnelStartConfiguration: Codable {
     var csqttPassword: String
     var csqttWebPort: Int?
     var csqttClientTag: String
+    var csqttDeviceID: String
+    var csqttExtraThreads: Int
+    var csqttUseMasking: Bool
     var seededTURN: SeededTURNCredentials?
 
     var normalizedWgQuickConfig: String {
@@ -53,6 +56,9 @@ struct TunnelStartConfiguration: Codable {
             "wdttUseVKCallsPreflight": wdttUseVKCallsPreflight,
             "csqttPassword": csqttPassword,
             "csqttClientTag": csqttClientTag,
+            "csqttDeviceID": csqttDeviceID,
+            "csqttExtraThreads": max(csqttExtraThreads, 0),
+            "csqttUseMasking": csqttUseMasking,
             // PacketTunnel cannot read the app's Application Support directory,
             // and sideloaded builds often have no App Group entitlement. Pass the
             // current snapshot through NetworkExtension preferences so both signed
@@ -252,7 +258,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
         if configuration.transportMode == .wdtt {
             SharedLogger.info("WDTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.wdttPassword.isEmpty), primaryHashLen=\(configuration.wdttClientKey.count), extraHashesLen=\(configuration.wdttServerKey.count)")
         } else if configuration.transportMode == .csqtt {
-            SharedLogger.info("CSQTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.csqttPassword.isEmpty), webPort=\(configuration.csqttWebPort ?? 0), clientTagLen=\(configuration.csqttClientTag.count)")
+            SharedLogger.info("CSQTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.csqttPassword.isEmpty), webPort=\(configuration.csqttWebPort ?? 0), clientTagLen=\(configuration.csqttClientTag.count), deviceIDLen=\(configuration.csqttDeviceID.count), extraThreads=\(configuration.csqttExtraThreads), masking=\(configuration.csqttUseMasking)")
         }
 
         let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"

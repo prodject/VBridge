@@ -60,6 +60,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var csqttPassword: String
     var csqttWebPort: Int?
     var csqttClientTag: String
+    var csqttDeviceID: String
+    var csqttExtraThreads: Int
+    var csqttUseMasking: Bool
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -85,6 +88,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case csqttPassword
         case csqttWebPort
         case csqttClientTag
+        case csqttDeviceID
+        case csqttExtraThreads
+        case csqttUseMasking
     }
 
     init(
@@ -110,7 +116,10 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttTunnelMTU: Int? = nil,
         csqttPassword: String = "",
         csqttWebPort: Int? = nil,
-        csqttClientTag: String = ""
+        csqttClientTag: String = "",
+        csqttDeviceID: String = "",
+        csqttExtraThreads: Int = 0,
+        csqttUseMasking: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -135,6 +144,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.csqttPassword = csqttPassword
         self.csqttWebPort = csqttWebPort
         self.csqttClientTag = csqttClientTag
+        self.csqttDeviceID = csqttDeviceID
+        self.csqttExtraThreads = max(csqttExtraThreads, 0)
+        self.csqttUseMasking = csqttUseMasking
     }
 
     init(from decoder: Decoder) throws {
@@ -162,5 +174,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         csqttPassword = try container.decodeIfPresent(String.self, forKey: .csqttPassword) ?? ""
         csqttWebPort = try container.decodeIfPresent(Int.self, forKey: .csqttWebPort)
         csqttClientTag = try container.decodeIfPresent(String.self, forKey: .csqttClientTag) ?? ""
+        csqttDeviceID = try container.decodeIfPresent(String.self, forKey: .csqttDeviceID) ?? ""
+        csqttExtraThreads = max(try container.decodeIfPresent(Int.self, forKey: .csqttExtraThreads) ?? 0, 0)
+        csqttUseMasking = try container.decodeIfPresent(Bool.self, forKey: .csqttUseMasking) ?? true
     }
 }

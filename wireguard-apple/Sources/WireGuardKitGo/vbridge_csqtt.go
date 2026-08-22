@@ -74,6 +74,8 @@ type csqttRuntime struct {
 	deviceID    string
 	password    string
 	workerCount int
+	useMasking bool
+	clientTag  string
 
 	dispatcher *csqttDispatcher
 	tunDevice  tun.Device
@@ -164,6 +166,15 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 	if workerCount <= 0 {
 		workerCount = 1
 	}
+	workerCount += max(config.CSQTTExtraThreads, 0)
+	useMasking := true
+	if config.CSQTTUseMasking != nil {
+		useMasking = *config.CSQTTUseMasking
+	}
+	clientTag := strings.TrimSpace(config.CSQTTClientTag)
+	if clientTag == "" {
+		clientTag = "vbridge"
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &csqttRuntime{
 		ctx:         ctx,
@@ -177,6 +188,8 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		deviceID:    deviceID,
 		password:    strings.TrimSpace(config.CSQTTPassword),
 		workerCount: workerCount,
+		useMasking:  useMasking,
+		clientTag:   clientTag,
 		readyCh:     make(chan struct{}),
 		provisionCh: make(chan struct{}),
 	}
@@ -486,20 +499,24 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 
 	go w.bindingLoop(ctx, turnClient)
 
-	obfsConn, err := newCSQTTObfsPacketConn(&csqttRelayPacketConn{
+	packetConn := net.PacketConn(&csqttRelayPacketConn{
 		relay: relay,
 		peer:  w.runtime.peerAddr,
-	}, w.runtime.peerAddr, w.runtime.password)
-	if err != nil {
-		return fmt.Errorf("obfs transport: %w", err)
+	})
+	if w.runtime.useMasking {
+		obfsConn, err := newCSQTTObfsPacketConn(packetConn, w.runtime.peerAddr, w.runtime.password)
+		if err != nil {
+			return fmt.Errorf("obfs transport: %w", err)
+		}
+		defer obfsConn.Close()
+		packetConn = obfsConn
 	}
-	defer obfsConn.Close()
 
 	cert, err := selfsign.GenerateSelfSigned()
 	if err != nil {
 		return fmt.Errorf("generate dtls cert: %w", err)
 	}
-	dtlsConn, err := dtls.Client(obfsConn, w.runtime.peerAddr, &dtls.Config{
+	dtlsConn, err := dtls.Client(packetConn, w.runtime.peerAddr, &dtls.Config{
 		Certificates:          []tls.Certificate{cert},
 		InsecureSkipVerify:    true,
 		ExtendedMasterSecret:  dtls.RequireExtendedMasterSecret,
@@ -575,7 +592,7 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 		w.runtime.deviceID,
 		w.runtime.password,
 		1,
-		"vbridge",
+		w.runtime.clientTag,
 		w.id,
 	)
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))

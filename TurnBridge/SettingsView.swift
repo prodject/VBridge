@@ -167,7 +167,15 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
 
-                    Text("Password is required. Web Port and Client Tag are optional values that can be imported from a CSQTT link or copied from the server web panel.")
+                    TextField("Device ID Override", text: binding(\.csqttDeviceID))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+
+                    Stepper("Extra Threads: \(profile.csqttExtraThreads)", value: binding(\.csqttExtraThreads), in: 0...32)
+
+                    Toggle("Use RTP Masking", isOn: binding(\.csqttUseMasking))
+
+                    Text("Password is required. Web Port, Client Tag, Device ID, masking and extra threads can be imported from a CSQTT link or copied from the server web panel.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -421,7 +429,10 @@ struct SettingsView: View {
             "wdttClientIDMode": profile.wdttClientIDMode,
             "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight,
             "csqttPassword": profile.csqttPassword,
-            "csqttClientTag": profile.csqttClientTag
+            "csqttClientTag": profile.csqttClientTag,
+            "csqttDeviceID": profile.csqttDeviceID,
+            "csqttExtraThreads": profile.csqttExtraThreads,
+            "csqttUseMasking": profile.csqttUseMasking
         ]
         if let wdttTunnelMTU = profile.wdttTunnelMTU, wdttTunnelMTU > 0 {
             payload["wdttTunnelMTU"] = wdttTunnelMTU

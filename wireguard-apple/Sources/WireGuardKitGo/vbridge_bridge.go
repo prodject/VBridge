@@ -220,6 +220,10 @@ type ProxyConfig struct {
 	DeviceID string `json:"device_id,omitempty"`
 	UseCSQTT bool   `json:"use_csqtt,omitempty"`
 	CSQTTPassword string `json:"csqtt_password,omitempty"`
+	CSQTTWebPort int `json:"csqtt_web_port,omitempty"`
+	CSQTTClientTag string `json:"csqtt_client_tag,omitempty"`
+	CSQTTExtraThreads int `json:"csqtt_extra_threads,omitempty"`
+	CSQTTUseMasking *bool `json:"csqtt_use_masking,omitempty"`
 }
 
 // Legacy single-call entry point: starts VK bootstrap AND attaches WireGuard

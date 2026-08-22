@@ -67,6 +67,9 @@ struct VBridge: App {
         csqttPassword: String,
         csqttWebPort: Int?,
         csqttClientTag: String,
+        csqttDeviceID: String,
+        csqttExtraThreads: Int,
+        csqttUseMasking: Bool,
         seededTURN: SeededTURNCredentials? = nil,
         completionHandler: @escaping (Bool) -> Void
     ) {
@@ -92,6 +95,9 @@ struct VBridge: App {
             csqttPassword: csqttPassword,
             csqttWebPort: csqttWebPort,
             csqttClientTag: csqttClientTag,
+            csqttDeviceID: csqttDeviceID,
+            csqttExtraThreads: csqttExtraThreads,
+            csqttUseMasking: csqttUseMasking,
             seededTURN: seededTURN
         )
         tunnelBackend.start(configuration, completionHandler: completionHandler)
