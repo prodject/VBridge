@@ -291,7 +291,7 @@ enum ServerAdminBridge {
         }.value
     }
 
-    private static func localizedServerAdminMessage(_ message: String) -> String {
+    nonisolated private static func localizedServerAdminMessage(_ message: String) -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("порт #"), trimmed.contains("должен быть числом 1..65535") {
             if let number = trimmed.split(separator: "#").dropFirst().first?.split(separator: " ").first {

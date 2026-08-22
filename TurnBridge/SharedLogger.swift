@@ -194,7 +194,7 @@ public struct SharedLogger {
         return logFileURL != nil
     }
 
-    static var logFileURL: URL? {
+    nonisolated static var logFileURL: URL? {
         if let groupID = appGroupID,
            let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) {
             return container.appendingPathComponent("vpn_tunnel.log")

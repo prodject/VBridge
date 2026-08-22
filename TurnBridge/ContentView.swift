@@ -2904,7 +2904,7 @@ struct ContentView: View {
         let combinedHashes = config.hashes.isEmpty
             ? config.vkLink
             : config.hashes.map { "https://vk.com/call/join/\($0)" }.joined(separator: ", ")
-        VPNProfile(
+        return VPNProfile(
             name: config.profileName?.isEmpty == false ? config.profileName! : fallbackName,
             transportMode: .csqtt,
             vkLink: combinedHashes,
