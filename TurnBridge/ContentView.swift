@@ -923,7 +923,7 @@ struct ContentView: View {
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
         if profile.vkLink.isEmpty {
-            return profile.transportMode == .wdtt
+            return profile.transportMode == .wdtt || profile.transportMode == .csqtt
                 ? "Please provide a valid VK call URL or hash."
                 : "Please provide a valid TURN Server URL."
         }
@@ -1108,10 +1108,21 @@ struct ContentView: View {
                 endLiveActivity(profileName: profile.name, immediate: true)
                 presentConnectionIssue(
                     title: "Connection Failed",
-                    message: "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
+                    message: connectionFailureMessage(for: profile.transportMode)
                 )
             }
             refreshWidgetTimelines()
+        }
+    }
+
+    private func connectionFailureMessage(for mode: VPNTransportMode) -> String {
+        switch mode {
+        case .wdtt:
+            return "Unable to start the tunnel. Check Logs and the captcha flow, then try again."
+        case .csqtt:
+            return "Unable to start the CSQTT connection. Check Logs, verify the CSQTT password and imported client parameters, then try again."
+        default:
+            return "Unable to start the tunnel. Check Logs and the profile configuration, then try again."
         }
     }
 

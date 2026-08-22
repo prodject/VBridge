@@ -49,6 +49,12 @@ struct SettingsView: View {
                         .disableAutocorrection(true)
                 }
 
+                if profile.transportMode == .csqtt {
+                    TextField("VK Call URL or Hash", text: binding(\.vkLink))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                }
+
                 TextField("Peer Address (IP:Port)", text: binding(\.peerAddr))
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -161,7 +167,7 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
 
-                    Text("CSQTT runtime integration is not wired yet. These fields prepare the profile model for the upcoming client backend.")
+                    Text("Password is required. Web Port and Client Tag are optional values that can be imported from a CSQTT link or copied from the server web panel.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
