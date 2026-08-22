@@ -13,8 +13,17 @@ func exportCSQTTLogsCommand() string {
 		"echo '===== csqtt container ====='",
 		"docker ps -a --filter name=csqtt-vpn 2>&1 || true",
 		"echo",
+		"echo '===== csqtt compose ====='",
+		"if [ -d /opt/vbridge-csqtt ]; then cd /opt/vbridge-csqtt && docker compose ps 2>&1; else echo 'csqtt install dir not found'; fi",
+		"echo",
 		"echo '===== csqtt logs ====='",
 		"if [ -d /opt/vbridge-csqtt ]; then cd /opt/vbridge-csqtt && docker compose logs --tail 400 2>&1; else echo 'csqtt install dir not found'; fi",
+		"echo",
+		"echo '===== csqtt install log ====='",
+		"if [ -f /var/log/csqtt-install.log ]; then tail -n 200 /var/log/csqtt-install.log 2>&1; else echo 'csqtt-install.log not found'; fi",
+		"echo",
+		"echo '===== csqtt ports ====='",
+		"ss -lunpt 2>&1 | grep -E '(:46000|:46002|csqtt)' || true",
 	}, "; ")
 }
 

@@ -59,6 +59,7 @@ private struct DeployResponse: Decodable, Sendable {
 
 struct DeployView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @AppStorage("deploy.kind") private var deployKind = DeployServerKind.wdtt.rawValue
     @AppStorage("deploy.host") private var host = ""
@@ -232,6 +233,22 @@ struct DeployView: View {
                         Label("Export Server", systemImage: "link.badge.plus")
                     }
                     .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
+                }
+
+                if selectedDeployKind == .csqtt {
+                    Button {
+                        openCSQTTWebPanel()
+                    } label: {
+                        Label("Open Web Panel", systemImage: "safari")
+                    }
+                    .disabled(csqttWebPanelURL == nil)
+
+                    Button {
+                        copyCSQTTWebPanelLink()
+                    } label: {
+                        Label("Copy Web Panel Link", systemImage: "link")
+                    }
+                    .disabled(csqttWebPanelURL == nil)
                 }
 
                 Button {
@@ -506,7 +523,7 @@ struct DeployView: View {
     }
 
     private var canUpdatePreserve: Bool {
-        selectedDeployKind == .wdtt && canInstall
+        canInstall
     }
 
     private var canUseStateArchive: Bool {
@@ -853,6 +870,26 @@ struct DeployView: View {
             password: password,
             port: sshPort
         )
+    }
+
+    private var csqttWebPanelURL: URL? {
+        guard selectedDeployKind == .csqtt else { return nil }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty, isValidPort(effectiveWGPort) else { return nil }
+        return URL(string: "http://\(trimmedHost):\(effectiveWGPort)")
+    }
+
+    private func openCSQTTWebPanel() {
+        guard let url = csqttWebPanelURL else { return }
+        openURL(url)
+    }
+
+    private func copyCSQTTWebPanelLink() {
+        guard let url = csqttWebPanelURL else { return }
+        UIPasteboard.general.string = url.absoluteString
+        resultTitle = "Link Copied"
+        resultMessage = "The CSQTT web panel link was copied to the clipboard."
+        showAlert = true
     }
 
     @ViewBuilder
