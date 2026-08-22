@@ -2,6 +2,57 @@ import Foundation
 import NetworkExtension
 import Combine
 
+enum TunnelOnDemandController {
+    static func refreshTrustedWiFiPreferences() {
+        let providerBundleIdentifier = VBridgeTunnelManagerStore.providerBundleIdentifier
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            if let error {
+                SharedLogger.error("Failed to load tunnel managers for trusted Wi-Fi refresh: \(error.localizedDescription)")
+                return
+            }
+
+            guard let manager = VBridgeTunnelManagerStore.preferredManager(
+                in: VBridgeTunnelManagerStore.matchingManagers(in: managers ?? [])
+            ) else {
+                return
+            }
+
+            applyTrustedWiFiSettings(to: manager)
+            manager.saveToPreferences { saveError in
+                if let saveError {
+                    SharedLogger.error("Failed to save trusted Wi-Fi preferences: \(saveError.localizedDescription)")
+                } else {
+                    SharedLogger.info("Trusted Wi-Fi on-demand preferences updated")
+                }
+            }
+        }
+    }
+
+    static func applyTrustedWiFiSettings(to manager: NETunnelProviderManager) {
+        let settings = TrustedWiFiStorage.load()
+        let ssids = TrustedWiFiStorage.normalizedSSIDs(settings.ssids)
+
+        guard settings.enabled, !ssids.isEmpty else {
+            manager.onDemandRules = nil
+            manager.isOnDemandEnabled = false
+            return
+        }
+
+        let trustedDisconnectRule = NEOnDemandRuleDisconnect()
+        trustedDisconnectRule.interfaceTypeMatch = .wiFi
+        trustedDisconnectRule.ssidMatch = ssids
+
+        let connectOtherWiFiRule = NEOnDemandRuleConnect()
+        connectOtherWiFiRule.interfaceTypeMatch = .wiFi
+
+        let connectCellularRule = NEOnDemandRuleConnect()
+        connectCellularRule.interfaceTypeMatch = .cellular
+
+        manager.onDemandRules = [trustedDisconnectRule, connectOtherWiFiRule, connectCellularRule]
+        manager.isOnDemandEnabled = true
+    }
+}
+
 struct TunnelStartConfiguration: Codable {
     var vkLink: String
     var peerAddr: String
@@ -312,6 +363,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             tunnelManager.protocolConfiguration = protocolConfiguration
             tunnelManager.localizedDescription = "VBridge"
             tunnelManager.isEnabled = true
+            TunnelOnDemandController.applyTrustedWiFiSettings(to: tunnelManager)
             tunnelManager.saveToPreferences { error in
                 if let error {
                     NSLog("Error (saveToPreferences): \(error)")

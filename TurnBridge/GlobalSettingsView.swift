@@ -3,6 +3,51 @@ import Foundation
 import Darwin
 import Network
 import UniformTypeIdentifiers
+import NetworkExtension
+
+struct TrustedWiFiSettings: Equatable {
+    var enabled: Bool
+    var ssids: [String]
+}
+
+enum TrustedWiFiStorage {
+    static let enabledKey = "trustedWiFi.enabled"
+    static let ssidsKey = "trustedWiFi.ssids"
+
+    static func load() -> TrustedWiFiSettings {
+        let defaults = UserDefaults.standard
+        let enabled = defaults.bool(forKey: enabledKey)
+        let ssids = normalizedSSIDs(defaults.stringArray(forKey: ssidsKey) ?? [])
+        return TrustedWiFiSettings(enabled: enabled, ssids: ssids)
+    }
+
+    static func save(_ settings: TrustedWiFiSettings) {
+        let defaults = UserDefaults.standard
+        defaults.set(settings.enabled, forKey: enabledKey)
+        defaults.set(normalizedSSIDs(settings.ssids), forKey: ssidsKey)
+    }
+
+    static func summary(_ settings: TrustedWiFiSettings) -> String {
+        let count = normalizedSSIDs(settings.ssids).count
+        if count == 0 {
+            return "No trusted Wi-Fi networks"
+        }
+        return count == 1 ? "1 trusted Wi-Fi network" : "\(count) trusted Wi-Fi networks"
+    }
+
+    static func normalizedSSIDs(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            result.append(trimmed)
+        }
+        return result
+    }
+}
 
 enum SplitTunnelMode: String, CaseIterable, Codable {
     case direct
@@ -598,6 +643,116 @@ struct SplitTunnelSettingsView: View {
     }
 }
 
+struct TrustedWiFiSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var settings = TrustedWiFiStorage.load()
+    @State private var showAddSSIDPrompt = false
+    @State private var newSSIDText = ""
+
+    let onCommit: ((TrustedWiFiSettings) -> Void)?
+
+    init(onCommit: ((TrustedWiFiSettings) -> Void)? = nil) {
+        self.onCommit = onCommit
+    }
+
+    var body: some View {
+        List {
+            Section(header: Text("Trusted Wi-Fi")) {
+                Toggle(isOn: enabledBinding) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Enabled")
+                        Text("When the device joins a trusted SSID, the VPN can stay disconnected and internet goes directly. Outside trusted Wi-Fi, on-demand rules reconnect the VPN automatically.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(TrustedWiFiStorage.summary(settings))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Add exact SSID names manually. These rules are applied through the system VPN manager.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+
+            if settings.ssids.isEmpty {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No trusted SSIDs yet")
+                            .font(.headline)
+                        Text("Add the Wi-Fi names where VBridge should stand by and let traffic go directly instead of keeping the VPN active.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                }
+            } else {
+                Section(header: Text("SSIDs")) {
+                    ForEach(settings.ssids, id: \.self) { ssid in
+                        Text(ssid)
+                            .font(.body)
+                    }
+                    .onDelete(perform: deleteSSIDs)
+                }
+            }
+        }
+        .navigationTitle("Trusted Wi-Fi")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button(action: {
+                    newSSIDText = ""
+                    showAddSSIDPrompt = true
+                }) {
+                    Image(systemName: "plus")
+                }
+
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+        .alert("Add Trusted SSID", isPresented: $showAddSSIDPrompt) {
+            TextField("Home Wi-Fi", text: $newSSIDText)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+            Button("Cancel", role: .cancel) {}
+            Button("Add") {
+                addSSID(newSSIDText)
+            }
+        } message: {
+            Text("Enter the exact Wi-Fi network name (SSID).")
+        }
+        .onDisappear {
+            onCommit?(settings)
+        }
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { settings.enabled },
+            set: { newValue in
+                settings.enabled = newValue
+                TrustedWiFiStorage.save(settings)
+            }
+        )
+    }
+
+    private func addSSID(_ value: String) {
+        settings.ssids = TrustedWiFiStorage.normalizedSSIDs(settings.ssids + [value])
+        TrustedWiFiStorage.save(settings)
+    }
+
+    private func deleteSSIDs(at offsets: IndexSet) {
+        settings.ssids.remove(atOffsets: offsets)
+        TrustedWiFiStorage.save(settings)
+    }
+}
+
 private struct SplitTunnelRuleListView: View {
     @Binding var settings: SplitTunnelSettings
 
@@ -815,6 +970,7 @@ struct GlobalSettingsView: View {
     @AppStorage("appTheme") private var appTheme = "system"
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
+    @State private var trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
 
     var body: some View {
         Form {
@@ -868,6 +1024,20 @@ struct GlobalSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Split-Tunneling")
                         Text(SplitTunnelStorage.ruleCountSummary())
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                NavigationLink(
+                    destination: TrustedWiFiSettingsView { settings in
+                        trustedWiFiSummary = TrustedWiFiStorage.summary(settings)
+                        TunnelOnDemandController.refreshTrustedWiFiPreferences()
+                    }
+                ) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Trusted Wi-Fi")
+                        Text(trustedWiFiSummary)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -949,6 +1119,9 @@ struct GlobalSettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
+        }
     }
 }
 
