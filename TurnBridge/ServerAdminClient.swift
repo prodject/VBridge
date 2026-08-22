@@ -2,12 +2,27 @@ import Foundation
 import WireGuardKitGo
 import UIKit
 
+enum ServerManagementTarget: Sendable {
+    case wdtt(ServerAdminTarget)
+    case csqtt(CSQTTAdminTarget)
+}
+
 struct ServerAdminTarget: Encodable, Sendable {
     var host: String
     var user: String
     var password: String
     var port: Int
     var mainPassword: String
+}
+
+struct CSQTTAdminTarget: Encodable, Sendable {
+    var host: String
+    var user: String
+    var password: String
+    var port: Int
+    var webPort: Int
+    var webUser: String
+    var webPassword: String
 }
 
 struct ServerAdminClientInfo: Decodable, Identifiable, Sendable {
@@ -98,6 +113,21 @@ private struct ServerAdminBridgeRequest: Encodable, Sendable {
     var days: Int?
     var expiresAt: Int64?
     var newPassword: String?
+}
+
+private struct CSQTTAdminBridgeRequest: Encodable, Sendable {
+    var action: String
+    var host: String
+    var user: String
+    var password: String
+    var port: Int
+    var webPort: Int
+    var webUser: String
+    var webPassword: String
+    var clientPassword: String?
+    var label: String?
+    var ports: String?
+    var days: Int?
 }
 
 extension ServerAdminClientInfo {
@@ -318,6 +348,132 @@ enum ServerAdminBridge {
             return "Client password must not match the main password."
         case "не удалось создать уникальный пароль":
             return "Failed to generate a unique client password."
+        default:
+            return trimmed
+        }
+    }
+}
+
+enum CSQTTAdminAction: String {
+    case list
+    case create
+    case update
+    case delete
+    case unbind
+    case activate
+    case deactivate
+}
+
+enum CSQTTAdminBridge {
+    static func list(_ target: CSQTTAdminTarget) async throws -> [ServerAdminClientInfo] {
+        let response = try await call(CSQTTAdminBridgeRequest(
+            action: CSQTTAdminAction.list.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            webPort: target.webPort,
+            webUser: target.webUser,
+            webPassword: target.webPassword
+        ))
+        return response.state?.passwords ?? []
+    }
+
+    static func create(_ target: CSQTTAdminTarget, label: String, ports: String, days: Int) async throws -> ServerAdminEnvelope {
+        try await call(CSQTTAdminBridgeRequest(
+            action: CSQTTAdminAction.create.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            webPort: target.webPort,
+            webUser: target.webUser,
+            webPassword: target.webPassword,
+            label: label.isEmpty ? nil : label,
+            ports: ports.isEmpty ? nil : ports,
+            days: days
+        ))
+    }
+
+    static func update(_ target: CSQTTAdminTarget, clientPassword: String, label: String, ports: String, days: Int) async throws -> ServerAdminEnvelope {
+        try await call(CSQTTAdminBridgeRequest(
+            action: CSQTTAdminAction.update.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            webPort: target.webPort,
+            webUser: target.webUser,
+            webPassword: target.webPassword,
+            clientPassword: clientPassword,
+            label: label.isEmpty ? nil : label,
+            ports: ports.isEmpty ? nil : ports,
+            days: days
+        ))
+    }
+
+    static func run(_ action: CSQTTAdminAction, target: CSQTTAdminTarget, clientPassword: String) async throws -> ServerAdminEnvelope {
+        try await call(CSQTTAdminBridgeRequest(
+            action: action.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            webPort: target.webPort,
+            webUser: target.webUser,
+            webPassword: target.webPassword,
+            clientPassword: clientPassword
+        ))
+    }
+
+    static func quickLink(_ target: CSQTTAdminTarget, client: ServerAdminClientInfo) -> String? {
+        let ports = (client.ports?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? client.ports! : "46000,46001,0")
+        let parts = ports.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let dtlsPort = parts.first.flatMap(Int.init) ?? 46000
+        var components = URLComponents()
+        components.scheme = "csqtt"
+        components.user = client.password
+        components.host = target.host
+        components.port = dtlsPort
+        if let label = client.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            components.queryItems = [URLQueryItem(name: "name", value: label)]
+        }
+        return components.url?.absoluteString
+    }
+
+    private static func call(_ request: CSQTTAdminBridgeRequest) async throws -> ServerAdminEnvelope {
+        try await Task.detached(priority: .userInitiated) {
+            let data = try JSONEncoder().encode(request)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw NSError(domain: "CSQTTAdminBridge", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode CSQTT admin request."])
+            }
+            let pointer = json.withCString {
+                VBridgeWGCSQTTAdmin(UnsafeMutablePointer(mutating: $0))
+            }
+            guard let pointer else {
+                throw NSError(domain: "CSQTTAdminBridge", code: 2, userInfo: [NSLocalizedDescriptionKey: "CSQTT admin bridge returned an empty response."])
+            }
+            defer { VBridgeWGFreeCString(pointer) }
+            let responseJSON = String(cString: pointer)
+            guard let responseData = responseJSON.data(using: .utf8) else {
+                throw NSError(domain: "CSQTTAdminBridge", code: 3, userInfo: [NSLocalizedDescriptionKey: "CSQTT admin bridge returned invalid UTF-8."])
+            }
+            let decoder = JSONDecoder()
+            let envelope = try decoder.decode(ServerAdminEnvelope.self, from: responseData)
+            if !envelope.ok {
+                throw NSError(domain: "CSQTTAdminBridge", code: 4, userInfo: [NSLocalizedDescriptionKey: localizedMessage(envelope.message)])
+            }
+            return envelope
+        }.value
+    }
+
+    nonisolated private static func localizedMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed {
+        case "invalid credentials":
+            return "Invalid CSQTT web login or password."
+        case "client password is empty":
+            return "Client password is required."
         default:
             return trimmed
         }

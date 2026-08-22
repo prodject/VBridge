@@ -31,6 +31,8 @@ type deployRequest struct {
 	DeployScript     string `json:"deployScriptPath"`
 	ServerBinary     string `json:"serverBinaryPath"`
 	MainPassword     string `json:"mainPassword"`
+	CSQTTWebUser     string `json:"csqttWebUser"`
+	CSQTTWebPassword string `json:"csqttWebPassword"`
 	AdminID          string `json:"adminId"`
 	BotToken         string `json:"botToken"`
 	DTLSPort         int    `json:"dtlsPort"`
@@ -61,6 +63,8 @@ type deployResponse struct {
 	DNS1           string `json:"dns1,omitempty"`
 	DNS2           string `json:"dns2,omitempty"`
 	MainPassword   string `json:"mainPassword,omitempty"`
+	CSQTTWebUser   string `json:"csqttWebUser,omitempty"`
+	CSQTTWebPassword string `json:"csqttWebPassword,omitempty"`
 	AdminID        string `json:"adminId,omitempty"`
 	BotToken       string `json:"botToken,omitempty"`
 }
@@ -75,6 +79,8 @@ type deployStatusChecks struct {
 	DNS1           string
 	DNS2           string
 	MainPassword   string
+	CSQTTWebUser   string
+	CSQTTWebPassword string
 	AdminID        string
 	BotToken       string
 	MaxPasswords   int
@@ -668,30 +674,37 @@ func uploadDeployFile(client *ssh.Client, localPath, remotePath string, mode os.
 
 func (r deployRequest) remoteCommand() string {
 	if r.isCSQTT() {
-		webPass := strings.TrimSpace(r.MainPassword)
+		webUser := strings.TrimSpace(r.CSQTTWebUser)
+		if webUser == "" {
+			webUser = "admin"
+		}
+		webPass := strings.TrimSpace(r.CSQTTWebPassword)
 		switch r.Action {
 		case "uninstall":
 			return fmt.Sprintf(
-				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh uninstall",
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh uninstall",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
 		case "update_preserve":
 			return fmt.Sprintf(
-				"env CSQTT_PRESERVE_CONFIG=1 CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				"env CSQTT_PRESERVE_CONFIG=1 CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
 		default:
 			return fmt.Sprintf(
-				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
+				"env CSQTT_PEER_PORT=%d CSQTT_WEB_PORT=%d CSQTT_SSH_PORT=%d CSQTT_WEB_USER=%s CSQTT_WEB_PASS=%s bash /tmp/vbridge-csqtt-deploy.sh install",
 				r.DTLSPort,
 				r.WGPort,
 				r.Port,
+				shellQuoteDeploy(webUser),
 				shellQuoteDeploy(webPass),
 			)
 		}

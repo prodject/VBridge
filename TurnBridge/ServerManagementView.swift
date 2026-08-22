@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import CoreImage.CIFilterBuiltins
 
 struct ServerManagementView: View {
-    let target: ServerAdminTarget?
+    let target: ServerManagementTarget?
     let canConnect: Bool
 
     @State private var isLoadingClients = false
@@ -50,6 +50,7 @@ struct ServerManagementView: View {
                     Spacer()
 
                     Button {
+                        newClientPorts = defaultPortsValue
                         showCreateClientSheet = true
                     } label: {
                         Label("New Client", systemImage: "plus")
@@ -98,10 +99,10 @@ struct ServerManagementView: View {
                                     }
                                     .buttonStyle(.bordered)
 
-                                    Button("Share") {
-                                        shareClient(client)
-                                    }
-                                    .buttonStyle(.bordered)
+                    Button("Share") {
+                        shareClient(client)
+                    }
+                    .buttonStyle(.bordered)
 
                                     Button("Quick Link") {
                                         shareQuickLink(client)
@@ -135,7 +136,7 @@ struct ServerManagementView: View {
                 }
             }
 
-            if canManage {
+            if canManage && isWDTTManagement {
                 Section(header: Text("Cleanup")) {
                     Button("Cleanup Expired") {
                         runGlobalAction(.cleanupExpired)
@@ -156,7 +157,7 @@ struct ServerManagementView: View {
 
             if !canManage {
                 Section {
-                    Text("Fill in server host, SSH password, and WDTT main password in Deploy before opening management.")
+                    Text(managementRequirementsText)
                         .foregroundColor(.secondary)
                 }
             }
@@ -200,15 +201,19 @@ struct ServerManagementView: View {
                 Form {
                     Section(header: Text("Client")) {
                         TextField("Label", text: $newClientLabel)
-                        TextField("VK Hash", text: $newClientHash)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                        if isWDTTManagement {
+                            TextField("VK Hash", text: $newClientHash)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                         TextField("Ports", text: $newClientPorts)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        TextField("Password", text: $newClientPassword)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                        if isWDTTManagement {
+                            TextField("Password", text: $newClientPassword)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Duration")
                                 .font(.subheadline)
@@ -259,9 +264,11 @@ struct ServerManagementView: View {
                             .buttonStyle(.bordered)
                         }
                         TextField("Label", text: $editedLabel)
-                        TextField("VK Hash", text: $editedHash)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                        if isWDTTManagement {
+                            TextField("VK Hash", text: $editedHash)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                         TextField("Ports", text: $editedPorts)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -274,10 +281,12 @@ struct ServerManagementView: View {
                         }
                     }
 
-                    Section(header: Text("Password")) {
-                        TextField("New Password", text: $editedNewPassword)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                    if isWDTTManagement {
+                        Section(header: Text("Password")) {
+                            TextField("New Password", text: $editedNewPassword)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                     }
 
                     Section {
@@ -309,12 +318,32 @@ struct ServerManagementView: View {
         canConnect && target != nil
     }
 
+    private var isWDTTManagement: Bool {
+        if case .some(.wdtt) = target {
+            return true
+        }
+        return false
+    }
+
+    private var managementRequirementsText: String {
+        if isWDTTManagement {
+            return "Fill in server host, SSH password, and WDTT main password in Deploy before opening management."
+        }
+        return "Fill in server host, SSH password, CSQTT web login, and CSQTT web password in Deploy before opening management."
+    }
+
     private func refreshServerClients() {
         guard let target, !isLoadingClients else { return }
         isLoadingClients = true
         Task {
             do {
-                let clients = try await ServerAdminBridge.list(target)
+                let clients: [ServerAdminClientInfo]
+                switch target {
+                case .wdtt(let wdttTarget):
+                    clients = try await ServerAdminBridge.list(wdttTarget)
+                case .csqtt(let csqttTarget):
+                    clients = try await CSQTTAdminBridge.list(csqttTarget)
+                }
                 await MainActor.run {
                     serverClients = clients.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
                     isLoadingClients = false
@@ -332,20 +361,28 @@ struct ServerManagementView: View {
 
     private func createServerClient() {
         guard let target else { return }
-        let request = ServerAdminCreateRequest(
-            label: newClientLabel.trimmingCharacters(in: .whitespacesAndNewlines),
-            vkHash: newClientHash.trimmingCharacters(in: .whitespacesAndNewlines),
-            ports: normalizedPortsInput(newClientPorts),
-            days: newClientDays,
-            clientPassword: newClientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let trimmedLabel = newClientLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedHash = newClientHash.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPorts = normalizedPortsInput(newClientPorts)
+        let trimmedPassword = newClientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                _ = try await ServerAdminBridge.create(target, request: request)
+                switch target {
+                case .wdtt(let wdttTarget):
+                    _ = try await ServerAdminBridge.create(wdttTarget, request: ServerAdminCreateRequest(
+                        label: trimmedLabel,
+                        vkHash: trimmedHash,
+                        ports: trimmedPorts,
+                        days: newClientDays,
+                        clientPassword: trimmedPassword
+                    ))
+                case .csqtt(let csqttTarget):
+                    _ = try await CSQTTAdminBridge.create(csqttTarget, label: trimmedLabel, ports: trimmedPorts, days: newClientDays)
+                }
                 await MainActor.run {
                     newClientLabel = ""
                     newClientHash = ""
-                    newClientPorts = "56000,56001,9000"
+                    newClientPorts = defaultPortsValue
                     newClientDays = 30
                     newClientPassword = ""
                     showCreateClientSheet = false
@@ -365,7 +402,7 @@ struct ServerManagementView: View {
         editingClient = client
         editedLabel = client.label ?? ""
         editedHash = client.vkHash ?? ""
-        editedPorts = client.ports ?? "56000,56001,9000"
+        editedPorts = client.ports ?? defaultPortsValue
         editedNewPassword = ""
         if let expiresAt = client.expiresAt, expiresAt > 0 {
             let now = Int64(Date().timeIntervalSince1970)
@@ -396,36 +433,42 @@ struct ServerManagementView: View {
         let detailsNeedUpdate =
             trimmedLabel != (client.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines) ||
             trimmedHash != (client.vkHash ?? "").trimmingCharacters(in: .whitespacesAndNewlines) ||
-            trimmedPorts != (client.ports ?? "56000,56001,9000").trimmingCharacters(in: .whitespacesAndNewlines)
+            trimmedPorts != (client.ports ?? defaultPortsValue).trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                if detailsNeedUpdate {
-                    _ = try await ServerAdminBridge.update(target, request: ServerAdminUpdateRequest(
-                        clientPassword: client.password,
-                        label: trimmedLabel,
-                        vkHash: trimmedHash,
-                        ports: trimmedPorts,
-                        days: nil,
-                        expiresAt: nil,
-                        newPassword: ""
-                    ))
-                }
+                switch target {
+                case .wdtt(let wdttTarget):
+                    if detailsNeedUpdate {
+                        _ = try await ServerAdminBridge.update(wdttTarget, request: ServerAdminUpdateRequest(
+                            clientPassword: client.password,
+                            label: trimmedLabel,
+                            vkHash: trimmedHash,
+                            ports: trimmedPorts,
+                            days: nil,
+                            expiresAt: nil,
+                            newPassword: ""
+                        ))
+                    }
 
-                if expiryNeedsUpdate {
-                    _ = try await ServerAdminBridge.setExpiry(
-                        target,
-                        clientPassword: client.password,
-                        days: editedNeverExpires ? nil : editedExpiryDays,
-                        expiresAt: editedNeverExpires ? 0 : nil
-                    )
-                }
+                    if expiryNeedsUpdate {
+                        _ = try await ServerAdminBridge.setExpiry(
+                            wdttTarget,
+                            clientPassword: client.password,
+                            days: editedNeverExpires ? nil : editedExpiryDays,
+                            expiresAt: editedNeverExpires ? 0 : nil
+                        )
+                    }
 
-                if !trimmedPassword.isEmpty {
-                    _ = try await ServerAdminBridge.setPassword(
-                        target,
-                        clientPassword: client.password,
-                        newPassword: trimmedPassword
-                    )
+                    if !trimmedPassword.isEmpty {
+                        _ = try await ServerAdminBridge.setPassword(
+                            wdttTarget,
+                            clientPassword: client.password,
+                            newPassword: trimmedPassword
+                        )
+                    }
+                case .csqtt(let csqttTarget):
+                    let days = editedNeverExpires ? 0 : editedExpiryDays
+                    _ = try await CSQTTAdminBridge.update(csqttTarget, clientPassword: client.password, label: trimmedLabel, ports: trimmedPorts, days: days)
                 }
 
                 await MainActor.run {
@@ -446,7 +489,13 @@ struct ServerManagementView: View {
         guard let target else { return }
         Task {
             do {
-                _ = try await ServerAdminBridge.run(action, target: target, clientPassword: clientPassword)
+                switch target {
+                case .wdtt(let wdttTarget):
+                    _ = try await ServerAdminBridge.run(action, target: wdttTarget, clientPassword: clientPassword)
+                case .csqtt(let csqttTarget):
+                    let csqttAction: CSQTTAdminAction = (action == .unbind) ? .unbind : (action == .delete ? .delete : (action == .activate ? .activate : .deactivate))
+                    _ = try await CSQTTAdminBridge.run(csqttAction, target: csqttTarget, clientPassword: clientPassword)
+                }
                 await MainActor.run {
                     refreshServerClients()
                 }
@@ -464,7 +513,8 @@ struct ServerManagementView: View {
         guard let target else { return }
         Task {
             do {
-                let response = try await ServerAdminBridge.run(action, target: target)
+                guard case .wdtt(let wdttTarget) = target else { return }
+                let response = try await ServerAdminBridge.run(action, target: wdttTarget)
                 await MainActor.run {
                     resultTitle = "Management Complete"
                     resultMessage = response.message
@@ -482,15 +532,28 @@ struct ServerManagementView: View {
     }
 
     private func shareClient(_ client: ServerAdminClientInfo) {
-        do {
-            let transfer = try ServerAdminBridge.exportClient(client)
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("wdtt-client-\(client.password).json")
-            try transfer.write(to: url, atomically: true, encoding: .utf8)
-            shareItems = [url]
-        } catch {
-            resultTitle = "Export Failed"
-            resultMessage = error.localizedDescription
-            showAlert = true
+        switch target {
+        case .wdtt:
+            do {
+                let transfer = try ServerAdminBridge.exportClient(client)
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("wdtt-client-\(client.password).json")
+                try transfer.write(to: url, atomically: true, encoding: .utf8)
+                shareItems = [url]
+            } catch {
+                resultTitle = "Export Failed"
+                resultMessage = error.localizedDescription
+                showAlert = true
+            }
+        case .csqtt(let csqttTarget):
+            guard let link = CSQTTAdminBridge.quickLink(csqttTarget, client: client) else {
+                resultTitle = "Share Failed"
+                resultMessage = "This client does not have enough data for a quick link."
+                showAlert = true
+                return
+            }
+            shareItems = [link]
+        case .none:
+            return
         }
     }
 
@@ -543,6 +606,7 @@ struct ServerManagementView: View {
         guard let target else { return }
         Task {
             do {
+                guard case .wdtt(let wdttTarget) = target else { return }
                 let access = url.startAccessingSecurityScopedResource()
                 defer {
                     if access {
@@ -553,7 +617,7 @@ struct ServerManagementView: View {
                 guard let text = String(data: data, encoding: .utf8) else {
                     throw NSError(domain: "ServerManagementView", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected file is not valid UTF-8 text."])
                 }
-                _ = try await ServerAdminBridge.importClient(target, transferText: text)
+                _ = try await ServerAdminBridge.importClient(wdttTarget, transferText: text)
                 await MainActor.run {
                     resultTitle = "Import Complete"
                     resultMessage = "The client was imported."
@@ -574,6 +638,10 @@ struct ServerManagementView: View {
         guard let target else {
             return nil
         }
+        if case .csqtt(let csqttTarget) = target {
+            return CSQTTAdminBridge.quickLink(csqttTarget, client: client)
+        }
+        guard case .wdtt(let wdttTarget) = target else { return nil }
         let rawHash = client.vkHash?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let ports = (client.ports?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? client.ports! : "56000,56001,9000")
         let parts = ports.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -583,7 +651,7 @@ struct ServerManagementView: View {
         components.host = "connect"
         var queryItems = [
             URLQueryItem(name: "v", value: "1"),
-            URLQueryItem(name: "host", value: target.host),
+            URLQueryItem(name: "host", value: wdttTarget.host),
             URLQueryItem(name: "dtls", value: parts[0]),
             URLQueryItem(name: "wg", value: parts[1]),
             URLQueryItem(name: "local", value: parts[2]),
@@ -612,6 +680,10 @@ struct ServerManagementView: View {
     private func trafficText(for client: ServerAdminClientInfo) -> String {
         let total = max(0, (client.downBytes ?? 0) + (client.upBytes ?? 0))
         return "Traffic: \(formatBytes(total))"
+    }
+
+    private var defaultPortsValue: String {
+        isWDTTManagement ? "56000,56001,9000" : "46000,46001,0"
     }
 
     private func formatBytes(_ bytes: Int64) -> String {

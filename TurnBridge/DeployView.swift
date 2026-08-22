@@ -26,6 +26,7 @@ private struct DeployRequest: Encodable, Sendable {
     var deployScriptPath: String
     var serverBinaryPath: String
     var mainPassword: String
+    var csqttWebUser: String
     var csqttWebPassword: String
     var adminId: String
     var botToken: String
@@ -57,6 +58,7 @@ private struct DeployResponse: Decodable, Sendable {
     var dns1: String?
     var dns2: String?
     var mainPassword: String?
+    var csqttWebUser: String?
     var csqttWebPassword: String?
     var adminId: String?
     var botToken: String?
@@ -75,12 +77,19 @@ struct DeployView: View {
     @AppStorage("deploy.dns1") private var dns1 = "1.1.1.1"
     @AppStorage("deploy.dns2") private var dns2 = "1.0.0.1"
     @AppStorage("deploy.mainPassword") private var mainPassword = ""
+    @AppStorage("deploy.csqttWebUser") private var csqttWebUser = "admin"
     @AppStorage("deploy.csqttWebPassword") private var csqttWebPassword = ""
     @AppStorage("deploy.adminId") private var adminId = ""
     @AppStorage("deploy.botToken") private var botToken = ""
     @AppStorage("deploy.manualPorts") private var manualPorts = false
     @AppStorage("deploy.dtlsPort") private var dtlsPort = 56000
     @AppStorage("deploy.wgPort") private var wgPort = 56001
+    @AppStorage("deploy.wdttManualPorts") private var wdttManualPorts = false
+    @AppStorage("deploy.wdttDtlsPort") private var wdttDtlsPort = 56000
+    @AppStorage("deploy.wdttWgPort") private var wdttWgPort = 56001
+    @AppStorage("deploy.csqttManualPorts") private var csqttManualPorts = false
+    @AppStorage("deploy.csqttPeerPort") private var csqttPeerPort = 46000
+    @AppStorage("deploy.csqttWebPort") private var csqttWebPort = 46002
     @AppStorage("deploy.serverArch") private var serverArch = "amd64"
     @AppStorage("deploy.maxPasswords") private var maxPasswords = 50
     @AppStorage("deploy.maxWorkersPerAccess") private var maxWorkersPerAccess = 0
@@ -105,6 +114,7 @@ struct DeployView: View {
     @State private var shareStateURL: URL?
     @State private var isCheckingServerStatus = false
     @State private var didConsumeLaunchAction = false
+    @State private var lastLoadedDeployKind: DeployServerKind?
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
@@ -150,9 +160,7 @@ struct DeployView: View {
 
             if hasSavedServerSettings {
                 Section(header: Text("Server Status")) {
-                    if selectedDeployKind == .wdtt {
-                        DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
-                    }
+                    DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: installedStatusTitle, value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
                 }
@@ -176,7 +184,7 @@ struct DeployView: View {
                 Section(header: Text("Secrets")) {
                     secretField("WDTT Main Password", text: $mainPassword)
 
-                    if !mainPassword.isEmpty && !isMainPasswordValid {
+                    if !mainPassword.isEmpty && !isSecretValueValid(mainPassword) {
                         Text("Allowed: letters, digits, and _ . ! ? : # - /")
                             .font(.caption)
                             .foregroundColor(.red)
@@ -187,9 +195,10 @@ struct DeployView: View {
                 }
             } else {
                 Section(header: Text("Web Panel")) {
+                    copyableTextField("CSQTT Web Login", text: $csqttWebUser)
                     secretField("CSQTT Web Password", text: $csqttWebPassword)
 
-                    if !csqttWebPassword.isEmpty && !isMainPasswordValid {
+                    if !csqttWebPassword.isEmpty && !isSecretValueValid(csqttWebPassword) {
                         Text("Allowed: letters, digits, and _ . ! ? : # - /")
                             .font(.caption)
                             .foregroundColor(.red)
@@ -244,16 +253,19 @@ struct DeployView: View {
             }
 
             Section {
-                if selectedDeployKind == .wdtt {
+                if selectedDeployKind == .wdtt || selectedDeployKind == .csqtt {
                     NavigationLink {
                         ServerManagementView(
-                            target: serverAdminTarget,
+                            target: serverManagementTarget,
                             canConnect: canConnect
                         )
                     } label: {
                         Label("Management", systemImage: "person.3")
                     }
+                    .disabled(serverManagementTarget == nil)
+                }
 
+                if selectedDeployKind == .wdtt {
                     NavigationLink {
                         OutboundManagementView(
                             target: serverOutboundTarget,
@@ -456,22 +468,20 @@ struct DeployView: View {
             Text("The app will uninstall \(selectedDeployKind.title) from the server and then install it again using the current Deploy settings.")
         }
         .task {
+            syncVisiblePorts(for: selectedDeployKind)
             await refreshSavedServerStatus()
             consumePendingLaunchActionIfNeeded()
         }
         .onChange(of: deployKind) { newValue in
             guard let kind = DeployServerKind(rawValue: newValue) else { return }
+            if let previousKind = lastLoadedDeployKind {
+                persistVisiblePorts(for: previousKind)
+            }
+            syncVisiblePorts(for: kind)
             if kind == .csqtt {
                 if serverArch != "amd64" {
                     serverArch = "amd64"
                 }
-                if !manualPorts {
-                    dtlsPort = 46000
-                    wgPort = 46002
-                }
-            } else if !manualPorts {
-                dtlsPort = 56000
-                wgPort = 56001
             }
 
             clearStatusIndicators()
@@ -479,6 +489,15 @@ struct DeployView: View {
                 await refreshSavedServerStatus()
                 consumePendingLaunchActionIfNeeded()
             }
+        }
+        .onChange(of: manualPorts) { _ in
+            persistVisiblePorts(for: selectedDeployKind)
+        }
+        .onChange(of: dtlsPort) { _ in
+            persistVisiblePorts(for: selectedDeployKind)
+        }
+        .onChange(of: wgPort) { _ in
+            persistVisiblePorts(for: selectedDeployKind)
         }
         .sheet(isPresented: Binding(
             get: { shareLogsURL != nil },
@@ -563,7 +582,10 @@ struct DeployView: View {
     }
 
     private var canInstall: Bool {
-        canConnect && isValidPort(effectiveDTLSPort) && isValidPort(effectiveWGPort) && (selectedDeployKind == .csqtt || isMainPasswordValid)
+        canConnect &&
+        isValidPort(effectiveDTLSPort) &&
+        isValidPort(effectiveWGPort) &&
+        (selectedDeployKind == .wdtt ? isSecretValueValid(mainPassword) : isSecretValueValid(csqttWebPassword))
     }
 
     private var canUpdatePreserve: Bool {
@@ -578,9 +600,9 @@ struct DeployView: View {
         selectedDeployKind == .wdtt && canConnect
     }
 
-    private var isMainPasswordValid: Bool {
+    private func isSecretValueValid(_ value: String) -> Bool {
         let pattern = #"^[a-zA-Z0-9_.!?:#/-]+$"#
-        return mainPassword.range(of: pattern, options: .regularExpression) != nil
+        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private var isSSHPortValid: Bool {
@@ -732,6 +754,7 @@ struct DeployView: View {
             dns1: dns1,
             dns2: dns2,
             mainPassword: mainPassword,
+            csqttWebUser: csqttWebUser,
             csqttWebPassword: csqttWebPassword,
             adminId: adminId,
             botToken: botToken,
@@ -825,6 +848,7 @@ struct DeployView: View {
             deployScriptPath: scriptURL?.path ?? "",
             serverBinaryPath: binaryURL?.path ?? "",
             mainPassword: mainPassword,
+            csqttWebUser: csqttWebUser.trimmingCharacters(in: .whitespacesAndNewlines),
             csqttWebPassword: csqttWebPassword,
             adminId: adminId.trimmingCharacters(in: .whitespacesAndNewlines),
             botToken: botToken.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -870,6 +894,11 @@ struct DeployView: View {
         if selectedDeployKind == .csqtt, csqttWebPassword.isEmpty, let value = nonEmpty(response.csqttWebPassword) {
             csqttWebPassword = value
         }
+        if selectedDeployKind == .csqtt,
+           csqttWebUser.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let value = nonEmpty(response.csqttWebUser) {
+            csqttWebUser = value
+        }
         if adminId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.adminId) {
             adminId = value
         }
@@ -893,6 +922,40 @@ struct DeployView: View {
         serverConnected = nil
         wdttInstalled = nil
         readyToConnect = nil
+    }
+
+    private func syncVisiblePorts(for kind: DeployServerKind) {
+        switch kind {
+        case .wdtt:
+            manualPorts = wdttManualPorts
+            dtlsPort = wdttDtlsPort
+            wgPort = wdttWgPort
+        case .csqtt:
+            manualPorts = csqttManualPorts
+            dtlsPort = csqttPeerPort
+            wgPort = csqttWebPort
+        }
+        lastLoadedDeployKind = kind
+    }
+
+    private func persistVisiblePorts(for kind: DeployServerKind) {
+        switch kind {
+        case .wdtt:
+            wdttManualPorts = manualPorts
+            wdttDtlsPort = dtlsPort
+            wdttWgPort = wgPort
+        case .csqtt:
+            csqttManualPorts = manualPorts
+            csqttPeerPort = dtlsPort
+            csqttWebPort = wgPort
+        }
+
+        // Keep legacy shared keys aligned for compatibility with older installs/import flows.
+        if kind == selectedDeployKind {
+            manualPorts = manualPorts
+            dtlsPort = dtlsPort
+            wgPort = wgPort
+        }
     }
 
     private func consumePendingLaunchActionIfNeeded() {
@@ -931,6 +994,43 @@ struct DeployView: View {
             port: sshPort,
             mainPassword: trimmedMainPassword
         )
+    }
+
+    private var csqttAdminTarget: CSQTTAdminTarget? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedWebUser = csqttWebUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedWebPassword = csqttWebPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !trimmedHost.isEmpty,
+            !password.isEmpty,
+            !trimmedWebUser.isEmpty,
+            !trimmedWebPassword.isEmpty,
+            isSSHPortValid,
+            isValidPort(effectiveWGPort)
+        else {
+            return nil
+        }
+        return CSQTTAdminTarget(
+            host: trimmedHost,
+            user: trimmedUser.isEmpty ? "root" : trimmedUser,
+            password: password,
+            port: sshPort,
+            webPort: effectiveWGPort,
+            webUser: trimmedWebUser,
+            webPassword: trimmedWebPassword
+        )
+    }
+
+    private var serverManagementTarget: ServerManagementTarget? {
+        switch selectedDeployKind {
+        case .wdtt:
+            guard let target = serverAdminTarget else { return nil }
+            return .wdtt(target)
+        case .csqtt:
+            guard let target = csqttAdminTarget else { return nil }
+            return .csqtt(target)
+        }
     }
 
     private var serverOutboundTarget: ServerOutboundTarget? {
