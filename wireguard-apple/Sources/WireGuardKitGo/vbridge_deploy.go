@@ -198,6 +198,30 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.Action == "live_log" {
+		text, commandErr := runSSHCommand(
+			client,
+			rootDeployCommand(liveDeployLogCommand(req.isCSQTT()), req.Password),
+			20*time.Second,
+		)
+		if commandErr != nil {
+			return deployResponse{
+				OK:              false,
+				Status:          "error",
+				Message:         "live log fetch failed: " + commandErr.Error(),
+				Output:          text,
+				ServerConnected: true,
+			}
+		}
+		return deployResponse{
+			OK:              true,
+			Status:          "success",
+			Message:         deployLabel + " live log fetched",
+			Output:          text,
+			ServerConnected: true,
+		}
+	}
+
 	if req.Action == "export_logs" {
 		if req.isCSQTT() {
 			checks, text := checkCSQTTStatus(client)
@@ -559,7 +583,7 @@ func (r deployRequest) validate() error {
 	if r.DeployKind != "wdtt" && r.DeployKind != "csqtt" {
 		return fmt.Errorf("unsupported deploy kind %q", r.DeployKind)
 	}
-	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
+	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "live_log" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
 		return fmt.Errorf("unsupported deploy action %q", r.Action)
 	}
 	if r.Host == "" {
@@ -861,6 +885,17 @@ func deployExistingTunFlag(enabled bool, iface string) string {
 		return ""
 	}
 	return deployFlag("-existing-tun", iface)
+}
+
+func liveDeployLogCommand(isCSQTT bool) string {
+	logFile := "/var/log/wdtt-install.log"
+	if isCSQTT {
+		logFile = "/var/log/csqtt-install.log"
+	}
+	return strings.Join([]string{
+		"set -eu",
+		fmt.Sprintf("if [ -f %s ]; then tail -n 200 %s; fi", shellQuoteDeploy(logFile), shellQuoteDeploy(logFile)),
+	}, "; ")
 }
 
 func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {

@@ -238,7 +238,7 @@ do_install() {
     ensure_docker
     write_assets
     cd "$WORK_DIR"
-    compose_cmd up -d --build
+    compose_cmd up -d --build >>"$LOG_FILE" 2>&1
     log "[ok] CSQTT installed"
 }
 

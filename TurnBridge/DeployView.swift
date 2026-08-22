@@ -10,6 +10,7 @@ private enum DeployAction: String, Sendable {
     case reinstall
     case uninstall
     case status
+    case liveLog = "live_log"
     case exportLogs = "export_logs"
     case cleanupDevices = "cleanup_devices"
     case exportState = "export_state"
@@ -115,6 +116,7 @@ struct DeployView: View {
     @State private var isCheckingServerStatus = false
     @State private var didConsumeLaunchAction = false
     @State private var lastLoadedDeployKind: DeployServerKind?
+    @State private var liveOutputTask: Task<Void, Never>?
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
@@ -336,20 +338,21 @@ struct DeployView: View {
                         Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
                     }
                     .disabled(!canCleanupDevices)
-                    Button(role: .destructive) {
-                        showReinstallConfirmation = true
-                    } label: {
-                        Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(!canInstall)
-
-                    Button(role: .destructive) {
-                        run(.uninstall)
-                    } label: {
-                        Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
-                    }
-                    .disabled(!canConnect)
                 }
+
+                Button(role: .destructive) {
+                    showReinstallConfirmation = true
+                } label: {
+                    Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(!canInstall)
+
+                Button(role: .destructive) {
+                    run(.uninstall)
+                } label: {
+                    Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
+                }
+                .disabled(!canConnect)
             }
 
             if selectedDeployKind == .wdtt {
@@ -629,10 +632,12 @@ struct DeployView: View {
         isRunning = true
         currentAction = action
         output = ""
+        startLiveOutputPolling(for: request)
 
         Task {
             let response = await perform(request)
             await MainActor.run {
+                stopLiveOutputPolling()
                 isRunning = false
                 currentAction = nil
                 output = response.output
@@ -681,6 +686,7 @@ struct DeployView: View {
         isRunning = true
         currentAction = .reinstall
         output = ""
+        startLiveOutputPolling(for: installRequest)
 
         Task {
             let uninstallResponse = await perform(uninstallRequest)
@@ -696,6 +702,7 @@ struct DeployView: View {
 
             guard uninstallResponse.ok else {
                 await MainActor.run {
+                    stopLiveOutputPolling()
                     isRunning = false
                     currentAction = nil
                     output = combinedOutput
@@ -720,6 +727,7 @@ struct DeployView: View {
             }
 
             await MainActor.run {
+                stopLiveOutputPolling()
                 isRunning = false
                 currentAction = nil
                 output = combinedOutput
@@ -822,6 +830,39 @@ struct DeployView: View {
                 return DeployResponse(ok: false, status: "error", message: error.localizedDescription, output: "")
             }
         }.value
+    }
+
+    @MainActor
+    private func startLiveOutputPolling(for request: DeployRequest) {
+        stopLiveOutputPolling()
+        guard request.action == DeployAction.install.rawValue ||
+              request.action == DeployAction.updatePreserve.rawValue ||
+              request.action == DeployAction.uninstall.rawValue else {
+            return
+        }
+
+        liveOutputTask = Task {
+            while !Task.isCancelled {
+                var liveRequest = request
+                liveRequest.action = DeployAction.liveLog.rawValue
+                let response = await perform(liveRequest)
+                if Task.isCancelled {
+                    return
+                }
+                if !response.output.isEmpty {
+                    await MainActor.run {
+                        output = response.output
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    @MainActor
+    private func stopLiveOutputPolling() {
+        liveOutputTask?.cancel()
+        liveOutputTask = nil
     }
 
     private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
