@@ -1091,6 +1091,9 @@ struct ContentView: View {
             wdttClientIDMode: profile.wdttClientIDMode,
             wdttUseVKCallsPreflight: profile.wdttUseVKCallsPreflight,
             wdttTunnelMTU: profile.wdttTunnelMTU,
+            dnsMode: profile.dnsMode,
+            dnsPrimary: profile.dnsPrimary,
+            dnsSecondary: profile.dnsSecondary,
             csqttPassword: profile.csqttPassword,
             csqttWebPort: profile.csqttWebPort,
             csqttClientTag: profile.csqttClientTag,
@@ -2648,6 +2651,8 @@ struct ContentView: View {
         defaults.set(settings.dtlsPort, forKey: "deploy.dtlsPort")
         defaults.set(settings.wgPort, forKey: "deploy.wgPort")
         defaults.set(settings.serverArch, forKey: "deploy.serverArch")
+        defaults.set(settings.wdttExistingTunEnabled ?? false, forKey: "deploy.wdttExistingTunEnabled")
+        defaults.set(settings.wdttExistingTunName ?? "", forKey: "deploy.wdttExistingTunName")
     }
 
     private func importFromFilePicker() {
@@ -2745,6 +2750,9 @@ struct ContentView: View {
             wdttClientIDMode: config.wdttClientIDMode ?? "default",
             wdttUseVKCallsPreflight: config.wdttUseVKCallsPreflight ?? true,
             wdttTunnelMTU: config.wdttTunnelMTU,
+            dnsMode: VPNDNSMode(rawValue: config.dnsMode ?? "") ?? .server,
+            dnsPrimary: config.dnsPrimary ?? "",
+            dnsSecondary: config.dnsSecondary ?? "",
             csqttPassword: config.csqttPassword ?? "",
             csqttWebPort: config.csqttWebPort,
             csqttClientTag: config.csqttClientTag ?? "",

@@ -82,6 +82,30 @@ struct SettingsView: View {
                 }
             }
 
+            Section(header: Text("DNS")) {
+                Picker("DNS", selection: binding(\.dnsMode)) {
+                    ForEach(VPNDNSMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+
+                if profile.dnsMode == .custom {
+                    TextField("Primary DNS", text: binding(\.dnsPrimary))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .keyboardType(.numbersAndPunctuation)
+
+                    TextField("Secondary DNS", text: binding(\.dnsSecondary))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .keyboardType(.numbersAndPunctuation)
+                }
+
+                Text("Overrides the DNS applied inside the VPN for this profile. Server / Profile keeps the current WireGuard or provisioned DNS.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             if profile.transportMode == .srtpCommunity {
                 Section(header: Text("SRTP-Community")) {
                     TextField("WRAP Key Hex", text: binding(\.wrapKeyHex))
@@ -428,6 +452,9 @@ struct SettingsView: View {
             "wdttFingerprint": profile.wdttFingerprint,
             "wdttClientIDMode": profile.wdttClientIDMode,
             "wdttUseVKCallsPreflight": profile.wdttUseVKCallsPreflight,
+            "dnsMode": profile.dnsMode.rawValue,
+            "dnsPrimary": profile.dnsPrimary,
+            "dnsSecondary": profile.dnsSecondary,
             "csqttPassword": profile.csqttPassword,
             "csqttClientTag": profile.csqttClientTag,
             "csqttDeviceID": profile.csqttDeviceID,

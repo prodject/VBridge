@@ -42,6 +42,8 @@ type deployRequest struct {
 	MaxHandshakes    int    `json:"maxHandshakes"`
 	HandshakeRate    int    `json:"handshakeRate"`
 	MaxClientMbps    int    `json:"maxClientMbps"`
+	WDTTExistingTunEnabled bool `json:"wdttExistingTunEnabled"`
+	WDTTExistingTunName string `json:"wdttExistingTunName"`
 	StateArchiveBase64 string `json:"stateArchiveBase64"`
 }
 
@@ -711,6 +713,7 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-admin", r.AdminID),
 			deployFlag("-bot-token", r.BotToken),
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
+			deployExistingTunFlag(r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
 		}, " "))
 		return fmt.Sprintf(
 			"env WDTT_PRESERVE_DATA=1 WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
@@ -730,6 +733,7 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-admin", r.AdminID),
 			deployFlag("-bot-token", r.BotToken),
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
+			deployExistingTunFlag(r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
 		}, " "))
 		return fmt.Sprintf(
 			"env WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
@@ -823,6 +827,17 @@ func deployDNSValue(dns1, dns2 string) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+func deployExistingTunFlag(enabled bool, iface string) string {
+	if !enabled {
+		return ""
+	}
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return ""
+	}
+	return deployFlag("-existing-tun", iface)
 }
 
 func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {

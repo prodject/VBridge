@@ -41,6 +41,9 @@ struct TurnConfigImport: Codable {
     let wdttClientIDMode: String?
     let wdttUseVKCallsPreflight: Bool?
     let wdttTunnelMTU: Int?
+    let dnsMode: String?
+    let dnsPrimary: String?
+    let dnsSecondary: String?
     let csqttPassword: String?
     let csqttWebPort: Int?
     let csqttClientTag: String?
@@ -121,6 +124,8 @@ struct DeploySettingsLink: Codable {
     let dtlsPort: Int
     let wgPort: Int
     let serverArch: String
+    let wdttExistingTunEnabled: Bool?
+    let wdttExistingTunName: String?
 
     private enum CodingKeys: String, CodingKey {
         case version
@@ -139,6 +144,8 @@ struct DeploySettingsLink: Codable {
         case dtlsPort
         case wgPort
         case serverArch
+        case wdttExistingTunEnabled
+        case wdttExistingTunName
     }
 
     init(
@@ -157,7 +164,9 @@ struct DeploySettingsLink: Codable {
         manualPorts: Bool,
         dtlsPort: Int,
         wgPort: Int,
-        serverArch: String
+        serverArch: String,
+        wdttExistingTunEnabled: Bool? = nil,
+        wdttExistingTunName: String? = nil
     ) {
         self.version = version
         self.nonce = nonce
@@ -175,6 +184,8 @@ struct DeploySettingsLink: Codable {
         self.dtlsPort = dtlsPort
         self.wgPort = wgPort
         self.serverArch = serverArch
+        self.wdttExistingTunEnabled = wdttExistingTunEnabled
+        self.wdttExistingTunName = wdttExistingTunName
     }
 
     init(from decoder: Decoder) throws {
@@ -195,6 +206,8 @@ struct DeploySettingsLink: Codable {
         dtlsPort = try container.decode(Int.self, forKey: .dtlsPort)
         wgPort = try container.decode(Int.self, forKey: .wgPort)
         serverArch = try container.decode(String.self, forKey: .serverArch)
+        wdttExistingTunEnabled = try container.decodeIfPresent(Bool.self, forKey: .wdttExistingTunEnabled)
+        wdttExistingTunName = try container.decodeIfPresent(String.self, forKey: .wdttExistingTunName)
     }
 }
 

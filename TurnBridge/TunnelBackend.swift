@@ -21,6 +21,9 @@ struct TunnelStartConfiguration: Codable {
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
     var wdttTunnelMTU: Int?
+    var dnsMode: VPNDNSMode
+    var dnsPrimary: String
+    var dnsSecondary: String
     var csqttPassword: String
     var csqttWebPort: Int?
     var csqttClientTag: String
@@ -54,6 +57,9 @@ struct TunnelStartConfiguration: Codable {
             "wdttFingerprint": wdttFingerprint,
             "wdttClientIDMode": wdttClientIDMode,
             "wdttUseVKCallsPreflight": wdttUseVKCallsPreflight,
+            "dnsMode": dnsMode.rawValue,
+            "dnsPrimary": dnsPrimary,
+            "dnsSecondary": dnsSecondary,
             "csqttPassword": csqttPassword,
             "csqttClientTag": csqttClientTag,
             "csqttDeviceID": csqttDeviceID,

@@ -37,6 +37,8 @@ private struct DeployRequest: Encodable, Sendable {
     var maxHandshakes: Int
     var handshakeRate: Int
     var maxClientMbps: Int
+    var wdttExistingTunEnabled: Bool
+    var wdttExistingTunName: String
     var stateArchiveBase64: String
 }
 
@@ -80,6 +82,8 @@ struct DeployView: View {
     @AppStorage("deploy.maxHandshakes") private var maxHandshakes = 32
     @AppStorage("deploy.handshakeRate") private var handshakeRate = 24
     @AppStorage("deploy.maxClientMbps") private var maxClientMbps = 0
+    @AppStorage("deploy.wdttExistingTunEnabled") private var wdttExistingTunEnabled = false
+    @AppStorage("deploy.wdttExistingTunName") private var wdttExistingTunName = ""
 
     @State private var isRunning = false
     @State private var currentAction: DeployAction?
@@ -317,6 +321,18 @@ struct DeployView: View {
 
             if selectedDeployKind == .wdtt {
                 Section(header: Text("Advanced Server")) {
+                    Toggle("Use Existing TUN Interface", isOn: $wdttExistingTunEnabled)
+
+                    if wdttExistingTunEnabled {
+                        TextField("Existing TUN Interface", text: $wdttExistingTunName)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        Text("Passes `-existing-tun <iface>` to WDTT deploy arguments so the server can try to route through an already running TUN interface on the VPS.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     Picker("Max Passwords", selection: $maxPasswords) {
                         ForEach(maxPasswordsOptions, id: \.self) { value in
                             Text("\(value)").tag(value)
@@ -693,7 +709,9 @@ struct DeployView: View {
             manualPorts: manualPorts,
             dtlsPort: dtlsPort,
             wgPort: wgPort,
-            serverArch: serverArch
+            serverArch: serverArch,
+            wdttExistingTunEnabled: wdttExistingTunEnabled,
+            wdttExistingTunName: wdttExistingTunName
         )
         do {
             UIPasteboard.general.string = try ConfigParser.exportDeploySettings(settings)
@@ -789,6 +807,8 @@ struct DeployView: View {
             maxHandshakes: maxHandshakes,
             handshakeRate: handshakeRate,
             maxClientMbps: maxClientMbps,
+            wdttExistingTunEnabled: wdttExistingTunEnabled,
+            wdttExistingTunName: wdttExistingTunName.trimmingCharacters(in: .whitespacesAndNewlines),
             stateArchiveBase64: ""
         )
     }

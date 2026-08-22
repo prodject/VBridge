@@ -14,6 +14,28 @@ struct SeededTURNCredentials: Codable, Equatable {
     }
 }
 
+enum VPNDNSMode: String, Codable, CaseIterable, Identifiable {
+    case server
+    case cloudflare
+    case google
+    case quad9
+    case adguard
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .server: return "Server / Profile"
+        case .cloudflare: return "Cloudflare"
+        case .google: return "Google"
+        case .quad9: return "Quad9"
+        case .adguard: return "AdGuard"
+        case .custom: return "Custom"
+        }
+    }
+}
+
 enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
     case wg
     case srtpCommunity
@@ -57,6 +79,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
     var wdttTunnelMTU: Int?
+    var dnsMode: VPNDNSMode
+    var dnsPrimary: String
+    var dnsSecondary: String
     var csqttPassword: String
     var csqttWebPort: Int?
     var csqttClientTag: String
@@ -85,6 +110,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case wdttClientIDMode
         case wdttUseVKCallsPreflight
         case wdttTunnelMTU
+        case dnsMode
+        case dnsPrimary
+        case dnsSecondary
         case csqttPassword
         case csqttWebPort
         case csqttClientTag
@@ -114,6 +142,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttClientIDMode: String = "default",
         wdttUseVKCallsPreflight: Bool = true,
         wdttTunnelMTU: Int? = nil,
+        dnsMode: VPNDNSMode = .server,
+        dnsPrimary: String = "",
+        dnsSecondary: String = "",
         csqttPassword: String = "",
         csqttWebPort: Int? = nil,
         csqttClientTag: String = "",
@@ -141,6 +172,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.wdttClientIDMode = wdttClientIDMode
         self.wdttUseVKCallsPreflight = wdttUseVKCallsPreflight
         self.wdttTunnelMTU = wdttTunnelMTU
+        self.dnsMode = dnsMode
+        self.dnsPrimary = dnsPrimary
+        self.dnsSecondary = dnsSecondary
         self.csqttPassword = csqttPassword
         self.csqttWebPort = csqttWebPort
         self.csqttClientTag = csqttClientTag
@@ -171,6 +205,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttClientIDMode = try container.decodeIfPresent(String.self, forKey: .wdttClientIDMode) ?? "default"
         wdttUseVKCallsPreflight = try container.decodeIfPresent(Bool.self, forKey: .wdttUseVKCallsPreflight) ?? true
         wdttTunnelMTU = try container.decodeIfPresent(Int.self, forKey: .wdttTunnelMTU)
+        dnsMode = try container.decodeIfPresent(VPNDNSMode.self, forKey: .dnsMode) ?? .server
+        dnsPrimary = try container.decodeIfPresent(String.self, forKey: .dnsPrimary) ?? ""
+        dnsSecondary = try container.decodeIfPresent(String.self, forKey: .dnsSecondary) ?? ""
         csqttPassword = try container.decodeIfPresent(String.self, forKey: .csqttPassword) ?? ""
         csqttWebPort = try container.decodeIfPresent(Int.self, forKey: .csqttWebPort)
         csqttClientTag = try container.decodeIfPresent(String.self, forKey: .csqttClientTag) ?? ""

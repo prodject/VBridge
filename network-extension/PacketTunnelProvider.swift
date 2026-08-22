@@ -565,6 +565,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             do {
                 let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
+                let dnsMode = (providerConfiguration["dnsMode"] as? String) ?? "server"
+                let dnsPrimary = (providerConfiguration["dnsPrimary"] as? String) ?? ""
+                let dnsSecondary = (providerConfiguration["dnsSecondary"] as? String) ?? ""
+                applyDNSOverride(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, to: parsedConfiguration)
                 applySplitTunnelConfiguration(splitTunnel, to: parsedConfiguration)
                 tunnelConfiguration = parsedConfiguration
                 wgUAPI = PacketTunnelSettingsGenerator(
@@ -602,6 +606,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let wdttClientIDMode = (providerConfiguration["wdttClientIDMode"] as? String) ?? "default"
         let wdttUseVKCallsPreflight = (providerConfiguration["wdttUseVKCallsPreflight"] as? Bool) ?? true
         let wdttTunnelMTU = providerConfiguration["wdttTunnelMTU"] as? Int
+        let dnsMode = (providerConfiguration["dnsMode"] as? String) ?? "server"
+        let dnsPrimary = (providerConfiguration["dnsPrimary"] as? String) ?? ""
+        let dnsSecondary = (providerConfiguration["dnsSecondary"] as? String) ?? ""
         let csqttPassword = (providerConfiguration["csqttPassword"] as? String) ?? ""
         let csqttWebPort = providerConfiguration["csqttWebPort"] as? Int
         let csqttClientTag = (providerConfiguration["csqttClientTag"] as? String) ?? ""
@@ -714,7 +721,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 let effectiveMTU = wdttTunnelMTU.flatMap { $0 > 0 ? $0 : nil } ?? provision.mtu ?? 1280
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
-                    dns: provision.dns,
+                    dns: effectiveDNSString(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, fallbackDNS: provision.dns),
                     mtu: String(effectiveMTU),
                     tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
                     splitTunnel: splitTunnel
@@ -736,7 +743,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 SharedLogger.info("CSQTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 networkSettings = self.createTunnelSettings(
                     address: provision.address,
-                    dns: provision.dns,
+                    dns: effectiveDNSString(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, fallbackDNS: provision.dns),
                     mtu: String(provision.mtu > 0 ? provision.mtu : 1280),
                     tunnelRemoteAddress: turnServerIP.isEmpty ? "10.0.0.1" : turnServerIP,
                     splitTunnel: splitTunnel
@@ -988,6 +995,54 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         applySplitTunnelConfiguration(splitTunnel, to: settings)
         return settings
+    }
+
+    private func applyDNSOverride(
+        mode: String,
+        primary: String,
+        secondary: String,
+        to tunnelConfiguration: TunnelConfiguration
+    ) {
+        let servers = effectiveDNSServers(mode: mode, primary: primary, secondary: secondary, fallbackDNS: "")
+        guard !servers.isEmpty else { return }
+        tunnelConfiguration.interface.dns = servers.compactMap(DNSServer.init(from:))
+    }
+
+    private func effectiveDNSString(
+        mode: String,
+        primary: String,
+        secondary: String,
+        fallbackDNS: String
+    ) -> String {
+        let servers = effectiveDNSServers(mode: mode, primary: primary, secondary: secondary, fallbackDNS: fallbackDNS)
+        return servers.isEmpty ? fallbackDNS : servers.joined(separator: ",")
+    }
+
+    private func effectiveDNSServers(
+        mode: String,
+        primary: String,
+        secondary: String,
+        fallbackDNS: String
+    ) -> [String] {
+        switch mode {
+        case "cloudflare":
+            return ["1.1.1.1", "1.0.0.1"]
+        case "google":
+            return ["8.8.8.8", "8.8.4.4"]
+        case "quad9":
+            return ["9.9.9.9", "149.112.112.112"]
+        case "adguard":
+            return ["94.140.14.14", "94.140.15.15"]
+        case "custom":
+            return [primary, secondary]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        default:
+            return fallbackDNS
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
     }
 
     private func applySplitTunnelConfiguration(
