@@ -194,7 +194,7 @@ private let vbridgeGoLoggerCallback: @convention(c) (Int32, UnsafePointer<CChar>
 class PacketTunnelProvider: NEPacketTunnelProvider {
     private var vbridgeTunnelHandle: Int32 = -1
     private var activeTransportMode = "wg"
-    private var pathMonitor: NWPathMonitor?
+    private var pathMonitor: Network.NWPathMonitor?
     private let pathMonitorQueue = DispatchQueue(label: "com.prodject.vbridge.network-extension.path-monitor")
     private var lastObservedPathSummary: String?
     private var didPauseProxyForSleep = false
@@ -1119,8 +1119,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         guard usesProxyLifecycleHooks else { return }
         guard pathMonitor == nil else { return }
 
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
+        let monitor = Network.NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] (path: Network.NWPath) in
             self?.handlePathUpdate(path)
         }
         pathMonitor = monitor
@@ -1135,7 +1135,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         lastObservedPathSummary = nil
     }
 
-    private func handlePathUpdate(_ path: NWPath) {
+    private func handlePathUpdate(_ path: Network.NWPath) {
         guard usesProxyLifecycleHooks else { return }
 
         let summary = pathSummary(path)
@@ -1170,7 +1170,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func pathSummary(_ path: NWPath) -> String {
+    private func pathSummary(_ path: Network.NWPath) -> String {
         let status: String
         switch path.status {
         case .satisfied:

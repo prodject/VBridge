@@ -31,6 +31,12 @@ extern char *VBridgeWGWaitWrapAProvision(int32_t handle, int32_t timeoutMs);
 extern char *VBridgeWGWaitCSQTTProvision(int32_t handle, int32_t timeoutMs);
 extern int32_t VBridgeWGAttachCSQTT(int32_t handle, int32_t tun_fd);
 extern void VBridgeWGSetLogger(vbridge_logger_fn_t logger_fn);
+extern void VBridgeWGPause(int32_t handle);
+extern void VBridgeWGResume(int32_t handle);
+extern void VBridgeWGWakeHealthCheck(int32_t handle);
+extern void VBridgeWGPathChanged(int32_t handle);
+extern void VBridgeWGPathInTransition(int32_t handle);
+extern void VBridgeWGLogPathSnapshot(int32_t handle, char *label);
 extern char *VBridgeWGProbeVKCreds(
     const char *linkID,
     const char *vkHostIPsJSON,
