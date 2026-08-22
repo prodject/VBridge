@@ -144,7 +144,9 @@ struct DeployView: View {
 
             if hasSavedServerSettings {
                 Section(header: Text("Server Status")) {
-                    DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
+                    if selectedDeployKind == .wdtt {
+                        DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
+                    }
                     DeployStatusRow(title: installedStatusTitle, value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
                 }
@@ -164,18 +166,42 @@ struct DeployView: View {
                 }
             }
 
-            Section(header: Text(selectedDeployKind == .wdtt ? "Secrets" : "Web Panel")) {
-                secretField(selectedDeployKind == .wdtt ? "WDTT Main Password" : "CSQTT Web Password", text: $mainPassword)
+            if selectedDeployKind == .wdtt {
+                Section(header: Text("Secrets")) {
+                    secretField("WDTT Main Password", text: $mainPassword)
 
-                if !mainPassword.isEmpty && !isMainPasswordValid {
-                    Text("Allowed: letters, digits, and _ . ! ? : # - /")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
+                    if !mainPassword.isEmpty && !isMainPasswordValid {
+                        Text("Allowed: letters, digits, and _ . ! ? : # - /")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
 
-                if selectedDeployKind == .wdtt {
                     copyableTextField("Telegram Admin ID", text: $adminId, keyboardType: .numberPad)
                     secretField("Telegram Bot Token", text: $botToken)
+                }
+            } else {
+                Section(header: Text("Web Panel")) {
+                    secretField("CSQTT Web Password", text: $mainPassword)
+
+                    if !mainPassword.isEmpty && !isMainPasswordValid {
+                        Text("Allowed: letters, digits, and _ . ! ? : # - /")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+
+                    Button {
+                        openCSQTTWebPanel()
+                    } label: {
+                        Label("Open Web Panel", systemImage: "safari")
+                    }
+                    .disabled(csqttWebPanelURL == nil)
+
+                    Button {
+                        copyCSQTTWebPanelLink()
+                    } label: {
+                        Label("Copy Web Panel Link", systemImage: "link")
+                    }
+                    .disabled(csqttWebPanelURL == nil)
                 }
             }
 
@@ -239,22 +265,6 @@ struct DeployView: View {
                     .disabled(host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isSSHPortValid)
                 }
 
-                if selectedDeployKind == .csqtt {
-                    Button {
-                        openCSQTTWebPanel()
-                    } label: {
-                        Label("Open Web Panel", systemImage: "safari")
-                    }
-                    .disabled(csqttWebPanelURL == nil)
-
-                    Button {
-                        copyCSQTTWebPanelLink()
-                    } label: {
-                        Label("Copy Web Panel Link", systemImage: "link")
-                    }
-                    .disabled(csqttWebPanelURL == nil)
-                }
-
                 Button {
                     run(.exportLogs)
                 } label: {
@@ -262,19 +272,21 @@ struct DeployView: View {
                 }
                 .disabled(!canConnect)
 
-                Button {
-                    run(.exportState)
-                } label: {
-                    Label(isRunning && currentAction == .exportState ? "Creating Backup..." : "Backup Server", systemImage: "externaldrive.badge.icloud")
-                }
-                .disabled(!canUseStateArchive)
+                if selectedDeployKind == .wdtt {
+                    Button {
+                        run(.exportState)
+                    } label: {
+                        Label(isRunning && currentAction == .exportState ? "Creating Backup..." : "Backup Server", systemImage: "externaldrive.badge.icloud")
+                    }
+                    .disabled(!canUseStateArchive)
 
-                Button {
-                    showImportStatePicker = true
-                } label: {
-                    Label(isRunning && currentAction == .importState ? "Restoring Backup..." : "Restore Server", systemImage: "arrow.clockwise.icloud")
+                    Button {
+                        showImportStatePicker = true
+                    } label: {
+                        Label(isRunning && currentAction == .importState ? "Restoring Backup..." : "Restore Server", systemImage: "arrow.clockwise.icloud")
+                    }
+                    .disabled(!canUseStateArchive)
                 }
-                .disabled(!canUseStateArchive)
 
                 Button {
                     run(.install)
@@ -283,12 +295,14 @@ struct DeployView: View {
                 }
                 .disabled(!canInstall)
 
-                Button {
-                    run(.updatePreserve)
-                } label: {
-                    Label(isRunning && currentAction == .updatePreserve ? "Updating..." : "Update With Preserve", systemImage: "arrow.clockwise.circle")
+                if selectedDeployKind == .wdtt {
+                    Button {
+                        run(.updatePreserve)
+                    } label: {
+                        Label(isRunning && currentAction == .updatePreserve ? "Updating..." : "Update With Preserve", systemImage: "arrow.clockwise.circle")
+                    }
+                    .disabled(!canUpdatePreserve)
                 }
-                .disabled(!canUpdatePreserve)
 
                 Button {
                     run(.status)
@@ -297,26 +311,27 @@ struct DeployView: View {
                 }
                 .disabled(!canConnect)
 
-                Button(role: .destructive) {
-                    showCleanupConfirmation = true
-                } label: {
-                    Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
-                }
-                .disabled(!canCleanupDevices)
+                if selectedDeployKind == .wdtt {
+                    Button(role: .destructive) {
+                        showCleanupConfirmation = true
+                    } label: {
+                        Label(isRunning && currentAction == .cleanupDevices ? "Cleaning..." : "Clean Orphan Devices", systemImage: "externaldrive.badge.xmark")
+                    }
+                    .disabled(!canCleanupDevices)
+                    Button(role: .destructive) {
+                        showReinstallConfirmation = true
+                    } label: {
+                        Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(!canInstall)
 
-                Button(role: .destructive) {
-                    showReinstallConfirmation = true
-                } label: {
-                    Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                    Button(role: .destructive) {
+                        run(.uninstall)
+                    } label: {
+                        Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
+                    }
+                    .disabled(!canConnect)
                 }
-                .disabled(!canInstall)
-
-                Button(role: .destructive) {
-                    run(.uninstall)
-                } label: {
-                    Label(isRunning && currentAction == .uninstall ? "Removing..." : "Uninstall", systemImage: "trash")
-                }
-                .disabled(!canConnect)
             }
 
             if selectedDeployKind == .wdtt {
@@ -450,6 +465,11 @@ struct DeployView: View {
             } else if !manualPorts {
                 dtlsPort = 56000
                 wgPort = 56001
+            }
+
+            clearStatusIndicators()
+            Task {
+                await refreshSavedServerStatus()
             }
         }
         .sheet(isPresented: Binding(
