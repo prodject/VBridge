@@ -187,4 +187,5 @@ This project was made possible thanks to the work of the open-source community. 
 * [Amneziawg-Apple](https://github.com/amnezia-vpn/amneziawg-apple.git) — Licensed under MIT.
 * [WINGSV](https://github.com/WINGS-N/WINGSV) — Licensed under the GNU GPL.
 * [proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android) — Licensed under the GPL-3.0.
+* [proxy-turn-vk-android-server-fix](https://github.com/michaillepichow/proxy-turn-vk-android-server-fix) — Licensed under the GPL-3.0.
 * [WDTT-Plus](https://github.com/Ivan4537/WDTT-Plus) — Source reference for the migrated WDTT server-management model, admin flows, and client transfer/share compatibility.
