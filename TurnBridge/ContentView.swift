@@ -214,6 +214,38 @@ private struct PreBootstrapCaptchaWebView: UIViewRepresentable {
     let onToken: (String) -> Void
     let onLimit: () -> Void
 
+    private struct CapturedBrowserProfile: Codable {
+        let device: String
+        let browser_fp: String
+        let user_agent: String
+        let captured_at: TimeInterval
+    }
+
+    private static func persistCapturedBrowserProfile(device: String, browserFP: String, userAgent: String) {
+        let trimmedDevice = device.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBrowserFP = browserFP.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUserAgent = userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDevice.isEmpty, !trimmedBrowserFP.isEmpty else { return }
+        guard let groupID = SharedLogger.appGroupID,
+              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) else {
+            SharedLogger.warning("Captcha profile capture skipped: App Group container unavailable")
+            return
+        }
+        let payload = CapturedBrowserProfile(
+            device: trimmedDevice,
+            browser_fp: trimmedBrowserFP,
+            user_agent: trimmedUserAgent,
+            captured_at: Date().timeIntervalSince1970
+        )
+        do {
+            let data = try JSONEncoder().encode(payload)
+            try data.write(to: container.appendingPathComponent("vk_profile.json"), options: .atomic)
+            SharedLogger.info("Saved captcha browser profile for automatic solver warmup")
+        } catch {
+            SharedLogger.error("Failed to save captcha browser profile: \(error.localizedDescription)")
+        }
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(onToken: onToken, onLimit: onLimit)
     }
@@ -254,6 +286,20 @@ private struct PreBootstrapCaptchaWebView: UIViewRepresentable {
             if body.hasPrefix("token:"), !didResolve {
                 didResolve = true
                 onToken(String(body.dropFirst("token:".count)))
+            } else if body.hasPrefix("profile:") {
+                let json = String(body.dropFirst("profile:".count))
+                guard let data = json.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return
+                }
+                let device = payload["device"] as? String ?? ""
+                let browserFP = payload["browser_fp"] as? String ?? ""
+                let userAgent = payload["user_agent"] as? String ?? ""
+                PreBootstrapCaptchaWebView.persistCapturedBrowserProfile(
+                    device: device,
+                    browserFP: browserFP,
+                    userAgent: userAgent
+                )
             } else if body.hasPrefix("state:limit") {
                 onLimit()
             }
@@ -275,12 +321,31 @@ private struct PreBootstrapCaptchaWebView: UIViewRepresentable {
             } catch (e) {}
         }
 
+        function parseFormEncoded(body) {
+            try {
+                var params = new URLSearchParams(String(body || ''));
+                var browserFp = params.get('browser_fp') || '';
+                var device = params.get('device') || '';
+                if (browserFp && device) {
+                    h.postMessage('profile:' + JSON.stringify({
+                        browser_fp: browserFp,
+                        device: device,
+                        user_agent: navigator.userAgent || ''
+                    }));
+                }
+            } catch (e) {}
+        }
+
         var origFetch = window.fetch;
         if (origFetch) {
             window.fetch = function() {
                 var url = arguments[0];
                 if (typeof url === 'object' && url.url) url = url.url;
+                var init = arguments.length > 1 ? arguments[1] : null;
                 var urlStr = String(url || '');
+                if (urlStr.indexOf('captchaNotRobot.componentDone') !== -1 && init && typeof init.body !== 'undefined') {
+                    parseFormEncoded(init.body);
+                }
                 var p = origFetch.apply(this, arguments);
                 if (urlStr.indexOf('captchaNotRobot.check') !== -1) {
                     p.then(function(response) {
@@ -297,8 +362,11 @@ private struct PreBootstrapCaptchaWebView: UIViewRepresentable {
             this._vbridgeURL = String(url || '');
             return origOpen.apply(this, arguments);
         };
-        XMLHttpRequest.prototype.send = function() {
+        XMLHttpRequest.prototype.send = function(body) {
             var xhr = this;
+            if ((xhr._vbridgeURL || '').indexOf('captchaNotRobot.componentDone') !== -1) {
+                parseFormEncoded(body);
+            }
             if ((xhr._vbridgeURL || '').indexOf('captchaNotRobot.check') !== -1) {
                 xhr.addEventListener('load', function() {
                     try { inspect(JSON.parse(xhr.responseText)); } catch(e) {}

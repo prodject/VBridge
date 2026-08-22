@@ -633,6 +633,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
         VBridgeWGSetLogger(vbridgeGoLoggerCallback)
+        ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
         VBridgeWGSetTimezoneOffset(Int32(TimeZone.current.secondsFromGMT()))
         if let logPath = SharedLogger.logFileURL?.path {
             logPath.withCString {
