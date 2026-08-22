@@ -86,7 +86,7 @@ func runCSQTTAdmin(req csqttAdminRequest) serverAdminResponse {
 		return serverAdminResponse{OK: false, Status: "error", Message: "failed to encode CSQTT admin payload: " + err.Error()}
 	}
 	payloadB64 := base64.StdEncoding.EncodeToString(payload)
-	command := rootDeployCommand(fmt.Sprintf(`python3 -c %s`,
+	command := rootDeployCommand(fmt.Sprintf(`command -v python3 >/dev/null 2>&1 || { echo '{"status":500,"body":"python3 is not installed on the server"}'; exit 0; }; python3 -c %s`,
 		shellQuoteDeploy(fmt.Sprintf(`import base64, json, ssl, sys, urllib.error, urllib.request, http.cookiejar
 
 cfg = json.loads(base64.b64decode(%q))
@@ -112,11 +112,16 @@ def parse_ports(value):
 
 context = ssl._create_unverified_context()
 jar = http.cookiejar.CookieJar()
-opener = urllib.request.build_opener(
+https_opener = urllib.request.build_opener(
     urllib.request.HTTPSHandler(context=context),
     urllib.request.HTTPCookieProcessor(jar),
 )
-base_url = f"https://127.0.0.1:{cfg['WebPort']}"
+http_opener = urllib.request.build_opener(
+    urllib.request.HTTPHandler(),
+    urllib.request.HTTPCookieProcessor(jar),
+)
+base_url = ""
+opener = None
 
 def request(path, method="GET", body=None):
     headers = {"content-type": "application/json"}
@@ -128,12 +133,32 @@ def request(path, method="GET", body=None):
     except urllib.error.HTTPError as err:
         return err.code, err.read().decode("utf-8", "replace")
 
-status, body = request("/api/login", "POST", {
-    "user": caesar_encode(cfg["WebUser"]),
-    "pass": caesar_encode(cfg["WebPassword"]),
-})
-if status < 200 or status >= 300:
-    sys.stdout.write(json.dumps({"status": status, "body": body}))
+def try_login(candidate_url, candidate_opener):
+    global base_url, opener
+    base_url = candidate_url
+    opener = candidate_opener
+    return request("/api/login", "POST", {
+        "user": caesar_encode(cfg["WebUser"]),
+        "pass": caesar_encode(cfg["WebPassword"]),
+    })
+
+login_error = None
+for candidate_url, candidate_opener in (
+    (f"https://127.0.0.1:{cfg['WebPort']}", https_opener),
+    (f"http://127.0.0.1:{cfg['WebPort']}", http_opener),
+):
+    try:
+        status, body = try_login(candidate_url, candidate_opener)
+    except Exception as err:
+        login_error = str(err)
+        continue
+    if 200 <= status < 300:
+        break
+else:
+    if login_error:
+        sys.stdout.write(json.dumps({"status": 500, "body": login_error}))
+    else:
+        sys.stdout.write(json.dumps({"status": status, "body": body}))
     sys.exit(0)
 
 action = cfg["Action"]

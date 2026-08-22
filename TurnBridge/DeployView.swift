@@ -401,7 +401,7 @@ struct DeployView: View {
                 }
             }
 
-            if isRunning {
+            if isRunning && output.isEmpty {
                 Section {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -686,7 +686,7 @@ struct DeployView: View {
         isRunning = true
         currentAction = .reinstall
         output = ""
-        startLiveOutputPolling(for: installRequest)
+        startLiveOutputPolling(for: uninstallRequest)
 
         Task {
             let uninstallResponse = await perform(uninstallRequest)
@@ -716,6 +716,12 @@ struct DeployView: View {
                     }
                 }
                 return
+            }
+
+            await MainActor.run {
+                stopLiveOutputPolling()
+                output = combinedOutput
+                startLiveOutputPolling(for: installRequest)
             }
 
             let installResponse = await perform(installRequest)
