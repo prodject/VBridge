@@ -43,7 +43,7 @@ struct SettingsView: View {
             }
 
             Section(header: Text("Proxy Settings")) {
-                if profile.transportMode != .wdtt {
+                if profile.transportMode != .wdtt && profile.transportMode != .csqtt {
                     TextField("TURN Server URL", text: binding(\.vkLink))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
@@ -53,7 +53,7 @@ struct SettingsView: View {
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
 
-                if profile.transportMode != .wdtt {
+                if profile.transportMode != .wdtt && profile.transportMode != .csqtt {
                     TextField("Listen Address (IP:Port)", text: binding(\.listenAddr))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
@@ -66,7 +66,7 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            if profile.transportMode != .wdtt {
+            if profile.transportMode != .wdtt && profile.transportMode != .csqtt {
                 Section(header: Text("WireGuard Config")) {
                     TextEditor(text: binding(\.wgQuickConfig))
                         .font(.system(.footnote, design: .monospaced))
@@ -148,7 +148,26 @@ struct SettingsView: View {
                 }
             }
 
-            if profile.transportMode != .wdtt {
+            if profile.transportMode == .csqtt {
+                Section(header: Text("CSQTT")) {
+                    SecureField("CSQTT Password", text: binding(\.csqttPassword))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+
+                    TextField("Web Port", value: binding(\.csqttWebPort), format: .number)
+                        .keyboardType(.numberPad)
+
+                    TextField("Client Tag", text: binding(\.csqttClientTag))
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+
+                    Text("CSQTT runtime integration is not wired yet. These fields prepare the profile model for the upcoming client backend.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if profile.transportMode != .wdtt && profile.transportMode != .csqtt {
                 Section(header: Text("Advanced Proxy")) {
                     Toggle(isOn: binding(\.useUdp)) {
                         VStack(alignment: .leading) {

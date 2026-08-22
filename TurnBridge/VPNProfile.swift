@@ -18,6 +18,7 @@ enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
     case wg
     case srtpCommunity
     case wdtt
+    case csqtt
 
     var id: String { rawValue }
 
@@ -29,6 +30,8 @@ enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
             return "SRTP-Community"
         case .wdtt:
             return "WDTT"
+        case .csqtt:
+            return "CSQTT"
         }
     }
 }
@@ -54,6 +57,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
     var wdttClientIDMode: String
     var wdttUseVKCallsPreflight: Bool
     var wdttTunnelMTU: Int?
+    var csqttPassword: String
+    var csqttWebPort: Int?
+    var csqttClientTag: String
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -76,6 +82,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         case wdttClientIDMode
         case wdttUseVKCallsPreflight
         case wdttTunnelMTU
+        case csqttPassword
+        case csqttWebPort
+        case csqttClientTag
     }
 
     init(
@@ -98,7 +107,10 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttFingerprint: String = "auto",
         wdttClientIDMode: String = "default",
         wdttUseVKCallsPreflight: Bool = true,
-        wdttTunnelMTU: Int? = nil
+        wdttTunnelMTU: Int? = nil,
+        csqttPassword: String = "",
+        csqttWebPort: Int? = nil,
+        csqttClientTag: String = ""
     ) {
         self.id = id
         self.name = name
@@ -120,6 +132,9 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         self.wdttClientIDMode = wdttClientIDMode
         self.wdttUseVKCallsPreflight = wdttUseVKCallsPreflight
         self.wdttTunnelMTU = wdttTunnelMTU
+        self.csqttPassword = csqttPassword
+        self.csqttWebPort = csqttWebPort
+        self.csqttClientTag = csqttClientTag
     }
 
     init(from decoder: Decoder) throws {
@@ -144,5 +159,8 @@ struct VPNProfile: Codable, Identifiable, Equatable {
         wdttClientIDMode = try container.decodeIfPresent(String.self, forKey: .wdttClientIDMode) ?? "default"
         wdttUseVKCallsPreflight = try container.decodeIfPresent(Bool.self, forKey: .wdttUseVKCallsPreflight) ?? true
         wdttTunnelMTU = try container.decodeIfPresent(Int.self, forKey: .wdttTunnelMTU)
+        csqttPassword = try container.decodeIfPresent(String.self, forKey: .csqttPassword) ?? ""
+        csqttWebPort = try container.decodeIfPresent(Int.self, forKey: .csqttWebPort)
+        csqttClientTag = try container.decodeIfPresent(String.self, forKey: .csqttClientTag) ?? ""
     }
 }
