@@ -159,6 +159,24 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 completionHandler(data)
             }
+        } else if let command = String(data: messageData, encoding: .utf8), command == "vbridge_provider_reconnect" {
+            wg_log(.info, message: "handleAppMessage: reconnect requested")
+            guard let tunnelProviderProtocol = self.protocolConfiguration as? NETunnelProviderProtocol,
+                  let tunnelConfiguration = tunnelProviderProtocol.asTunnelConfiguration() else {
+                wg_log(.error, message: "handleAppMessage: reconnect failed, protocol configuration invalid")
+                completionHandler(nil)
+                return
+            }
+
+            adapter.update(tunnelConfiguration: tunnelConfiguration) { [weak self] error in
+                if let error {
+                    wg_log(.error, message: "handleAppMessage: reconnect failed: \(error)")
+                    completionHandler(Data("error".utf8))
+                } else {
+                    wg_log(.info, message: "handleAppMessage: reconnect applied")
+                    completionHandler(Data("ok".utf8))
+                }
+            }
         } else {
             wg_log(.debug, message: "handleAppMessage: unsupported message payload")
             completionHandler(nil)

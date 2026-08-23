@@ -448,6 +448,8 @@ struct ContentView: View {
     @State private var logMonitoringTask: Task<Void, Never>?
     @State private var tunnelHealthTask: Task<Void, Never>?
     @State private var tunnelHealthProbeFailures = 0
+    @State private var tunnelReconnectTask: Task<Void, Never>?
+    @State private var tunnelReconnectAttempts = 0
     @State private var speedTestTask: Task<Void, Never>?
     @State private var speedTestDebounceTask: Task<Void, Never>?
     @State private var lastSpeedMeasurementActiveConnections: Int?
@@ -1636,18 +1638,22 @@ struct ContentView: View {
         if newStatus == .connected {
             isUserInitiatedDisconnect = false
             captchaRecoveryRestartCount = 0
+            tunnelReconnectAttempts = 0
             clearCaptchaRecoveryRequest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             pendingTunnelRestartProfile = nil
             pendingTunnelRestartReason = ""
+            cancelTunnelReconnect()
             startTunnelHealthMonitoringIfNeeded()
         } else if newStatus == .disconnected, isUserInitiatedDisconnect {
             isUserInitiatedDisconnect = false
             captchaRecoveryRestartCount = 0
+            tunnelReconnectAttempts = 0
             clearCaptchaRecoveryRequest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             endLiveActivity(immediate: true)
             stopTunnelHealthMonitoring()
+            cancelTunnelReconnect()
             if let profile = pendingTunnelRestartProfile {
                 let reason = pendingTunnelRestartReason
                 pendingTunnelRestartProfile = nil
@@ -1657,11 +1663,13 @@ struct ContentView: View {
                 return
             }
         } else if newStatus == .disconnected,
-                  previousStatus == .connecting || previousStatus == .reasserting {
+                  previousStatus == .connecting || previousStatus == .reasserting || previousStatus == .connected {
             handleCaptchaRecoveryIfNeeded()
             stopTunnelHealthMonitoring()
+            requestTunnelSoftReconnect()
         } else if newStatus == .invalid || newStatus == .disconnecting {
             stopTunnelHealthMonitoring()
+            cancelTunnelReconnect()
         }
         if newStatus != .connecting && newStatus != .reasserting {
             cancelConnectWatchdog()
@@ -1746,6 +1754,62 @@ struct ContentView: View {
         tunnelHealthTask?.cancel()
         tunnelHealthTask = nil
         tunnelHealthProbeFailures = 0
+    }
+
+    private func requestTunnelSoftReconnect() {
+        guard !isUserInitiatedDisconnect else { return }
+        guard let profile = store.selectedProfile else { return }
+        guard tunnelReconnectTask == nil else { return }
+        guard tunnelReconnectAttempts < 1 else {
+            SharedLogger.warning("Unexpected disconnect already retried once; not reconnecting automatically")
+            return
+        }
+
+        tunnelReconnectAttempts += 1
+        SharedLogger.warning("Unexpected tunnel disconnect detected; requesting provider reconnect")
+        tunnelReconnectTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard tunnelReconnectTask != nil else { return }
+            tunnelReconnectTask = nil
+            guard vpnStatus == .disconnected || vpnStatus == .invalid else { return }
+            guard !isUserInitiatedDisconnect else { return }
+            let softReconnectSucceeded = await requestProviderSoftReconnect()
+            if softReconnectSucceeded {
+                SharedLogger.info("Provider reconnect requested successfully")
+                return
+            }
+            SharedLogger.warning("Provider reconnect unavailable; falling back to full tunnel restart")
+            connectTunnel(using: profile, resetCaptchaRecoveryState: false)
+        }
+    }
+
+    private func cancelTunnelReconnect() {
+        tunnelReconnectTask?.cancel()
+        tunnelReconnectTask = nil
+    }
+
+    private func requestProviderSoftReconnect() async -> Bool {
+        await withCheckedContinuation { continuation in
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession else {
+                continuation.resume(returning: false)
+                return
+            }
+
+            do {
+                try session.sendProviderMessage(Data("vbridge_provider_reconnect".utf8)) { response in
+                    guard let response,
+                          let text = String(data: response, encoding: .utf8) else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    continuation.resume(returning: text == "ok")
+                }
+            } catch {
+                SharedLogger.warning("Provider soft reconnect send failed: \(error.localizedDescription)")
+                continuation.resume(returning: false)
+            }
+        }
     }
 
     private func probeTunnelProviderHealth() async -> Bool {
