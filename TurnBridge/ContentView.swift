@@ -2046,7 +2046,7 @@ struct ContentView: View {
 
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let result = await runSpeedTest()
-            guard hasMeasuredSpeed(result) else {
+            guard result.downloadMbps != nil || result.uploadMbps != nil else {
                 throw MTUDetectionError.speedTestFailed(mtu)
             }
 
