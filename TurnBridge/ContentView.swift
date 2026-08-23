@@ -446,6 +446,8 @@ struct ContentView: View {
     @State private var connectionStartedAt: Date?
     @State private var lastWidgetRefreshSignature = ""
     @State private var logMonitoringTask: Task<Void, Never>?
+    @State private var tunnelHealthTask: Task<Void, Never>?
+    @State private var tunnelHealthProbeFailures = 0
     @State private var speedTestTask: Task<Void, Never>?
     @State private var speedTestDebounceTask: Task<Void, Never>?
     @State private var lastSpeedMeasurementActiveConnections: Int?
@@ -1638,12 +1640,14 @@ struct ContentView: View {
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             pendingTunnelRestartProfile = nil
             pendingTunnelRestartReason = ""
+            startTunnelHealthMonitoringIfNeeded()
         } else if newStatus == .disconnected, isUserInitiatedDisconnect {
             isUserInitiatedDisconnect = false
             captchaRecoveryRestartCount = 0
             clearCaptchaRecoveryRequest()
             UserNotificationDispatcher.shared.clearConnectionIssueNotification()
             endLiveActivity(immediate: true)
+            stopTunnelHealthMonitoring()
             if let profile = pendingTunnelRestartProfile {
                 let reason = pendingTunnelRestartReason
                 pendingTunnelRestartProfile = nil
@@ -1655,6 +1659,9 @@ struct ContentView: View {
         } else if newStatus == .disconnected,
                   previousStatus == .connecting || previousStatus == .reasserting {
             handleCaptchaRecoveryIfNeeded()
+            stopTunnelHealthMonitoring()
+        } else if newStatus == .invalid || newStatus == .disconnecting {
+            stopTunnelHealthMonitoring()
         }
         if newStatus != .connecting && newStatus != .reasserting {
             cancelConnectWatchdog()
@@ -1694,6 +1701,77 @@ struct ContentView: View {
     private func stopLogMonitoring() {
         logMonitoringTask?.cancel()
         logMonitoringTask = nil
+    }
+
+    private func startTunnelHealthMonitoringIfNeeded() {
+        guard tunnelHealthTask == nil else { return }
+        tunnelHealthProbeFailures = 0
+        tunnelHealthTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                guard !Task.isCancelled else { return }
+
+                let shouldContinue = await MainActor.run { vpnStatus == .connected || vpnStatus == .reasserting }
+                guard shouldContinue else {
+                    await MainActor.run { stopTunnelHealthMonitoring() }
+                    return
+                }
+
+                let probeOk = await probeTunnelProviderHealth()
+                guard !Task.isCancelled else { return }
+                if probeOk {
+                    await MainActor.run {
+                        tunnelHealthProbeFailures = 0
+                    }
+                    continue
+                }
+
+                let shouldReconnect = await MainActor.run {
+                    tunnelHealthProbeFailures += 1
+                    return tunnelHealthProbeFailures >= 2
+                }
+                if shouldReconnect {
+                    await MainActor.run {
+                        SharedLogger.warning("Tunnel health probe failed twice; requesting reconnect")
+                        stopTunnelHealthMonitoring()
+                        reconnectTunnel()
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private func stopTunnelHealthMonitoring() {
+        tunnelHealthTask?.cancel()
+        tunnelHealthTask = nil
+        tunnelHealthProbeFailures = 0
+    }
+
+    private func probeTunnelProviderHealth() async -> Bool {
+        await withCheckedContinuation { continuation in
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession,
+                  session.status == .connected || session.status == .reasserting else {
+                continuation.resume(returning: false)
+                return
+            }
+
+            do {
+                try session.sendProviderMessage(Data("vbridge_provider_probe".utf8)) { response in
+                    guard let response,
+                          let text = String(data: response, encoding: .utf8),
+                          text.contains("alive handle=") else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    continuation.resume(returning: true)
+                }
+            } catch {
+                SharedLogger.warning("Tunnel health probe send failed: \(error.localizedDescription)")
+                continuation.resume(returning: false)
+            }
+        }
     }
 
     private func refreshConnectionProgress() {
@@ -2257,27 +2335,6 @@ struct ContentView: View {
     private func runSpeedTest() async -> SpeedMeasurementResult {
         SharedLogger.info("Speed test started")
 
-        let speedcheckerResult = await measureSpeedcheckerSpeedTest()
-
-        if let speedcheckerResult, hasMeasuredSpeed(speedcheckerResult) {
-            return speedcheckerResult
-        }
-
-        if let speedcheckerResult {
-            SharedLogger.warning("Speedchecker returned ISP/IP only, continuing with Cloudflare speed test")
-            SharedLogger.info(
-                String(
-                    format: "Speedchecker partial result: download=%@ upload=%@ isp=%@ ip=%@",
-                    speedcheckerResult.downloadMbps.map { String(format: "%.1f", $0) } ?? "--",
-                    speedcheckerResult.uploadMbps.map { String(format: "%.1f", $0) } ?? "--",
-                    speedcheckerResult.ispName ?? "unknown",
-                    speedcheckerResult.ipAddress ?? "unknown"
-                )
-            )
-        } else {
-            SharedLogger.warning("Speedchecker SDK returned no usable result, falling back to Cloudflare speed test")
-        }
-
         let downloadMbps = await measureCloudflareDownloadSpeed()
         if Task.isCancelled {
             return SpeedMeasurementResult(downloadMbps: nil, uploadMbps: nil, ispName: nil, ipAddress: nil)
@@ -2294,8 +2351,8 @@ struct ContentView: View {
             return SpeedMeasurementResult(
                 downloadMbps: downloadMbps,
                 uploadMbps: uploadMbps,
-                ispName: speedcheckerResult?.ispName,
-                ipAddress: speedcheckerResult?.ipAddress
+                ispName: nil,
+                ipAddress: nil
             )
         }
 
@@ -2304,26 +2361,8 @@ struct ContentView: View {
         return SpeedMeasurementResult(
             downloadMbps: runtimeResult.downloadMbps,
             uploadMbps: runtimeResult.uploadMbps,
-            ispName: speedcheckerResult?.ispName ?? runtimeResult.ispName,
-            ipAddress: speedcheckerResult?.ipAddress ?? runtimeResult.ipAddress
-        )
-    }
-
-    private func hasMeasuredSpeed(_ result: SpeedMeasurementResult) -> Bool {
-        result.downloadMbps != nil || result.uploadMbps != nil
-    }
-
-    private func measureSpeedcheckerSpeedTest() async -> SpeedMeasurementResult? {
-        let service = SpeedcheckerSpeedTestService()
-        guard let result = await service.runFreeTest() else {
-            return nil
-        }
-
-        return SpeedMeasurementResult(
-            downloadMbps: result.downloadMbps,
-            uploadMbps: result.uploadMbps,
-            ispName: result.ispName,
-            ipAddress: result.ipAddress
+            ispName: runtimeResult.ispName,
+            ipAddress: runtimeResult.ipAddress
         )
     }
 
