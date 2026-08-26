@@ -1523,6 +1523,18 @@ func (p *Proxy) allowsRxStallReconnect() bool {
 	return !p.config.UseWrapA
 }
 
+// WRAP-A has a looser receive cadence than the regular DTLS path because the
+// server's transport keepalive is out-of-band from real payload traffic and
+// application traffic may stay asymmetric for long stretches. Give it a wider
+// stale-RX window before treating a read timeout as proof that the tunnel is
+// dead.
+func (p *Proxy) wrapAReadStaleThreshold() time.Duration {
+	if p.config.UseWrapA {
+		return 5 * time.Minute
+	}
+	return 3 * time.Minute
+}
+
 // SendPacket sends a WireGuard packet through the tunnel.
 func (p *Proxy) SendPacket(data []byte) error {
 	buf := make([]byte, len(data))
@@ -3021,7 +3033,7 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 						continue
 					}
 					lastRecv := p.lastRecvTime.Load()
-					if lastRecv > 0 && time.Since(time.Unix(lastRecv, 0)) < 3*time.Minute {
+					if lastRecv > 0 && time.Since(time.Unix(lastRecv, 0)) < p.wrapAReadStaleThreshold() {
 						continue
 					}
 					log.Printf("proxy: [conn %d] WRAP-A read timeout, tunnel stale, reconnecting", connIdx)
@@ -3030,15 +3042,15 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 				log.Printf("proxy: [conn %d] WRAP-A read error: %v", connIdx, rerr)
 				return
 			}
-				// The server's 1-byte transport keepalive must NOT reach
-				// WireGuard, but it still proves the WRAP-A data path is alive.
-				// Count it as tunnel RX so watchdog / staleness logic does not
-				// mistake an otherwise healthy but quiescent session for a dead one.
-				p.lastRecvTime.Store(time.Now().Unix())
-				if n <= 1 {
-					continue
-				}
-				pkt := recvPktPoolGet(n)
+			// The server's 1-byte transport keepalive must NOT reach
+			// WireGuard, but it still proves the WRAP-A data path is alive.
+			// Count it as tunnel RX so watchdog / staleness logic does not
+			// mistake an otherwise healthy but quiescent session for a dead one.
+			p.lastRecvTime.Store(time.Now().Unix())
+			if n <= 1 {
+				continue
+			}
+			pkt := recvPktPoolGet(n)
 			copy(pkt, buf[:n])
 			select {
 			case p.recvCh <- pkt:
