@@ -1249,7 +1249,7 @@ func (p *Proxy) WakeHealthCheck() {
 	txPrev := p.lastWakeTxBytes.Swap(txNow)
 	txDelta := txNow - txPrev
 	lastRecv := p.lastRecvTime.Load()
-	if txDelta > 4096 && lastRecv > 0 {
+	if p.allowsRxStallReconnect() && txDelta > 4096 && lastRecv > 0 {
 		rxStale := time.Since(time.Unix(lastRecv, 0))
 		if rxStale > 90*time.Second {
 			log.Printf("proxy: wake check — %d bytes TX since last wake but no RX for %s, forcing reconnect",
@@ -1441,7 +1441,7 @@ func (p *Proxy) runWatchdog() {
 			// observable improvement to user-perceived connectivity.
 			txNow := p.txBytes.Load()
 			txDelta := txNow - p.lastWatchdogTxBytes.Swap(txNow)
-			if txDelta > 4096 && lastRecv > 0 && active > 0 {
+			if p.allowsRxStallReconnect() && txDelta > 4096 && lastRecv > 0 && active > 0 {
 				elapsed := time.Since(time.Unix(lastRecv, 0))
 				if elapsed > 2*time.Minute {
 					log.Printf("proxy: watchdog — %d bytes TX in last tick but no DTLS RX for %s with %d active conns, forcing reconnect",
@@ -1510,6 +1510,17 @@ func (p *Proxy) runWatchdog() {
 			return
 		}
 	}
+}
+
+// WRAP-A sessions do not have the DTLS probe-echo path and use a server-side
+// 1-byte transport keepalive that we intentionally drop before updating
+// lastRecvTime. In practice that makes "TX observed but no RX for N seconds"
+// too noisy as a full-tunnel restart trigger for WDTT/WRAP-A: brief asymmetric
+// traffic or quiescent periods look indistinguishable from a dead data plane.
+// Keep the zero-active-conns recovery path for WRAP-A, but avoid self-induced
+// reconnect churn on mere RX silence.
+func (p *Proxy) allowsRxStallReconnect() bool {
+	return !p.config.UseWrapA
 }
 
 // SendPacket sends a WireGuard packet through the tunnel.
@@ -3019,13 +3030,15 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 				log.Printf("proxy: [conn %d] WRAP-A read error: %v", connIdx, rerr)
 				return
 			}
-			// Skip the server's 1-byte transport keepalive — it must NOT reach
-			// WireGuard (which would treat it as an invalid message type).
-			if n <= 1 {
-				continue
-			}
-			p.lastRecvTime.Store(time.Now().Unix())
-			pkt := recvPktPoolGet(n)
+				// The server's 1-byte transport keepalive must NOT reach
+				// WireGuard, but it still proves the WRAP-A data path is alive.
+				// Count it as tunnel RX so watchdog / staleness logic does not
+				// mistake an otherwise healthy but quiescent session for a dead one.
+				p.lastRecvTime.Store(time.Now().Unix())
+				if n <= 1 {
+					continue
+				}
+				pkt := recvPktPoolGet(n)
 			copy(pkt, buf[:n])
 			select {
 			case p.recvCh <- pkt:
