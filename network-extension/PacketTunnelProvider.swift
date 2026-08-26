@@ -650,6 +650,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
+        let rawTransportMode = (providerConfiguration["transportMode"] as? String) ?? "nil"
+        let rawCSQTTPassword = ((providerConfiguration["csqttPassword"] as? String) ?? "").isEmpty ? "empty" : "set"
+        let rawWDTTPPassword = ((providerConfiguration["wdttPassword"] as? String) ?? "").isEmpty ? "empty" : "set"
+        NSLog("ProviderConfig: transportMode=%@ csqttPassword=%@ wdttPassword=%@", rawTransportMode, rawCSQTTPassword, rawWDTTPPassword)
+        SharedLogger.info(
+            "ProviderConfig loaded: transportMode=\(rawTransportMode), csqttPassword=\(rawCSQTTPassword), wdttPassword=\(rawWDTTPPassword)",
+            source: .tunnel
+        )
+
         let transportMode = (providerConfiguration["transportMode"] as? String) ?? "wg"
         activeTransportMode = transportMode
         let isWDTT = transportMode == "wdtt"
