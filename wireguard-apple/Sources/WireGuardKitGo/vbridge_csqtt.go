@@ -4,6 +4,7 @@ package main
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"crypto/cipher"
 	"crypto/rand"
@@ -37,6 +38,7 @@ const (
 	csqttReadTimeout       = 30 * time.Minute
 	csqttHandshakeTimeout  = 20 * time.Second
 	csqttProvisionTimeout  = 15 * time.Second
+	csqttDisconnectTimeout = 5 * time.Second
 	csqttSocketBufSize     = 625 * 1024
 	csqttTunOffset         = 4
 	csqttDefaultMTU        = 1280
@@ -50,6 +52,13 @@ const (
 	csqttKeepaliveByte     = 0xff
 	csqttKeepaliveSize     = 16
 )
+
+var csqttProvisionAttempts = []time.Duration{
+	1500 * time.Millisecond,
+	3 * time.Second,
+	6 * time.Second,
+	csqttProvisionTimeout,
+}
 
 type csqttProvision struct {
 	Address   string `json:"address"`
@@ -541,6 +550,7 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 		return fmt.Errorf("dtls client: %w", err)
 	}
 	defer dtlsConn.Close()
+	defer w.sendDisconnect(dtlsConn)
 
 	handshakeCtx, handshakeCancel := context.WithTimeout(ctx, csqttHandshakeTimeout)
 	defer handshakeCancel()
@@ -609,36 +619,56 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 		w.runtime.salt,
 		w.wireID(),
 	)
-	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if _, err := conn.Write([]byte(request)); err != nil {
-		_ = conn.SetWriteDeadline(time.Time{})
-		return nil, fmt.Errorf("send getconf: %w", err)
-	}
-	_ = conn.SetWriteDeadline(time.Time{})
-
 	buffer := make([]byte, csqttMaxPacketSize)
-	_ = conn.SetReadDeadline(time.Now().Add(csqttProvisionTimeout))
 	defer conn.SetReadDeadline(time.Time{})
-	for {
-		count, err := conn.Read(buffer)
-		if err != nil {
-			return nil, fmt.Errorf("read provision: %w", err)
+	for attempt, timeout := range csqttProvisionAttempts {
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := conn.Write([]byte(request)); err != nil {
+			_ = conn.SetWriteDeadline(time.Time{})
+			return nil, fmt.Errorf("send getconf: %w", err)
 		}
-		payload := buffer[:count]
-		if !isCSQTTControlPacket(payload) {
-			continue
+		_ = conn.SetWriteDeadline(time.Time{})
+		deadline := time.Now().Add(timeout)
+		for {
+			_ = conn.SetReadDeadline(deadline)
+			count, err := conn.Read(buffer)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					break
+				}
+				return nil, fmt.Errorf("read provision: %w", err)
+			}
+			payload := buffer[:count]
+			if !isCSQTTControlPacket(payload) {
+				continue
+			}
+			text := strings.TrimSpace(string(payload))
+			if strings.HasPrefix(text, "TUNCONF:") {
+				return parseCSQTTProvision(payload)
+			}
+			if strings.HasPrefix(text, "DENIED:") {
+				return nil, fmt.Errorf("fatal_auth: %s", text)
+			}
+			if text == "NOCONF" {
+				return nil, errors.New("csqtt: server returned NOCONF")
+			}
 		}
-		text := strings.TrimSpace(string(payload))
-		if strings.HasPrefix(text, "TUNCONF:") {
-			return parseCSQTTProvision(payload)
+		if attempt == len(csqttProvisionAttempts)-1 {
+			break
 		}
-		if strings.HasPrefix(text, "DENIED:") {
-			return nil, fmt.Errorf("fatal_auth: %s", text)
-		}
-		if text == "NOCONF" {
-			return nil, errors.New("csqtt: server returned NOCONF")
-		}
+		log.Printf("csqtt: worker %d GETCONF timeout, retry %d/%d", w.id, attempt+1, len(csqttProvisionAttempts))
 	}
+	return nil, fmt.Errorf("csqtt: provision timeout after %d attempts", len(csqttProvisionAttempts))
+}
+
+func (w *csqttWorker) sendDisconnect(conn net.Conn) {
+	if w.runtime.ctx.Err() == nil {
+		return
+	}
+	request := fmt.Sprintf("DISCONNECT:%s|%s", w.runtime.deviceID, w.runtime.salt)
+	_ = conn.SetWriteDeadline(time.Now().Add(csqttDisconnectTimeout))
+	_, _ = conn.Write([]byte(request))
+	_ = conn.SetWriteDeadline(time.Time{})
 }
 
 func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
