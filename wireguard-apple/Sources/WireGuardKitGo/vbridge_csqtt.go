@@ -76,6 +76,8 @@ type csqttRuntime struct {
 	workerCount int
 	useMasking bool
 	clientTag  string
+	salt       string
+	generation uint64
 
 	dispatcher *csqttDispatcher
 	tunDevice  tun.Device
@@ -101,6 +103,10 @@ type csqttWorker struct {
 	id      int
 	runtime *csqttRuntime
 	sendCh  chan []byte
+}
+
+func (w *csqttWorker) wireID() int {
+	return w.id + 1
 }
 
 type csqttDispatcher struct {
@@ -175,6 +181,10 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 	if clientTag == "" {
 		clientTag = "vbridge"
 	}
+	salt := strings.TrimSpace(config.CSQTTClientTag)
+	if salt == "" {
+		salt = deviceID
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &csqttRuntime{
 		ctx:         ctx,
@@ -190,6 +200,8 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		workerCount: workerCount,
 		useMasking:  useMasking,
 		clientTag:   clientTag,
+		salt:        salt,
+		generation:  uint64(time.Now().UnixMilli()),
 		readyCh:     make(chan struct{}),
 		provisionCh: make(chan struct{}),
 	}
@@ -591,9 +603,9 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 		w.runtime.localPort,
 		w.runtime.deviceID,
 		w.runtime.password,
-		1,
-		w.runtime.clientTag,
-		w.id,
+		w.runtime.generation,
+		w.runtime.salt,
+		w.wireID(),
 	)
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if _, err := conn.Write([]byte(request)); err != nil {
