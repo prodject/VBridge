@@ -36,6 +36,7 @@ import (
 
 const (
 	csqttKeepaliveInterval = 15 * time.Second
+	csqttPathProbeInterval = time.Second
 	csqttReadTimeout       = 30 * time.Minute
 	csqttHandshakeTimeout  = 20 * time.Second
 	csqttProvisionTimeout  = 15 * time.Second
@@ -53,6 +54,7 @@ const (
 	csqttKeepaliveByte     = 0xff
 	csqttKeepaliveSize     = 16
 	csqttPathProbeSize     = 45
+	csqttPathProbeMissLimit = 3
 )
 
 var csqttProvisionAttempts = []time.Duration{
@@ -105,6 +107,7 @@ type csqttRuntime struct {
 	provisionCh chan struct{}
 	provMu      sync.Mutex
 	provision   *csqttProvision
+	provisionRequested atomic.Bool
 	errMu       sync.Mutex
 	fatalErr    error
 
@@ -121,6 +124,9 @@ type csqttWorker struct {
 	id      int
 	runtime *csqttRuntime
 	sendCh  chan []byte
+
+	unansweredProbes atomic.Uint32
+	outstandingProbe atomic.Uint64
 }
 
 func (w *csqttWorker) wireID() int {
@@ -365,6 +371,7 @@ func (r *csqttRuntime) signalReady() {
 func (r *csqttRuntime) setProvision(provision *csqttProvision) {
 	r.provMu.Lock()
 	defer r.provMu.Unlock()
+	defer r.provisionRequested.Store(false)
 	if r.provision != nil {
 		return
 	}
@@ -373,6 +380,23 @@ func (r *csqttRuntime) setProvision(provision *csqttProvision) {
 	}
 	r.provision = provision
 	close(r.provisionCh)
+}
+
+func (r *csqttRuntime) provisionReady() bool {
+	r.provMu.Lock()
+	defer r.provMu.Unlock()
+	return r.provision != nil
+}
+
+func (r *csqttRuntime) beginProvisionRequest() bool {
+	if r.provisionReady() {
+		return false
+	}
+	return r.provisionRequested.CompareAndSwap(false, true)
+}
+
+func (r *csqttRuntime) finishProvisionRequest() {
+	r.provisionRequested.Store(false)
 }
 
 func (r *csqttRuntime) setFatalError(err error) {
@@ -569,9 +593,11 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 	defer w.runtime.activeWorkers.Add(-1)
 	w.runtime.signalReady()
 
-	if w.runtime.provision == nil {
+	if w.runtime.beginProvisionRequest() {
 		if provision, err := w.requestProvision(dtlsConn); err == nil && provision != nil {
 			w.runtime.setProvision(provision)
+		} else {
+			w.runtime.finishProvisionRequest()
 		}
 	}
 
@@ -680,23 +706,30 @@ func (w *csqttWorker) sendDisconnect(conn net.Conn) {
 
 func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
 	ticker := time.NewTicker(csqttKeepaliveInterval)
+	probeTicker := time.NewTicker(csqttPathProbeInterval)
 	defer ticker.Stop()
+	defer probeTicker.Stop()
 	ping := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttKeepaliveSize)
 	probe := buildCSQTTPathProbe(w.runtime.deviceID, w.runtime.generation, w.wireID())
-	var probeSequence uint64
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-probeTicker.C:
 			if len(probe) == csqttPathProbeSize {
-				probeSequence++
+				nextMisses := w.unansweredProbes.Add(1)
+				if nextMisses > csqttPathProbeMissLimit {
+					_ = conn.Close()
+					return
+				}
+				probeSequence := w.outstandingProbe.Add(1)
 				copy(probe[31:39], encodeCSQTTPathProbeSequence(probeSequence))
 				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 				if _, err := conn.Write(probe); err != nil {
 					return
 				}
 			}
+		case <-ticker.C:
 			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if _, err := conn.Write(ping); err != nil {
 				return
@@ -739,16 +772,27 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 					w.runtime.setProvision(provision)
 				}
 			}
+			w.resetPathValidation()
 			continue
 		}
 		if isCSQTTKeepalivePacket(payload) {
+			w.resetPathValidation()
+			continue
+		}
+		if w.isCurrentPathAck(payload) {
+			w.unansweredProbes.Store(0)
 			continue
 		}
 		if isCSQTTPathAckPacket(payload) {
 			continue
 		}
+		w.resetPathValidation()
 		w.runtime.writeTUNPacket(payload)
 	}
+}
+
+func (w *csqttWorker) resetPathValidation() {
+	w.unansweredProbes.Store(0)
 }
 
 func parseCSQTTProvision(payload []byte) (*csqttProvision, error) {
@@ -792,6 +836,14 @@ func isCSQTTPathAckPacket(payload []byte) bool {
 	return len(payload) == len(csqttPathReceiptAck)+10 && bytes.HasPrefix(payload, csqttPathReceiptAck)
 }
 
+func (w *csqttWorker) isCurrentPathAck(payload []byte) bool {
+	workerID, sequence, ok := parseCSQTTPathAck(payload)
+	if !ok {
+		return false
+	}
+	return workerID == uint16(w.wireID()) && sequence != 0 && sequence == w.outstandingProbe.Load()
+}
+
 func buildCSQTTPathProbe(deviceID string, generation uint64, workerID int) []byte {
 	device := []byte(strings.TrimSpace(deviceID))
 	if len(device) == 0 || len(device) > 16 || workerID <= 0 || workerID > 162 {
@@ -815,6 +867,16 @@ func encodeCSQTTPathProbeSequence(sequence uint64) []byte {
 	value := make([]byte, 8)
 	binary.BigEndian.PutUint64(value, sequence)
 	return value
+}
+
+func parseCSQTTPathAck(payload []byte) (uint16, uint64, bool) {
+	if !isCSQTTPathAckPacket(payload) {
+		return 0, 0, false
+	}
+	offset := len(csqttPathReceiptAck)
+	workerID := binary.BigEndian.Uint16(payload[offset : offset+2])
+	sequence := binary.BigEndian.Uint64(payload[offset+2 : offset+10])
+	return workerID, sequence, true
 }
 
 func deriveCSQTTWrapKey(password string) ([]byte, error) {
