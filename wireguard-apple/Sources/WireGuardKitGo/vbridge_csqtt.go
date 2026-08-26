@@ -118,6 +118,8 @@ type csqttRuntime struct {
 
 	workersMu sync.Mutex
 	workers   []*csqttWorker
+	getCreds  getCredsFunc
+	resetCreds func()
 }
 
 type csqttWorker struct {
@@ -197,6 +199,10 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		workerCount = 1
 	}
 	workerCount += max(config.CSQTTExtraThreads, 0)
+	identityPoolSize := ceilDiv(workerCount, 12)
+	if identityPoolSize < 1 {
+		identityPoolSize = 1
+	}
 	useMasking := true
 	if config.CSQTTUseMasking != nil {
 		useMasking = *config.CSQTTUseMasking
@@ -229,7 +235,11 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		readyCh:     make(chan struct{}),
 		provisionCh: make(chan struct{}),
 	}
+	runtime.getCreds, runtime.resetCreds = poolCreds(func(ctx context.Context, hash string) (*turnCred, error) {
+		return getVKTurnCredWithFallback(ctx, hash)
+	}, identityPoolSize)
 	runtime.dispatcher = &csqttDispatcher{runtime: runtime}
+	log.Printf("csqtt: TURN identity strategy: %d workers, %d cached identities", workerCount, identityPoolSize)
 	return runtime, nil
 }
 
@@ -503,7 +513,7 @@ func (w *csqttWorker) run() {
 
 func (w *csqttWorker) runSingleSession(hash string) error {
 	ctx := w.runtime.ctx
-	cred, err := getVKTurnCredWithFallback(ctx, hash)
+	cred, err := w.runtime.getCreds(ctx, hash)
 	if err != nil {
 		return fmt.Errorf("get turn creds: %w", err)
 	}
