@@ -21,6 +21,7 @@ private let splitTunnelSynchronousDomainLimit = 64
 private let splitTunnelMetadataFileName = "split-tunnel-metadata.json"
 private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
+private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
 
 private func configureGoRuntimeMemoryBeforeFirstCall() {
     setenv("GOMEMLIMIT", goRuntimeMemoryLimit, 1)
@@ -627,9 +628,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         SharedLogger.markTunnelProviderStarted()
         NSLog("START TUNNEL CALLED")
+        NSLog("BUILD MARKER %@", packetTunnelBuildMarker)
         configureGoRuntimeMemoryBeforeFirstCall()
         sharedLogger.log("START TUNNEL CALLED")
+        sharedLogger.log("BUILD MARKER \(packetTunnelBuildMarker, privacy: .public)")
         SharedLogger.info("START TUNNEL CALLED", source: .tunnel)
+        SharedLogger.info("BUILD MARKER \(packetTunnelBuildMarker)", source: .tunnel)
         sharedLogger.log("=== Starting tunnel ===")
         SharedLogger.info("Starting tunnel", source: .tunnel)
         VBridgeWGSetLogger(vbridgeGoLoggerCallback)
