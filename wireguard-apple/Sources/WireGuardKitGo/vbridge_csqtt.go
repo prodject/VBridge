@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +52,7 @@ const (
 	csqttMaxPacketSize     = 4096
 	csqttKeepaliveByte     = 0xff
 	csqttKeepaliveSize     = 16
+	csqttPathProbeSize     = 45
 )
 
 var csqttProvisionAttempts = []time.Duration{
@@ -59,6 +61,11 @@ var csqttProvisionAttempts = []time.Duration{
 	6 * time.Second,
 	csqttProvisionTimeout,
 }
+
+var (
+	csqttPathReceiptAck = []byte{0xff, 'C', 'S', 'Q', 'T', 'T', '_', 'R', 'X', '_', 'A', 'C', 'K'}
+	csqttPathProbeMagic = []byte{'C', 'S', 'Q', '2'}
+)
 
 type csqttProvision struct {
 	Address   string `json:"address"`
@@ -675,11 +682,21 @@ func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
 	ticker := time.NewTicker(csqttKeepaliveInterval)
 	defer ticker.Stop()
 	ping := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttKeepaliveSize)
+	probe := buildCSQTTPathProbe(w.runtime.deviceID, w.runtime.generation, w.wireID())
+	var probeSequence uint64
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if len(probe) == csqttPathProbeSize {
+				probeSequence++
+				copy(probe[31:39], encodeCSQTTPathProbeSequence(probeSequence))
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if _, err := conn.Write(probe); err != nil {
+					return
+				}
+			}
 			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if _, err := conn.Write(ping); err != nil {
 				return
@@ -727,6 +744,9 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 		if isCSQTTKeepalivePacket(payload) {
 			continue
 		}
+		if isCSQTTPathAckPacket(payload) {
+			continue
+		}
 		w.runtime.writeTUNPacket(payload)
 	}
 }
@@ -766,6 +786,35 @@ func isCSQTTKeepalivePacket(payload []byte) bool {
 		}
 	}
 	return true
+}
+
+func isCSQTTPathAckPacket(payload []byte) bool {
+	return len(payload) == len(csqttPathReceiptAck)+10 && bytes.HasPrefix(payload, csqttPathReceiptAck)
+}
+
+func buildCSQTTPathProbe(deviceID string, generation uint64, workerID int) []byte {
+	device := []byte(strings.TrimSpace(deviceID))
+	if len(device) == 0 || len(device) > 16 || workerID <= 0 || workerID > 162 {
+		return nil
+	}
+	payload := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttPathProbeSize)
+	for index := 1; index < 17; index++ {
+		payload[index] = 0
+	}
+	copy(payload[1:1+len(device)], device)
+	binary.BigEndian.PutUint64(payload[17:25], generation)
+	copy(payload[25:29], csqttPathProbeMagic)
+	binary.BigEndian.PutUint16(payload[29:31], uint16(workerID))
+	for index := 31; index < 39; index++ {
+		payload[index] = 0
+	}
+	return payload
+}
+
+func encodeCSQTTPathProbeSequence(sequence uint64) []byte {
+	value := make([]byte, 8)
+	binary.BigEndian.PutUint64(value, sequence)
+	return value
 }
 
 func deriveCSQTTWrapKey(password string) ([]byte, error) {
