@@ -47,6 +47,8 @@ const (
 	csqttHeaderLen         = 24
 	csqttTagLen            = 16
 	csqttMaxPacketSize     = 4096
+	csqttKeepaliveByte     = 0xff
+	csqttKeepaliveSize     = 16
 )
 
 type csqttProvision struct {
@@ -642,7 +644,7 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
 	ticker := time.NewTicker(csqttKeepaliveInterval)
 	defer ticker.Stop()
-	ping := []byte{0xff}
+	ping := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttKeepaliveSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -692,6 +694,9 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 			}
 			continue
 		}
+		if isCSQTTKeepalivePacket(payload) {
+			continue
+		}
 		w.runtime.writeTUNPacket(payload)
 	}
 }
@@ -719,6 +724,18 @@ func isCSQTTControlPacket(payload []byte) bool {
 		text == "NOCONF" ||
 		text == "READY_OK" ||
 		text == "OK:disconnected"
+}
+
+func isCSQTTKeepalivePacket(payload []byte) bool {
+	if len(payload) != csqttKeepaliveSize {
+		return false
+	}
+	for _, value := range payload {
+		if value != csqttKeepaliveByte {
+			return false
+		}
+	}
+	return true
 }
 
 func deriveCSQTTWrapKey(password string) ([]byte, error) {
