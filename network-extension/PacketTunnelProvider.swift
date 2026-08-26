@@ -772,6 +772,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self = self else { return }
             let bootstrapStartedAt = Date()
+            NSLog("CSQTT/WDTT: starting bootstrap runtime mode=%@", transportMode)
             SharedLogger.info("Starting VK/TURN bootstrap runtime", source: .tunnel)
             let handle = proxyConfigJSON.withCString {
                 VBridgeWGStartVKBootstrap(UnsafeMutablePointer(mutating: $0))
@@ -782,10 +783,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 return
             }
             self.vbridgeTunnelHandle = handle
+            NSLog("CSQTT/WDTT: bootstrap handle=%d mode=%@", handle, transportMode)
             SharedLogger.info("VK/TURN bootstrap runtime started; waiting for readiness", source: .tunnel)
 
             var networkSettings: NEPacketTunnelNetworkSettings
             var effectiveUAPI = wgUAPI
+            NSLog("CSQTT/WDTT: waiting bootstrap ready handle=%d timeoutMs=120000", handle)
             let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
             let bootstrapElapsed = Int(Date().timeIntervalSince(bootstrapStartedAt) * 1000)
             guard ready == 1 else {
@@ -799,6 +802,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                 return
             }
+            NSLog("CSQTT/WDTT: bootstrap ready handle=%d elapsedMs=%d", handle, bootstrapElapsed)
             SharedLogger.info("VK/TURN bootstrap ready after \(bootstrapElapsed)ms", source: .tunnel)
 
             let turnServerIP = self.currentTURNServerIP(handle: handle)
@@ -837,6 +841,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     splitTunnel: splitTunnel
                 )
             } else if isCSQTT {
+                NSLog("CSQTT: waiting provision handle=%d timeoutMs=30000", handle)
                 SharedLogger.info("CSQTT waiting for TUNCONF provision", source: .tunnel)
                 let provisionStartedAt = Date()
                 guard let provisionJSON = self.waitForCSQTTProvision(handle: handle, timeoutMs: 30000),
@@ -850,6 +855,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     return
                 }
                 let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                NSLog("CSQTT: provision received handle=%d elapsedMs=%d payloadBytes=%d", handle, provisionElapsed, provisionJSON.utf8.count)
                 SharedLogger.info("CSQTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 self.activeProvisionAddress = provision.address
                 self.activeProvisionFallbackDNS = provision.dns
@@ -874,6 +880,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             DispatchQueue.main.async {
+                NSLog("CSQTT/WDTT: applying tunnel network settings handle=%d", handle)
                 SharedLogger.info("Applying packet tunnel network settings", source: .tunnel)
                 self.setTunnelNetworkSettings(networkSettings) { error in
                     if let error = error {
@@ -894,6 +901,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
                     let attachResult: Int32
                     if isCSQTT {
+                        NSLog("CSQTT: attaching TUN handle=%d tunFd=%d", handle, tunFd)
                         attachResult = VBridgeWGAttachCSQTT(handle, tunFd)
                     } else {
                         attachResult = effectiveUAPI.withCString {
@@ -911,6 +919,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
                         return
                     }
+                    NSLog("CSQTT/WDTT: attach success handle=%d mode=%@", handle, transportMode)
                     self.lastAppliedNetworkSettings = networkSettings
                     if isCSQTT {
                         SharedLogger.info("Tunnel up with CSQTT runtime", source: .tunnel)

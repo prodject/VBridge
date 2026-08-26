@@ -1058,11 +1058,15 @@ func VBridgeWGWaitCSQTTProvision(tunnelHandle C.int32_t, timeoutMs C.int32_t) *C
 	entry, ok := tunnels[id]
 	tunnelsMu.Unlock()
 	if !ok || entry.csqtt == nil {
+		log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d missing csqtt entry", id)
 		return C.CString("")
 	}
-	provision, err := entry.csqtt.WaitProvision(time.Duration(int64(timeoutMs)) * time.Millisecond)
+	timeout := time.Duration(int64(timeoutMs)) * time.Millisecond
+	startedAt := time.Now()
+	log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d wait start timeout=%s", id, timeout)
+	provision, err := entry.csqtt.WaitProvision(timeout)
 	if err != nil {
-		log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d: %v", id, err)
+		log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d failed after %s: %v", id, time.Since(startedAt).Round(10*time.Millisecond), err)
 		return C.CString("")
 	}
 	data, err := json.Marshal(provision)
@@ -1070,6 +1074,7 @@ func VBridgeWGWaitCSQTTProvision(tunnelHandle C.int32_t, timeoutMs C.int32_t) *C
 		log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d marshal: %v", id, err)
 		return C.CString("")
 	}
+	log.Printf("VBridgeWGWaitCSQTTProvision: tunnel %d ready after %s address=%s mtu=%d", id, time.Since(startedAt).Round(10*time.Millisecond), provision.Address, provision.MTU)
 	return C.CString(string(data))
 }
 
@@ -1080,8 +1085,10 @@ func VBridgeWGAttachCSQTT(tunnelHandle C.int32_t, tunFd C.int32_t) C.int32_t {
 	entry, ok := tunnels[id]
 	tunnelsMu.Unlock()
 	if !ok || entry.csqtt == nil {
+		log.Printf("VBridgeWGAttachCSQTT: tunnel %d missing csqtt entry", id)
 		return -1
 	}
+	log.Printf("VBridgeWGAttachCSQTT: tunnel %d attach start tunFd=%d", id, int32(tunFd))
 	if err := entry.csqtt.AttachTUN(int32(tunFd)); err != nil {
 		log.Printf("VBridgeWGAttachCSQTT: tunnel %d: %v", id, err)
 		return -2

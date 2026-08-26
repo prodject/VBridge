@@ -497,16 +497,18 @@ func VBridgeWGWaitBootstrapReady(tunnelHandle C.int32_t, timeoutMs C.int32_t) C.
 
 	timeout := time.Duration(int64(timeoutMs)) * time.Millisecond
 	if entry.csqtt != nil {
+		startedAt := time.Now()
+		log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d csqtt wait start timeout=%s", id, timeout)
 		err := entry.csqtt.WaitBootstrap(timeout)
 		if err == nil {
-			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d ready", id)
+			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d csqtt ready after %s", id, time.Since(startedAt).Round(10*time.Millisecond))
 			return 1
 		}
 		if strings.Contains(err.Error(), "timeout") {
-			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d timeout after %s", id, timeout)
+			log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d csqtt timeout after %s (waited %s)", id, timeout, time.Since(startedAt).Round(10*time.Millisecond))
 			return 0
 		}
-		log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d failed: %v", id, err)
+		log.Printf("VBridgeWGWaitBootstrapReady: tunnel %d csqtt failed after %s: %v", id, time.Since(startedAt).Round(10*time.Millisecond), err)
 		return -1
 	}
 	err := entry.proxy.WaitBootstrap(timeout)
