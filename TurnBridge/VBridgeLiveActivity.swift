@@ -164,7 +164,6 @@ struct VBridgeWidgetSnapshot: Codable, Hashable {
 
 @available(iOS 16.1, *)
 enum VBridgeWidgetSnapshotStore {
-    private static let appGroupID = "group.com.prodject.vbridge"
     private static let snapshotKey = "vbridge.widget.snapshot"
 
     private static let encoder: JSONEncoder = {
@@ -180,7 +179,7 @@ enum VBridgeWidgetSnapshotStore {
     }()
 
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+        SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true)
     }
 
     static func load() -> VBridgeWidgetSnapshot? {
@@ -204,6 +203,7 @@ enum VBridgeWidgetSnapshotStore {
 
     private static func reloadWidgetTimelinesIfAvailable() {
 #if canImport(WidgetKit)
+        guard SharedLogger.supportsSharedContainerFeatures else { return }
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
     }
@@ -211,7 +211,6 @@ enum VBridgeWidgetSnapshotStore {
 
 @available(iOS 16.1, *)
 enum VBridgeLiveActivityStore {
-    private static let appGroupID = "group.com.prodject.vbridge"
     private static let snapshotKey = "vbridge.live.activity.snapshot"
 
     private static let encoder: JSONEncoder = {
@@ -227,7 +226,7 @@ enum VBridgeLiveActivityStore {
     }()
 
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+        SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true)
     }
 
     static func load() -> VBridgeLiveActivitySnapshot? {
@@ -356,6 +355,7 @@ enum VBridgeLiveActivityStore {
 
     private static func reloadWidgetTimelinesIfAvailable() {
 #if canImport(WidgetKit)
+        guard SharedLogger.supportsSharedContainerFeatures else { return }
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
     }
@@ -489,6 +489,10 @@ final class VBridgeLiveActivityCoordinator {
     }
 
     private func apply(snapshot: VBridgeLiveActivitySnapshot) async {
+        guard SharedLogger.supportsSharedContainerFeatures else {
+            activity = nil
+            return
+        }
         let content = ActivityContent(
             state: snapshot.content,
             staleDate: snapshot.content.phase == .connecting ? Date().addingTimeInterval(45) : nil,

@@ -12,16 +12,19 @@ extension Notification.Name {
 }
 
 enum PendingShortcutActionStore {
-    private static let suiteName = "group.com.prodject.vbridge"
     private static let key = "pending.shortcut.action"
 
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: suiteName)
+        SharedLogger.sharedUserDefaults()
     }
 
     static func store(_ action: PendingShortcutAction) {
-        defaults?.set(action.rawValue, forKey: key)
-        defaults?.synchronize()
+        guard let defaults else {
+            SharedLogger.debug("Shortcut action ignored: shared App Group defaults unavailable")
+            return
+        }
+        defaults.set(action.rawValue, forKey: key)
+        defaults.synchronize()
         NotificationCenter.default.post(name: .pendingShortcutActionDidChange, object: nil)
     }
 

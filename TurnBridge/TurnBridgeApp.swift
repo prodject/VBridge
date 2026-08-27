@@ -21,7 +21,11 @@ struct VBridge: App {
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
 #if !targetEnvironment(macCatalyst)
         if #available(iOS 16.0, *) {
-            VBridgeAppShortcuts.updateAppShortcutParameters()
+            if SharedLogger.supportsSharedContainerFeatures {
+                VBridgeAppShortcuts.updateAppShortcutParameters()
+            } else {
+                SharedLogger.info("App shortcuts disabled: shared App Group unavailable")
+            }
         }
 #endif
     }

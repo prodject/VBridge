@@ -1969,6 +1969,7 @@ struct ContentView: View {
 
     private func refreshWidgetTimelines() {
 #if canImport(WidgetKit)
+        guard SharedLogger.supportsSharedContainerFeatures else { return }
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #if !targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
@@ -2012,6 +2013,9 @@ struct ContentView: View {
 
     @discardableResult
     private func consumePendingShortcutActionIfReady() -> Bool {
+        guard SharedLogger.supportsSharedContainerFeatures else {
+            return false
+        }
         guard hasLoadedInitialStatus else {
             return false
         }

@@ -139,6 +139,27 @@ public struct SharedLogger {
 
     static var appGroupID: String? { _appGroupID }
 
+    static var hasUsableAppGroup: Bool {
+        appGroupID != nil
+    }
+
+    static var supportsSharedContainerFeatures: Bool {
+        hasUsableAppGroup
+    }
+
+    static func sharedUserDefaults(fallbackToStandardInMainApp: Bool = false) -> UserDefaults? {
+        if let groupID = appGroupID,
+           let sharedDefaults = UserDefaults(suiteName: groupID) {
+            return sharedDefaults
+        }
+
+        guard fallbackToStandardInMainApp,
+              !Bundle.main.bundlePath.hasSuffix(".appex") else {
+            return nil
+        }
+        return UserDefaults.standard
+    }
+
     private static func appGroupsFromBinary() -> [String]? {
         // Try own executable first
         if let path = Bundle.main.executablePath,
