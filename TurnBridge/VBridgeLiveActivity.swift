@@ -6,6 +6,28 @@ import WidgetKit
 #endif
 
 @available(iOS 16.1, *)
+private enum VBridgeSharedContainerSupport {
+    static let appGroupID = "group.com.prodject.vbridge"
+
+    static var isAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
+    }
+
+    static func sharedUserDefaults(fallbackToStandardInMainApp: Bool = false) -> UserDefaults? {
+        if let sharedDefaults = UserDefaults(suiteName: appGroupID),
+           FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil {
+            return sharedDefaults
+        }
+
+        guard fallbackToStandardInMainApp,
+              !Bundle.main.bundlePath.hasSuffix(".appex") else {
+            return nil
+        }
+        return UserDefaults.standard
+    }
+}
+
+@available(iOS 16.1, *)
 struct VBridgePingSample: Codable, Hashable {
     var name: String
     var latencyMs: Int?
@@ -179,7 +201,7 @@ enum VBridgeWidgetSnapshotStore {
     }()
 
     private static var defaults: UserDefaults? {
-        SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true)
+        VBridgeSharedContainerSupport.sharedUserDefaults(fallbackToStandardInMainApp: true)
     }
 
     static func load() -> VBridgeWidgetSnapshot? {
@@ -203,7 +225,7 @@ enum VBridgeWidgetSnapshotStore {
 
     private static func reloadWidgetTimelinesIfAvailable() {
 #if canImport(WidgetKit)
-        guard SharedLogger.supportsSharedContainerFeatures else { return }
+        guard VBridgeSharedContainerSupport.isAvailable else { return }
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
     }
@@ -226,7 +248,7 @@ enum VBridgeLiveActivityStore {
     }()
 
     private static var defaults: UserDefaults? {
-        SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true)
+        VBridgeSharedContainerSupport.sharedUserDefaults(fallbackToStandardInMainApp: true)
     }
 
     static func load() -> VBridgeLiveActivitySnapshot? {
@@ -355,7 +377,7 @@ enum VBridgeLiveActivityStore {
 
     private static func reloadWidgetTimelinesIfAvailable() {
 #if canImport(WidgetKit)
-        guard SharedLogger.supportsSharedContainerFeatures else { return }
+        guard VBridgeSharedContainerSupport.isAvailable else { return }
         WidgetCenter.shared.reloadTimelines(ofKind: "VBridgeWidget")
 #endif
     }
@@ -489,7 +511,7 @@ final class VBridgeLiveActivityCoordinator {
     }
 
     private func apply(snapshot: VBridgeLiveActivitySnapshot) async {
-        guard SharedLogger.supportsSharedContainerFeatures else {
+        guard VBridgeSharedContainerSupport.isAvailable else {
             activity = nil
             return
         }

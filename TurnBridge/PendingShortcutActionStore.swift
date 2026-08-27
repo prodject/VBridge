@@ -12,15 +12,15 @@ extension Notification.Name {
 }
 
 enum PendingShortcutActionStore {
+    private static let appGroupID = "group.com.prodject.vbridge"
     private static let key = "pending.shortcut.action"
 
     private static var defaults: UserDefaults? {
-        SharedLogger.sharedUserDefaults()
+        UserDefaults(suiteName: appGroupID)
     }
 
     static func store(_ action: PendingShortcutAction) {
         guard let defaults else {
-            SharedLogger.debug("Shortcut action ignored: shared App Group defaults unavailable")
             return
         }
         defaults.set(action.rawValue, forKey: key)
