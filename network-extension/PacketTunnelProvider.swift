@@ -23,6 +23,39 @@ private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
 
+@discardableResult
+private func emitEarlyPacketTunnelMarker(_ event: String) -> String {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[\(timestamp)] [PT-EARLY] \(event) build=\(packetTunnelBuildMarker)"
+    NSLog("%@", line)
+
+    let fileManager = FileManager.default
+    let emergencyLogURL = fileManager.temporaryDirectory.appendingPathComponent("packet-tunnel-early.log")
+    let destinations = [emergencyLogURL, SharedLogger.logFileURL]
+
+    for destination in destinations {
+        guard let destination else { continue }
+        let parentDirectory = destination.deletingLastPathComponent()
+        try? fileManager.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+        let payload = "\(line)\n"
+        if let data = payload.data(using: .utf8) {
+            if fileManager.fileExists(atPath: destination.path) {
+                if let handle = try? FileHandle(forWritingTo: destination) {
+                    try? handle.seekToEnd()
+                    try? handle.write(contentsOf: data)
+                    try? handle.close()
+                }
+            } else {
+                try? data.write(to: destination, options: .atomic)
+            }
+        }
+    }
+
+    return line
+}
+
+private let packetTunnelModuleLoadMarker: String = emitEarlyPacketTunnelMarker("PacketTunnelProvider module loaded")
+
 private func configureGoRuntimeMemoryBeforeFirstCall() {
     setenv("GOMEMLIMIT", goRuntimeMemoryLimit, 1)
     setenv("GOGC", "25", 1)
@@ -205,6 +238,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var activeProvisionFallbackDNS = ""
     private var activeProvisionMTU = "1280"
     private var activeTunnelRemoteAddress = "10.0.0.1"
+
+    override init() {
+        super.init()
+        emitEarlyPacketTunnelMarker("PacketTunnelProvider init")
+        sharedLogger.log("EARLY MARKER: \(packetTunnelModuleLoadMarker, privacy: .public)")
+        SharedLogger.info("PacketTunnelProvider init", source: .tunnel)
+    }
 
 	    private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { [weak self] _, message in
