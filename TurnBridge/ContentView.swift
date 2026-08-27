@@ -1477,7 +1477,7 @@ struct ContentView: View {
 
     @MainActor
     private func awaitPreBootstrapCaptcha(url: String) async -> PreBootstrapCaptchaResult {
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             preBootstrapCaptchaContinuation = continuation
             preBootstrapCaptcha = PreBootstrapCaptchaChallenge(url: url)
         }
@@ -1803,7 +1803,7 @@ struct ContentView: View {
             return false
         }
 
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             guard let manager = tunnelManagerStore.manager,
                   let session = manager.connection as? NETunnelProviderSession else {
                 continuation.resume(returning: false)
@@ -1831,7 +1831,7 @@ struct ContentView: View {
             return true
         }
 
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             guard let manager = tunnelManagerStore.manager,
                   let session = manager.connection as? NETunnelProviderSession,
                   session.status == .connected || session.status == .reasserting else {
@@ -2874,7 +2874,7 @@ struct ContentView: View {
     }
 
     private func applyLiveDNSUpdate(profile: VPNProfile) async -> Bool {
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             guard let manager = tunnelManagerStore.manager,
                   let session = manager.connection as? NETunnelProviderSession,
                   session.status == .connected else {
