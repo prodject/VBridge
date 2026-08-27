@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import NetworkExtension
 
 struct LogView: View {
     @State private var entries: [LogEntry] = []
@@ -10,6 +11,8 @@ struct LogView: View {
     @State private var showFilters = false
     @State private var monitoringTask: Task<Void, Never>? = nil
     @State private var lastRawLines: [String] = []
+    @State private var isFetchingProviderTrace = false
+    @ObservedObject private var tunnelManagerStore = VBridgeTunnelManagerStore.shared
 
     var filteredEntries: [LogEntry] {
         entries.filter { entry in
@@ -42,6 +45,16 @@ struct LogView: View {
                     Image(systemName: "doc.on.doc")
                         .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                 }
+                Button(action: fetchProviderTrace) {
+                    if isFetchingProviderTrace {
+                        ProgressView()
+                            .tint(Color(red: 0.53, green: 0.37, blue: 0.98))
+                    } else {
+                        Image(systemName: "waveform.path.ecg.text")
+                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
+                    }
+                }
+                .disabled(isFetchingProviderTrace)
                 if let logURL = SharedLogger.logFileURL {
                     ShareLink(item: logURL) {
                         Image(systemName: "square.and.arrow.up")
@@ -339,5 +352,47 @@ struct LogView: View {
     private func copyLogs() {
         let text = filteredEntries.map { $0.rawLine }.joined(separator: "\n")
         UIPasteboard.general.string = text
+    }
+
+    private func fetchProviderTrace() {
+        guard !isFetchingProviderTrace else { return }
+        isFetchingProviderTrace = true
+
+        Task { @MainActor in
+            defer { isFetchingProviderTrace = false }
+
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession else {
+                SharedLogger.warning("Provider trace unavailable: tunnel extension session is not active")
+                await loadLogs()
+                return
+            }
+
+            let response = await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+                do {
+                    try session.sendProviderMessage(Data("vbridge_provider_trace_dump".utf8)) { data in
+                        continuation.resume(returning: data)
+                    }
+                } catch {
+                    SharedLogger.warning("Provider trace request failed: \(error.localizedDescription)")
+                    continuation.resume(returning: nil)
+                }
+            }
+
+            guard let response,
+                  let text = String(data: response, encoding: .utf8),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                SharedLogger.warning("Provider trace unavailable: extension returned no in-memory trace")
+                await loadLogs()
+                return
+            }
+
+            SharedLogger.info("Provider trace dump begin", source: .tunnel)
+            for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                SharedLogger.info(String(line), source: .tunnel)
+            }
+            SharedLogger.info("Provider trace dump end", source: .tunnel)
+            await loadLogs()
+        }
     }
 }

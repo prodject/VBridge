@@ -22,11 +22,29 @@ private let splitTunnelMetadataFileName = "split-tunnel-metadata.json"
 private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
+private let providerTraceDumpMessage = "vbridge_provider_trace_dump"
+private let providerTraceBufferLimit = 200
+private let providerTraceBufferLock = NSLock()
+private var providerTraceBuffer: [String] = []
 
 private func traceStartTunnel(_ message: String) {
+    providerTraceBufferLock.lock()
+    providerTraceBuffer.append(message)
+    if providerTraceBuffer.count > providerTraceBufferLimit {
+        providerTraceBuffer.removeFirst(providerTraceBuffer.count - providerTraceBufferLimit)
+    }
+    providerTraceBufferLock.unlock()
     NSLog("[TRACE][startTunnel] %@", message)
     sharedLogger.log("[TRACE][startTunnel] \(message, privacy: .public)")
     SharedLogger.info("[TRACE][startTunnel] \(message)", source: .tunnel)
+}
+
+private func providerTraceDumpData() -> Data? {
+    providerTraceBufferLock.lock()
+    let lines = providerTraceBuffer
+    providerTraceBufferLock.unlock()
+    guard !lines.isEmpty else { return nil }
+    return lines.joined(separator: "\n").data(using: .utf8)
 }
 
 private func sharedDefaultsForTunnel() -> UserDefaults? {
@@ -635,6 +653,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        providerTraceBufferLock.lock()
+        providerTraceBuffer.removeAll(keepingCapacity: true)
+        providerTraceBufferLock.unlock()
+
         func finishStartTunnel(_ error: Error?, stage: String) {
             if let error {
                 traceStartTunnel("completionHandler(error) stage=\(stage) error=\(error.localizedDescription)")
@@ -1506,6 +1528,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if messageData == Data("vbridge_provider_probe".utf8) {
             let response = "alive handle=\(vbridgeTunnelHandle)"
             completionHandler(Data(response.utf8))
+            return
+        }
+
+        if messageData == Data(providerTraceDumpMessage.utf8) {
+            completionHandler(providerTraceDumpData())
             return
         }
 
