@@ -227,15 +227,28 @@ public struct SharedLogger {
         }
 #endif
 
-        // Main-app fallback for improperly re-signed builds where the App
-        // Group entitlement is absent. The Network Extension cannot share this
-        // file, but app-side logs and UI remain usable instead of showing a
-        // broken empty state.
-        guard !Bundle.main.bundlePath.hasSuffix(".appex"),
-              let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
+        if let processLocalLogURL = processLocalLogFileURL {
+            return processLocalLogURL
         }
-        return documents.appendingPathComponent("vpn_tunnel.log")
+
+        return nil
+    }
+
+    private nonisolated static var processLocalLogFileURL: URL? {
+        let fileManager = FileManager.default
+
+        if Bundle.main.bundlePath.hasSuffix(".appex") {
+            if let container = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                return container.appendingPathComponent("vpn_tunnel_extension.log")
+            }
+            return fileManager.temporaryDirectory.appendingPathComponent("vpn_tunnel_extension.log")
+        }
+
+        if let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            return documents.appendingPathComponent("vpn_tunnel.log")
+        }
+
+        return nil
     }
 
     private static var tunnelProviderLaunchMarkerURL: URL? {

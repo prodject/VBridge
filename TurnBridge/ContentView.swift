@@ -3270,8 +3270,7 @@ struct ContentView: View {
     }
 
     private func loadCaptchaRecoveryRequest() -> CaptchaRecoveryRequest? {
-        guard let groupID = SharedLogger.appGroupID,
-              let defaults = UserDefaults(suiteName: groupID),
+        guard let defaults = SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true),
               let data = defaults.data(forKey: "captcha.recovery.request") else {
             return nil
         }
@@ -3279,10 +3278,7 @@ struct ContentView: View {
     }
 
     private func clearCaptchaRecoveryRequest() {
-        guard let groupID = SharedLogger.appGroupID,
-              let defaults = UserDefaults(suiteName: groupID) else {
-            return
-        }
+        guard let defaults = SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true) else { return }
         defaults.removeObject(forKey: "captcha.recovery.request")
     }
 

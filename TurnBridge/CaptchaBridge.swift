@@ -36,11 +36,7 @@ final class CaptchaBridge: ObservableObject {
     private var notificationObserver: AnyObject?
 
     init() {
-        if let groupID = SharedLogger.appGroupID {
-            defaults = UserDefaults(suiteName: groupID)
-        } else {
-            defaults = nil
-        }
+        defaults = SharedLogger.sharedUserDefaults(fallbackToStandardInMainApp: true)
         refresh()
         startMonitoring()
         startNotificationObserver()

@@ -20,10 +20,16 @@ enum CredCache {
     private static let saturationCooldown: TimeInterval = 600
 
     private static var cacheURL: URL? {
-        guard let groupID = SharedLogger.appGroupID else { return nil }
-        return FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: groupID)?
-            .appendingPathComponent("creds-pool.json")
+        if let groupID = SharedLogger.appGroupID,
+           let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: groupID) {
+            return container.appendingPathComponent("creds-pool.json")
+        }
+
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documents.appendingPathComponent("creds-pool.json")
     }
 
     static func loadValidCred() -> SeededTURNCredentials? {

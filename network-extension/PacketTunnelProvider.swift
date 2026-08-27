@@ -69,13 +69,25 @@ private struct CaptchaRecoveryRequest: Codable {
     let createdAt: TimeInterval
 }
 
+private func packetTunnelSharedDefaults() -> UserDefaults? {
+    if let groupID = SharedLogger.appGroupID,
+       let defaults = UserDefaults(suiteName: groupID) {
+        return defaults
+    }
+
+    // Sideloaded builds often lose the shared App Group while the packet
+    // tunnel container itself remains writable. Keep provider-local state
+    // alive so startup and recovery paths do not depend on the shared
+    // container.
+    return UserDefaults.standard
+}
+
 private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void = { _, messageCStr in
     guard let messageCStr else { return }
     let payload = String(cString: messageCStr)
     guard let payloadData = payload.data(using: .utf8) else { return }
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
-        sharedLogger.error("[TP]: unable to access shared defaults for captcha payload")
+    guard let defaults = packetTunnelSharedDefaults() else {
+        sharedLogger.error("[TP]: unable to access provider defaults for captcha payload")
         return
     }
 
@@ -92,10 +104,7 @@ private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, Un
 }
 
 private func clearCaptchaRequest() {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
-        return
-    }
+    guard let defaults = packetTunnelSharedDefaults() else { return }
 
     defaults.removeObject(forKey: captchaRequestStorageKey)
     defaults.synchronize()
@@ -109,10 +118,7 @@ private func clearCaptchaRequest() {
 }
 
 private func storeCaptchaRecoveryRequest(reason: String) {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
-        return
-    }
+    guard let defaults = packetTunnelSharedDefaults() else { return }
 
     let request = CaptchaRecoveryRequest(
         id: UUID().uuidString,
@@ -136,10 +142,7 @@ private func storeCaptchaRecoveryRequest(reason: String) {
 }
 
 private func clearCaptchaRecoveryRequest() {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
-        return
-    }
+    guard let defaults = packetTunnelSharedDefaults() else { return }
 
     defaults.removeObject(forKey: captchaRecoveryStorageKey)
     defaults.synchronize()
@@ -1088,8 +1091,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func persistedDeviceID() -> String {
         let key = "wdtt.device.id"
-        if let groupID = SharedLogger.appGroupID,
-           let defaults = UserDefaults(suiteName: groupID) {
+        if let defaults = packetTunnelSharedDefaults() {
             if let existing = defaults.string(forKey: key), !existing.isEmpty {
                 return existing
             }
