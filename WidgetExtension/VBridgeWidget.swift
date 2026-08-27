@@ -384,7 +384,7 @@ private struct WidgetSnapshot: Equatable {
         self.ispName = liveSnapshot.content.ispName ?? fallback?.ispName
         self.ipAddress = liveSnapshot.content.ipAddress ?? fallback?.ipAddress
         if let livePingSamples = liveSnapshot.content.pingSamples {
-            self.pings = livePingSamples.map(PingSample.init(shared:))
+            self.pings = livePingSamples.map { PingSample(shared: $0) }
         } else if state == .connected {
             self.pings = fallback?.pings ?? PingSample.placeholderSamples
         } else {
@@ -406,7 +406,7 @@ private struct WidgetSnapshot: Equatable {
         self.ispName = sharedSnapshot.ispName ?? fallback?.ispName
         self.ipAddress = sharedSnapshot.ipAddress ?? fallback?.ipAddress
         if let pingSamples = sharedSnapshot.pingSamples {
-            self.pings = pingSamples.map(PingSample.init(shared:))
+            self.pings = pingSamples.map { PingSample(shared: $0) }
         } else {
             self.pings = fallback?.pings ?? PingSample.placeholderSamples
         }

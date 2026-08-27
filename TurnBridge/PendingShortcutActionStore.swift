@@ -16,10 +16,24 @@ enum PendingShortcutActionStore {
     private static var didLogUnavailableWarning = false
 
     private static var defaults: UserDefaults? {
-        guard let groupID = SharedLogger.appGroupID else {
+        guard let groupID = appGroupID else {
             return nil
         }
         return UserDefaults(suiteName: groupID)
+    }
+
+    private static var appGroupID: String? {
+        let candidates = [
+            "group.com.prodject.vbridge",
+            Bundle.main.bundleIdentifier.map { "group.\($0.replacingOccurrences(of: ".network-extension", with: ""))" }
+        ].compactMap { $0 }
+
+        for candidate in candidates {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: candidate) != nil {
+                return candidate
+            }
+        }
+        return nil
     }
 
     static var isAvailable: Bool {
@@ -29,9 +43,7 @@ enum PendingShortcutActionStore {
     private static func logUnavailableIfNeeded() {
         guard !didLogUnavailableWarning else { return }
         didLogUnavailableWarning = true
-        SharedLogger.warning(
-            "Shortcuts and widget control actions are unavailable in this build because the shared App Group container is missing."
-        )
+        NSLog("Shortcuts and widget control actions are unavailable in this build because the shared App Group container is missing.")
     }
 
     static func store(_ action: PendingShortcutAction) {

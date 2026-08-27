@@ -684,7 +684,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             do {
-                let baseConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
                 activeBaseWgQuickConfig = wgQuickConfig
                 let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
                 let dnsMode = (providerConfiguration["dnsMode"] as? String) ?? "server"

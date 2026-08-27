@@ -149,7 +149,109 @@ public struct SharedLogger {
     }
 
     static var appGroupDiagnostics: String {
-        AppEntitlements.appGroupDiagnosis(required: defaultAppGroupID)
+        appGroupDiagnosis(required: defaultAppGroupID)
+    }
+
+    private static func appGroupDiagnosis(required: String) -> String {
+        let entitlements = currentAppEntitlements()
+        if let error = entitlements.error {
+            return "Could not read this build's entitlements (\(error)). Cannot tell whether \(required) was granted."
+        }
+
+        let team = entitlements.effectiveTeam ?? "unknown team"
+        let groups = entitlements.applicationGroups.isEmpty
+            ? "none"
+            : entitlements.applicationGroups.joined(separator: ", ")
+
+        if entitlements.applicationGroups.contains(required) {
+            return "This build is entitled to \(required) (team \(team)). The shared container should be available."
+        }
+
+        return """
+        This build is NOT entitled to \(required).
+        Signed by team \(team)\(entitlements.applicationIdentifier.map { " (app id \($0))" } ?? "").
+        App Groups it does have: \(groups).
+        That means the IPA was re-signed by a third party, so the original shared container cannot be preserved.
+        Shared logging between app and tunnel, TURN credential cache, shared captcha state, widgets and extension statistics are disabled in this build.
+        The VPN may still work, but the app cannot rely on App Group IPC.
+        """
+    }
+
+    private struct RuntimeEntitlements {
+        let applicationIdentifier: String?
+        let teamIdentifier: String?
+        let applicationGroups: [String]
+        let error: String?
+
+        var effectiveTeam: String? {
+            if let teamIdentifier, !teamIdentifier.isEmpty {
+                return teamIdentifier
+            }
+            guard let applicationIdentifier,
+                  let dot = applicationIdentifier.firstIndex(of: ".") else {
+                return nil
+            }
+            return String(applicationIdentifier[..<dot])
+        }
+    }
+
+    private static func currentAppEntitlements() -> RuntimeEntitlements {
+        guard let executablePath = Bundle.main.executablePath else {
+            return RuntimeEntitlements(
+                applicationIdentifier: nil,
+                teamIdentifier: nil,
+                applicationGroups: [],
+                error: "missing executable path"
+            )
+        }
+
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: executablePath))
+            guard let plist = extractEntitlementsPlist(fromBinaryData: data) else {
+                return RuntimeEntitlements(
+                    applicationIdentifier: nil,
+                    teamIdentifier: nil,
+                    applicationGroups: [],
+                    error: "entitlements plist not found"
+                )
+            }
+
+            return RuntimeEntitlements(
+                applicationIdentifier: plist["application-identifier"] as? String,
+                teamIdentifier: plist["com.apple.developer.team-identifier"] as? String,
+                applicationGroups: plist["com.apple.security.application-groups"] as? [String] ?? [],
+                error: nil
+            )
+        } catch {
+            return RuntimeEntitlements(
+                applicationIdentifier: nil,
+                teamIdentifier: nil,
+                applicationGroups: [],
+                error: error.localizedDescription
+            )
+        }
+    }
+
+    private static func extractEntitlementsPlist(fromBinaryData data: Data) -> [String: Any]? {
+        let xmlMarker = Data("<?xml".utf8)
+        let endMarker = Data("</plist>".utf8)
+        var searchRange = data.startIndex..<data.endIndex
+
+        while let xmlStart = data.range(of: xmlMarker, in: searchRange) {
+            guard let xmlEnd = data.range(of: endMarker, in: xmlStart.lowerBound..<data.endIndex) else {
+                break
+            }
+
+            let plistData = data.subdata(in: xmlStart.lowerBound..<xmlEnd.upperBound)
+            if let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
+               plist["application-identifier"] != nil || plist["com.apple.security.application-groups"] != nil {
+                return plist
+            }
+
+            searchRange = xmlEnd.upperBound..<data.endIndex
+        }
+
+        return nil
     }
 
     private static func appGroupsFromBinary() -> [String]? {

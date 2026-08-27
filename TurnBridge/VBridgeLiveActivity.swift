@@ -5,6 +5,30 @@ import Foundation
 import WidgetKit
 #endif
 
+private enum LiveActivitySharedStore {
+    static let defaultAppGroupID = "group.com.prodject.vbridge"
+
+    static func appGroupID() -> String? {
+        let candidates = [
+            defaultAppGroupID,
+            derivedAppGroupID()
+        ].compactMap { $0 }
+
+        for candidate in candidates {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: candidate) != nil {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func derivedAppGroupID() -> String? {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return nil }
+        let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
+        return "group.\(baseBundleID)"
+    }
+}
+
 @available(iOS 16.1, *)
 struct VBridgePingSample: Codable, Hashable {
     var name: String
@@ -179,7 +203,7 @@ enum VBridgeWidgetSnapshotStore {
     }()
 
     private static var defaults: UserDefaults? {
-        guard let groupID = SharedLogger.appGroupID else { return nil }
+        guard let groupID = LiveActivitySharedStore.appGroupID() else { return nil }
         return UserDefaults(suiteName: groupID)
     }
 
@@ -226,7 +250,7 @@ enum VBridgeLiveActivityStore {
     }()
 
     private static var defaults: UserDefaults? {
-        guard let groupID = SharedLogger.appGroupID else { return nil }
+        guard let groupID = LiveActivitySharedStore.appGroupID() else { return nil }
         return UserDefaults(suiteName: groupID)
     }
 
