@@ -303,22 +303,22 @@ jobs:
             GOOS=darwin GOARCH=arm64 go build \
               -trimpath \
               -ldflags "-s -w" \
-              -o "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper-arm64" \
+              -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-arm64" \
               ./cmd/vbridge-helper
             GOOS=darwin GOARCH=amd64 go build \
               -trimpath \
               -ldflags "-s -w" \
-              -o "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper-amd64" \
+              -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-amd64" \
               ./cmd/vbridge-helper
           )
 
           lipo -create \
-            "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper-arm64" \
-            "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper-amd64" \
-            -output "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper"
-          /usr/bin/codesign --force --sign - --timestamp=none "$HELPER_BUILD_DIR/com.prodject.vbridgex.helper"
+            "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-arm64" \
+            "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-amd64" \
+            -output "$HELPER_BUILD_DIR/com.prodject.vbridge.helper"
+          /usr/bin/codesign --force --sign - --timestamp=none "$HELPER_BUILD_DIR/com.prodject.vbridge.helper"
 
-          echo "helper_path=$HELPER_BUILD_DIR/com.prodject.vbridgex.helper" >> "$GITHUB_OUTPUT"
+          echo "helper_path=$HELPER_BUILD_DIR/com.prodject.vbridge.helper" >> "$GITHUB_OUTPUT"
 
       - name: Package macOS privileged helper
         id: package_helper
@@ -335,15 +335,15 @@ jobs:
           mkdir -p "$PKG_ROOT/Library/LaunchDaemons"
           mkdir -p "$PKG_SCRIPTS"
 
-          ditto "${{ steps.build_helper.outputs.helper_path }}" "$PKG_ROOT/Library/PrivilegedHelperTools/com.prodject.vbridgex.helper"
-          ditto "packaging/macos-helper/com.prodject.vbridgex.helper.plist" "$PKG_ROOT/Library/LaunchDaemons/com.prodject.vbridgex.helper.plist"
+          ditto "${{ steps.build_helper.outputs.helper_path }}" "$PKG_ROOT/Library/PrivilegedHelperTools/com.prodject.vbridge.helper"
+          ditto "packaging/macos-helper/com.prodject.vbridge.helper.plist" "$PKG_ROOT/Library/LaunchDaemons/com.prodject.vbridge.helper.plist"
           ditto "packaging/macos-helper/postinstall" "$PKG_SCRIPTS/postinstall"
           chmod 755 "$PKG_SCRIPTS/postinstall"
 
           pkgbuild \
             --root "$PKG_ROOT" \
             --scripts "$PKG_SCRIPTS" \
-            --identifier "com.prodject.vbridgex.helper.pkg" \
+            --identifier "com.prodject.vbridge.helper.pkg" \
             --version "$APP_VERSION" \
             --install-location "/" \
             "$HELPER_PKG_PATH"

@@ -5,7 +5,7 @@ import WidgetKit
 import SwiftUI
 
 private enum WidgetAppGroup {
-    static let identifier = "group.com.prodject.vbridgex"
+    static let identifier = "group.com.prodject.vbridge"
 }
 
 private enum WidgetActionStore {

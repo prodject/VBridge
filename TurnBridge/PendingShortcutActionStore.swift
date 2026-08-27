@@ -12,7 +12,7 @@ extension Notification.Name {
 }
 
 enum PendingShortcutActionStore {
-    private static let appGroupID = "group.com.prodject.vbridgex"
+    private static let appGroupID = "group.com.prodject.vbridge"
     private static let key = "pending.shortcut.action"
 
     private static var defaults: UserDefaults? {

@@ -648,7 +648,7 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
-						CFBundleURLName = com.prodject.vbridgex;
+						CFBundleURLName = com.prodject.vbridge;
 						CFBundleURLSchemes = (
 							vbridge,
 							wdtt,
@@ -668,7 +668,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge;
 				PRODUCT_NAME = VBridge;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -713,7 +713,7 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
-						CFBundleURLName = com.prodject.vbridgex;
+						CFBundleURLName = com.prodject.vbridge;
 						CFBundleURLSchemes = (
 							vbridge,
 							wdtt,
@@ -733,7 +733,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge;
 				PRODUCT_NAME = VBridge;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -767,7 +767,7 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
-						CFBundleURLName = com.prodject.vbridgex.mac;
+						CFBundleURLName = com.prodject.vbridge.mac;
 						CFBundleURLSchemes = (
 							vbridge,
 							wdtt,
@@ -781,7 +781,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.mac;
 				PRODUCT_NAME = VBridgeMac;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -815,7 +815,7 @@
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
-						CFBundleURLName = com.prodject.vbridgex.mac;
+						CFBundleURLName = com.prodject.vbridge.mac;
 						CFBundleURLSchemes = (
 							vbridge,
 							wdtt,
@@ -829,7 +829,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.mac;
 				PRODUCT_NAME = VBridgeMac;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -862,8 +862,8 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.tunnel;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridgex.mac.tunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.tunnel;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridge.mac.tunnel;
 				PRODUCT_MODULE_NAME = PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SKIP_INSTALL = YES;
@@ -898,8 +898,8 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.tunnel;
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridgex.mac.tunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.tunnel;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = com.prodject.vbridge.mac.tunnel;
 				PRODUCT_MODULE_NAME = PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SKIP_INSTALL = YES;
@@ -958,7 +958,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.widget;
 				PRODUCT_NAME = VBridgeWidgetExtension;
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -988,7 +988,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.2.8;
-				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridgex.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prodject.vbridge.widget;
 				PRODUCT_NAME = VBridgeWidgetExtension;
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

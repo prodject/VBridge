@@ -10,11 +10,11 @@ import os
 import Network
 import Darwin
 
-let sharedLogger = Logger(subsystem: "com.prodject.vbridgex.network-extension", category: "wgtunnel")
+let sharedLogger = Logger(subsystem: "com.prodject.vbridge.network-extension", category: "wgtunnel")
 private let captchaRequestStorageKey = "captcha.pending.request"
-private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridgex.captcha.pending.request.changed" as CFString)
+private let captchaRequestDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.pending.request.changed" as CFString)
 private let captchaRecoveryStorageKey = "captcha.recovery.request"
-private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridgex.captcha.recovery.request.changed" as CFString)
+private let captchaRecoveryDidChangeNotification = CFNotificationName(rawValue: "com.prodject.vbridge.captcha.recovery.request.changed" as CFString)
 private let splitTunnelMatchDomainPrefix = "__vbridge_match_domain__:"
 private let splitTunnelDisableGlobalDNSPrefix = "__vbridge_disable_global_dns__"
 private let splitTunnelSynchronousDomainLimit = 64
@@ -196,7 +196,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var vbridgeTunnelHandle: Int32 = -1
     private var activeTransportMode = "wg"
     private var pathMonitor: Network.NWPathMonitor?
-    private let pathMonitorQueue = DispatchQueue(label: "com.prodject.vbridgex.network-extension.path-monitor")
+    private let pathMonitorQueue = DispatchQueue(label: "com.prodject.vbridge.network-extension.path-monitor")
     private var lastObservedPathSummary: String?
     private var didPauseProxyForSleep = false
     private var activeSplitTunnel = SplitTunnelConfiguration(enabled: false, mode: .direct, rules: [])

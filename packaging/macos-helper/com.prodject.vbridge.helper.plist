@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.prodject.vbridgex.helper</string>
+	<string>com.prodject.vbridge.helper</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Library/PrivilegedHelperTools/com.prodject.vbridgex.helper</string>
+		<string>/Library/PrivilegedHelperTools/com.prodject.vbridge.helper</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

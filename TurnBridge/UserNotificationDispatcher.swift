@@ -3,10 +3,10 @@ import UIKit
 import UserNotifications
 
 enum AppNotificationIdentifier {
-    static let connectionIssue = "com.prodject.vbridgex.connection.issue"
+    static let connectionIssue = "com.prodject.vbridge.connection.issue"
 
     static func captcha(_ requestID: String) -> String {
-        "com.prodject.vbridgex.captcha.\(requestID)"
+        "com.prodject.vbridge.captcha.\(requestID)"
     }
 }
 

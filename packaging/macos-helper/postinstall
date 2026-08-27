@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-LABEL="com.prodject.vbridgex.helper"
+LABEL="com.prodject.vbridge.helper"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 HELPER="/Library/PrivilegedHelperTools/${LABEL}"
 

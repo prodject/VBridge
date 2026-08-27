@@ -7,7 +7,7 @@ import WidgetKit
 
 @available(iOS 16.1, *)
 private enum VBridgeSharedContainerSupport {
-    static let appGroupID = "group.com.prodject.vbridgex"
+    static let appGroupID = "group.com.prodject.vbridge"
 
     static var isAvailable: Bool {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
