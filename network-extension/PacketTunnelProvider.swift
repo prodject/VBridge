@@ -23,6 +23,12 @@ private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
 
+private func traceStartTunnel(_ message: String) {
+    NSLog("[TRACE][startTunnel] %@", message)
+    sharedLogger.log("[TRACE][startTunnel] \(message, privacy: .public)")
+    SharedLogger.info("[TRACE][startTunnel] \(message)", source: .tunnel)
+}
+
 private func sharedDefaultsForTunnel() -> UserDefaults? {
     guard let groupID = SharedLogger.appGroupID else {
         return nil
@@ -629,7 +635,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        func finishStartTunnel(_ error: Error?, stage: String) {
+            if let error {
+                traceStartTunnel("completionHandler(error) stage=\(stage) error=\(error.localizedDescription)")
+            } else {
+                traceStartTunnel("completionHandler(nil) stage=\(stage)")
+            }
+            completionHandler(error)
+        }
+
         SharedLogger.markTunnelProviderStarted()
+        traceStartTunnel("entered optionsKeys=\(options?.keys.sorted() ?? [])")
         NSLog("START TUNNEL CALLED")
         NSLog("BUILD MARKER %@", packetTunnelBuildMarker)
         configureGoRuntimeMemoryBeforeFirstCall()
@@ -642,20 +658,28 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         VBridgeWGSetLogger(vbridgeGoLoggerCallback)
         ProxySetCaptchaCallback(nil, goProxyCaptchaCallback)
         VBridgeWGSetTimezoneOffset(Int32(TimeZone.current.secondsFromGMT()))
+        traceStartTunnel("logger, captcha callback and timezone configured")
         if let logPath = SharedLogger.logFileURL?.path {
+            traceStartTunnel("log file path resolved path=\(logPath)")
             logPath.withCString {
                 VBridgeWGSetLogFilePath($0)
             }
+            traceStartTunnel("VBridgeWGSetLogFilePath completed")
+        } else {
+            traceStartTunnel("log file path unavailable")
         }
         clearCaptchaRecoveryRequest()
+        traceStartTunnel("captcha recovery request cleared")
 
+        traceStartTunnel("reading protocolConfiguration")
         guard let protocolConfiguration = self.protocolConfiguration as? NETunnelProviderProtocol,
               let providerConfiguration = protocolConfiguration.providerConfiguration else {
             sharedLogger.error("Invalid provider configuration")
             SharedLogger.error("Invalid provider configuration", source: .tunnel)
-            completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+            finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "invalid_protocol_configuration")
             return
         }
+        traceStartTunnel("providerConfiguration loaded keys=\(providerConfiguration.keys.sorted())")
 
         let rawTransportMode = (providerConfiguration["transportMode"] as? String) ?? "nil"
         let rawCSQTTPassword = ((providerConfiguration["csqttPassword"] as? String) ?? "").isEmpty ? "empty" : "set"
@@ -670,45 +694,58 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         activeTransportMode = transportMode
         let isWDTT = transportMode == "wdtt"
         let isCSQTT = transportMode == "csqtt"
+        traceStartTunnel("transport mode resolved mode=\(transportMode) isWDTT=\(isWDTT) isCSQTT=\(isCSQTT)")
+        traceStartTunnel("building split tunnel configuration")
         let splitTunnel = splitTunnelConfiguration(providerConfiguration: providerConfiguration)
         activeSplitTunnel = splitTunnel
+        traceStartTunnel("split tunnel configuration ready enabled=\(splitTunnel.enabled) mode=\(splitTunnel.mode.rawValue) rules=\(splitTunnel.rules.count)")
         var tunnelConfiguration: TunnelConfiguration?
         var wgUAPI = ""
 
         if !isWDTT && !isCSQTT {
+            traceStartTunnel("reading wgQuickConfig from providerConfiguration")
             guard let wgQuickConfig = providerConfiguration["wgQuickConfig"] as? String else {
                 sharedLogger.error("wgQuickConfig missing from provider configuration")
                 SharedLogger.error("WireGuard config missing from provider configuration", source: .wireguard)
-                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                finishStartTunnel(PacketTunnelProviderError.cantParseWgQuickConfig, stage: "wgquick_missing")
                 return
             }
+            traceStartTunnel("wgQuickConfig loaded bytes=\(wgQuickConfig.utf8.count)")
 
             do {
                 activeBaseWgQuickConfig = wgQuickConfig
+                traceStartTunnel("parsing wgQuickConfig")
                 let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: wgQuickConfig)
+                traceStartTunnel("wgQuickConfig parsed peers=\(parsedConfiguration.peers.count)")
                 let dnsMode = (providerConfiguration["dnsMode"] as? String) ?? "server"
                 let dnsPrimary = (providerConfiguration["dnsPrimary"] as? String) ?? ""
                 let dnsSecondary = (providerConfiguration["dnsSecondary"] as? String) ?? ""
+                traceStartTunnel("applying DNS override mode=\(dnsMode) primaryLen=\(dnsPrimary.count) secondaryLen=\(dnsSecondary.count)")
                 applyDNSOverride(mode: dnsMode, primary: dnsPrimary, secondary: dnsSecondary, to: parsedConfiguration)
+                traceStartTunnel("DNS override applied")
                 applySplitTunnelConfiguration(splitTunnel, to: parsedConfiguration)
+                traceStartTunnel("split tunnel applied to TunnelConfiguration")
                 tunnelConfiguration = parsedConfiguration
+                traceStartTunnel("generating WireGuard UAPI")
                 wgUAPI = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: parsedConfiguration,
                     resolvedEndpoints: parsedConfiguration.peers.map(\.endpoint)
                 ).uapiConfigurationString()
+                traceStartTunnel("WireGuard UAPI generated bytes=\(wgUAPI.utf8.count)")
             } catch {
                 sharedLogger.error("wg-quick config parse error: \(error.localizedDescription)")
                 SharedLogger.error("Failed to parse WireGuard config: \(error.localizedDescription)", source: .wireguard)
-                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                finishStartTunnel(PacketTunnelProviderError.cantParseWgQuickConfig, stage: "wgquick_parse_failed")
                 return
             }
         }
 
+        traceStartTunnel("reading proxy parameters")
         guard let peerAddr = providerConfiguration["peerAddr"] as? String,
               let nValueInt = providerConfiguration["nValue"] as? Int else {
             sharedLogger.error("Missing proxy parameters in configuration")
             SharedLogger.error("Missing proxy parameters in configuration", source: .tunnel)
-            completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+            finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "proxy_parameters_missing")
             return
         }
         let requestedNValue = Int32(nValueInt)
@@ -737,6 +774,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let csqttExtraThreads = max((providerConfiguration["csqttExtraThreads"] as? Int) ?? 0, 0)
         let csqttUseMasking = (providerConfiguration["csqttUseMasking"] as? Bool) ?? true
         let seededTURN = providerConfiguration["seededTURN"] as? [String: String]
+        traceStartTunnel("proxy parameters ready peer=\(peerAddr) listen=\(listenAddr) requestedN=\(nValueInt) effectiveN=\(nValue) seededTURN=\(seededTURN != nil)")
 
         if useSingleProxyWorker && requestedNValue != 1 {
             SharedLogger.warning(
@@ -780,21 +818,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             seededTURN: seededTURN
         ) else {
             SharedLogger.error("Failed to encode proxy config", source: .tunnel)
-            completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+            finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "proxy_config_encode_failed")
             return
         }
+        traceStartTunnel("proxy config JSON encoded bytes=\(proxyConfigJSON.utf8.count)")
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self = self else { return }
             let bootstrapStartedAt = Date()
+            traceStartTunnel("background bootstrap block entered mode=\(transportMode)")
             NSLog("CSQTT/WDTT: starting bootstrap runtime mode=%@", transportMode)
             SharedLogger.info("Starting VK/TURN bootstrap runtime", source: .tunnel)
+            traceStartTunnel("calling VBridgeWGStartVKBootstrap")
             let handle = proxyConfigJSON.withCString {
                 VBridgeWGStartVKBootstrap(UnsafeMutablePointer(mutating: $0))
             }
+            traceStartTunnel("VBridgeWGStartVKBootstrap returned handle=\(handle)")
             guard handle >= 0 else {
                 SharedLogger.error("VBridgeWGStartVKBootstrap failed: \(handle)", source: .tunnel)
-                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "bootstrap_start_failed")
                 return
             }
             self.vbridgeTunnelHandle = handle
@@ -804,8 +846,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             var networkSettings: NEPacketTunnelNetworkSettings
             var effectiveUAPI = wgUAPI
             NSLog("CSQTT/WDTT: waiting bootstrap ready handle=%d timeoutMs=120000", handle)
+            traceStartTunnel("waiting bootstrap ready handle=\(handle) timeoutMs=120000")
             let ready = VBridgeWGWaitBootstrapReady(handle, 120000)
             let bootstrapElapsed = Int(Date().timeIntervalSince(bootstrapStartedAt) * 1000)
+            traceStartTunnel("bootstrap ready returned value=\(ready) elapsedMs=\(bootstrapElapsed)")
             guard ready == 1 else {
                 VBridgeWGTurnOff(handle)
                 self.vbridgeTunnelHandle = -1
@@ -814,13 +858,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 } else {
                     SharedLogger.error("VK/TURN bootstrap failed after \(bootstrapElapsed)ms: \(ready)", source: .tunnel)
                 }
-                completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "bootstrap_ready_failed")
                 return
             }
             NSLog("CSQTT/WDTT: bootstrap ready handle=%d elapsedMs=%d", handle, bootstrapElapsed)
             SharedLogger.info("VK/TURN bootstrap ready after \(bootstrapElapsed)ms", source: .tunnel)
 
             let turnServerIP = self.currentTURNServerIP(handle: handle)
+            traceStartTunnel("current TURN server IP resolved value=\(turnServerIP.isEmpty ? "<empty>" : turnServerIP)")
             if turnServerIP.isEmpty {
                 SharedLogger.warning("Bootstrap ready but TURN server IP is empty", source: .tunnel)
             } else {
@@ -831,6 +876,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if isWDTT {
                 SharedLogger.info("WDTT waiting for WRAP-A GETCONF provision", source: .tunnel)
                 let provisionStartedAt = Date()
+                traceStartTunnel("waiting WDTT provision handle=\(handle) timeoutMs=30000")
                 guard let provisionJSON = self.waitForWrapAProvision(handle: handle, timeoutMs: 30000),
                       let provision = try? JSONDecoder().decode(WrapAProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.uapi.isEmpty else {
@@ -838,10 +884,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     self.vbridgeTunnelHandle = -1
                     let elapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
                     SharedLogger.error("WDTT provision failed or timed out after \(elapsed)ms", source: .tunnel)
-                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "wdtt_provision_failed")
                     return
                 }
                 let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                traceStartTunnel("WDTT provision received elapsedMs=\(provisionElapsed) address=\(provision.address) dns=\(provision.dns) mtu=\(provision.mtu ?? 0) uapiBytes=\(provision.uapi.utf8.count)")
                 SharedLogger.info("WDTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 effectiveUAPI = provision.uapi
                 let effectiveMTU = wdttTunnelMTU.flatMap { $0 > 0 ? $0 : nil } ?? provision.mtu ?? 1280
@@ -855,10 +902,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     tunnelRemoteAddress: self.activeTunnelRemoteAddress,
                     splitTunnel: splitTunnel
                 )
+                traceStartTunnel("WDTT network settings created remote=\(self.activeTunnelRemoteAddress) address=\(provision.address)")
             } else if isCSQTT {
                 NSLog("CSQTT: waiting provision handle=%d timeoutMs=30000", handle)
                 SharedLogger.info("CSQTT waiting for TUNCONF provision", source: .tunnel)
                 let provisionStartedAt = Date()
+                traceStartTunnel("waiting CSQTT provision handle=\(handle) timeoutMs=30000")
                 guard let provisionJSON = self.waitForCSQTTProvision(handle: handle, timeoutMs: 30000),
                       let provision = try? JSONDecoder().decode(CSQTTProvision.self, from: Data(provisionJSON.utf8)),
                       !provision.address.isEmpty else {
@@ -866,10 +915,11 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     self.vbridgeTunnelHandle = -1
                     let elapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
                     SharedLogger.error("CSQTT provision failed or timed out after \(elapsed)ms", source: .tunnel)
-                    completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                    finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "csqtt_provision_failed")
                     return
                 }
                 let provisionElapsed = Int(Date().timeIntervalSince(provisionStartedAt) * 1000)
+                traceStartTunnel("CSQTT provision received elapsedMs=\(provisionElapsed) address=\(provision.address) dns=\(provision.dns) mtu=\(provision.mtu) localPort=\(provision.localPort ?? 0)")
                 NSLog("CSQTT: provision received handle=%d elapsedMs=%d payloadBytes=%d", handle, provisionElapsed, provisionJSON.utf8.count)
                 SharedLogger.info("CSQTT provision received after \(provisionElapsed)ms: bytes=\(provisionJSON.utf8.count)", source: .tunnel)
                 self.activeProvisionAddress = provision.address
@@ -882,47 +932,57 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     tunnelRemoteAddress: self.activeTunnelRemoteAddress,
                     splitTunnel: splitTunnel
                 )
+                traceStartTunnel("CSQTT network settings created remote=\(self.activeTunnelRemoteAddress) address=\(provision.address)")
             } else if let tunnelConfiguration = tunnelConfiguration {
+                traceStartTunnel("generating PacketTunnelNetworkSettings from TunnelConfiguration")
                 networkSettings = PacketTunnelSettingsGenerator(
                     tunnelConfiguration: tunnelConfiguration,
                     resolvedEndpoints: tunnelConfiguration.peers.map(\.endpoint)
                 ).generateNetworkSettings()
+                traceStartTunnel("PacketTunnelNetworkSettings generated for native WireGuard")
             } else {
                 VBridgeWGTurnOff(handle)
                 self.vbridgeTunnelHandle = -1
-                completionHandler(PacketTunnelProviderError.cantParseWgQuickConfig)
+                finishStartTunnel(PacketTunnelProviderError.cantParseWgQuickConfig, stage: "missing_tunnel_configuration")
                 return
             }
 
             DispatchQueue.main.async {
                 NSLog("CSQTT/WDTT: applying tunnel network settings handle=%d", handle)
                 SharedLogger.info("Applying packet tunnel network settings", source: .tunnel)
+                traceStartTunnel("calling setTunnelNetworkSettings handle=\(handle)")
                 self.setTunnelNetworkSettings(networkSettings) { error in
+                    traceStartTunnel("setTunnelNetworkSettings completed error=\(error?.localizedDescription ?? "nil")")
                     if let error = error {
                         VBridgeWGTurnOff(handle)
                         self.vbridgeTunnelHandle = -1
                         SharedLogger.error("Failed to apply packet tunnel network settings: \(error.localizedDescription)", source: .tunnel)
-                        completionHandler(error)
+                        finishStartTunnel(error, stage: "set_tunnel_network_settings_failed")
                         return
                     }
 
+                    traceStartTunnel("searching for TUN file descriptor")
                     guard let tunFd = self.findTunFileDescriptor() else {
                         VBridgeWGTurnOff(handle)
                         self.vbridgeTunnelHandle = -1
                         SharedLogger.error("Could not find TUN file descriptor", source: .wireguard)
-                        completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                        finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "tun_fd_missing")
                         return
                     }
+                    traceStartTunnel("TUN file descriptor found fd=\(tunFd)")
 
                     let attachResult: Int32
                     if isCSQTT {
                         NSLog("CSQTT: attaching TUN handle=%d tunFd=%d", handle, tunFd)
+                        traceStartTunnel("calling VBridgeWGAttachCSQTT handle=\(handle) tunFd=\(tunFd)")
                         attachResult = VBridgeWGAttachCSQTT(handle, tunFd)
                     } else {
+                        traceStartTunnel("calling VBridgeWGAttachWireGuard handle=\(handle) tunFd=\(tunFd) uapiBytes=\(effectiveUAPI.utf8.count)")
                         attachResult = effectiveUAPI.withCString {
                             VBridgeWGAttachWireGuard(handle, UnsafeMutablePointer(mutating: $0), tunFd)
                         }
                     }
+                    traceStartTunnel("attach returned result=\(attachResult)")
                     guard attachResult == 1 else {
                         VBridgeWGTurnOff(handle)
                         self.vbridgeTunnelHandle = -1
@@ -931,19 +991,21 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         } else {
                             SharedLogger.error("VBridgeWGAttachWireGuard failed: \(attachResult)", source: .wireguard)
                         }
-                        completionHandler(PacketTunnelProviderError.invalidProtocolConfiguration)
+                        finishStartTunnel(PacketTunnelProviderError.invalidProtocolConfiguration, stage: "attach_failed")
                         return
                     }
                     NSLog("CSQTT/WDTT: attach success handle=%d mode=%@", handle, transportMode)
                     self.lastAppliedNetworkSettings = networkSettings
+                    traceStartTunnel("lastAppliedNetworkSettings stored")
                     if isCSQTT {
                         SharedLogger.info("Tunnel up with CSQTT runtime", source: .tunnel)
                     } else {
                         SharedLogger.info("Tunnel up with vk-turn-proxy-ios runtime", source: .wireguard)
+                        traceStartTunnel("starting path monitor for proxy lifecycle hooks if needed")
                         self.startPathMonitoringIfNeeded()
                     }
                     SharedLogger.info("Packet tunnel startup completed; reporting Connected to iOS", source: .tunnel)
-                    completionHandler(nil)
+                    finishStartTunnel(nil, stage: "startup_completed")
                 }
             }
         }
