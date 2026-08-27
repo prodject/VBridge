@@ -108,7 +108,7 @@ public struct LogEntry: Identifiable, Equatable {
 public struct SharedLogger {
 
     // MARK: - App Group detection from binary entitlements
-    private static let defaultAppGroupID = "group.com.prodject.vbridge"
+    private static let defaultAppGroupID = "group.com.prodject.vbridgex"
 
     private static let _appGroupID: String? = {
         var candidates: [String] = []
@@ -124,7 +124,7 @@ public struct SharedLogger {
         }
 
         // 3) Fallback: derive from bundle ID (works for Xcode-signed builds).
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.prodject.vbridgex"
         let baseBundleID = bundleID.replacingOccurrences(of: ".network-extension", with: "")
         candidates.append("group.\(baseBundleID)")
 

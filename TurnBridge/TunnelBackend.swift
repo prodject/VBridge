@@ -210,7 +210,7 @@ final class VBridgeTunnelManagerStore: ObservableObject {
     }
 
     static var providerBundleIdentifier: String {
-        let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
+        let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "com.prodject.vbridgex"
         if let plugInsURL = Bundle.main.builtInPlugInsURL {
             for appexName in ["PacketTunnel.appex", "network-extension.appex"] {
                 let appexURL = plugInsURL.appendingPathComponent(appexName)
@@ -319,7 +319,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
             SharedLogger.info("CSQTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.csqttPassword.isEmpty), webPort=\(configuration.csqttWebPort ?? 0), clientTagLen=\(configuration.csqttClientTag.count), deviceIDLen=\(configuration.csqttDeviceID.count), extraThreads=\(configuration.csqttExtraThreads), masking=\(configuration.csqttUseMasking)")
         }
 
-        let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridge"
+        let currentAppBundleId = Bundle.main.bundleIdentifier ?? "com.prodject.vbridgex"
         let providerBundleIdentifier = VBridgeTunnelManagerStore.providerBundleIdentifier
         SharedLogger.debug("Packet tunnel provider id: app=\(currentAppBundleId), provider=\(providerBundleIdentifier)")
 

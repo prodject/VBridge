@@ -4,7 +4,7 @@ import WidgetKit
 
 @available(iOS 18.0, *)
 enum VBridgeControlKind {
-    static let connect = "com.prodject.vbridge.control.connect"
+    static let connect = "com.prodject.vbridgex.control.connect"
 }
 
 @available(iOS 18.0, *)
