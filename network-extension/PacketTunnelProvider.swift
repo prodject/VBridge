@@ -22,7 +22,6 @@ private let splitTunnelMetadataFileName = "split-tunnel-metadata.json"
 private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
-private let tunnelLogExportMessage = "vbridge_export_tunnel_log"
 
 private func sharedDefaultsForTunnel() -> UserDefaults? {
     guard let groupID = SharedLogger.appGroupID else {
@@ -36,11 +35,6 @@ private func configureGoRuntimeMemoryBeforeFirstCall() {
     setenv("GOGC", "25", 1)
     setenv("GODEBUG", "asyncpreemptoff=1,madvdontneed=1", 1)
     NSLog("Go runtime env configured: GOMEMLIMIT=\(goRuntimeMemoryLimit), GOGC=25")
-}
-
-private func extensionDocumentsLogURL() -> URL? {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
-        .appendingPathComponent("vpn_tunnel.log")
 }
 
 private struct CaptchaRecoveryRequest: Codable {
@@ -1450,22 +1444,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if messageData == Data("vbridge_provider_probe".utf8) {
             let response = "alive handle=\(vbridgeTunnelHandle)"
             completionHandler(Data(response.utf8))
-            return
-        }
-
-        if messageData == Data(tunnelLogExportMessage.utf8) {
-            sharedLogger.log("handleAppMessage: tunnel log export requested")
-            guard let logURL = extensionDocumentsLogURL() else {
-                sharedLogger.error("handleAppMessage: extension documents directory unavailable")
-                completionHandler(nil)
-                return
-            }
-            guard let data = try? Data(contentsOf: logURL) else {
-                sharedLogger.error("handleAppMessage: tunnel log file unavailable at \(logURL.path, privacy: .public)")
-                completionHandler(nil)
-                return
-            }
-            completionHandler(data)
             return
         }
 
