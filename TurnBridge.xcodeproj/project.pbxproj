@@ -646,6 +646,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
 						CFBundleURLName = com.prodject.vbridge;
@@ -711,6 +712,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
 						CFBundleURLName = com.prodject.vbridge;
@@ -765,6 +767,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
 						CFBundleURLName = com.prodject.vbridge.mac;
@@ -813,6 +816,7 @@
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Location is required by the speed test SDK to measure the connection and report ISP information.";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_CFBundleURLTypes = (
 					{
 						CFBundleURLName = com.prodject.vbridge.mac;

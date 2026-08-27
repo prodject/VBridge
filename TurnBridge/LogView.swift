@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import NetworkExtension
 
 struct LogView: View {
     @State private var entries: [LogEntry] = []
@@ -10,6 +11,10 @@ struct LogView: View {
     @State private var showFilters = false
     @State private var monitoringTask: Task<Void, Never>? = nil
     @State private var lastRawLines: [String] = []
+    @State private var exportedTunnelLogURL: URL?
+    @State private var isExportingTunnelLog = false
+    @State private var exportTunnelLogError: String?
+    @ObservedObject private var tunnelManagerStore = VBridgeTunnelManagerStore.shared
 
     var filteredEntries: [LogEntry] {
         entries.filter { entry in
@@ -42,6 +47,16 @@ struct LogView: View {
                     Image(systemName: "doc.on.doc")
                         .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
                 }
+                Button(action: exportTunnelLog) {
+                    if isExportingTunnelLog {
+                        ProgressView()
+                            .tint(Color(red: 0.53, green: 0.37, blue: 0.98))
+                    } else {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .foregroundColor(Color(red: 0.53, green: 0.37, blue: 0.98))
+                    }
+                }
+                .disabled(isExportingTunnelLog)
                 if let logURL = SharedLogger.logFileURL {
                     ShareLink(item: logURL) {
                         Image(systemName: "square.and.arrow.up")
@@ -59,6 +74,35 @@ struct LogView: View {
         }
         .onDisappear {
             stopMonitoring()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { exportedTunnelLogURL != nil },
+                set: { newValue in
+                    if !newValue {
+                        exportedTunnelLogURL = nil
+                    }
+                }
+            )
+        ) {
+            if let url = exportedTunnelLogURL {
+                LogShareActivityView(items: [url])
+            }
+        }
+        .alert(
+            "Tunnel Log Unavailable",
+            isPresented: Binding(
+                get: { exportTunnelLogError != nil },
+                set: { newValue in
+                    if !newValue {
+                        exportTunnelLogError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportTunnelLogError ?? "")
         }
     }
 
@@ -340,4 +384,70 @@ struct LogView: View {
         let text = filteredEntries.map { $0.rawLine }.joined(separator: "\n")
         UIPasteboard.general.string = text
     }
+
+    private func exportTunnelLog() {
+        guard !isExportingTunnelLog else { return }
+        isExportingTunnelLog = true
+        exportTunnelLogError = nil
+
+        Task { @MainActor in
+            defer { isExportingTunnelLog = false }
+
+            guard let manager = tunnelManagerStore.manager,
+                  let session = manager.connection as? NETunnelProviderSession else {
+                exportTunnelLogError = "The tunnel extension is not available in the current session."
+                return
+            }
+
+            let message = Data("vbridge_export_tunnel_log".utf8)
+            let response = await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+                do {
+                    try session.sendProviderMessage(message) { data in
+                        continuation.resume(returning: data)
+                    }
+                } catch {
+                    SharedLogger.warning("Tunnel log export request failed: \(error.localizedDescription)")
+                    continuation.resume(returning: nil)
+                }
+            }
+
+            guard let response, !response.isEmpty else {
+                exportTunnelLogError = "The app could not retrieve the tunnel log from the extension. Start the VPN once and try again while the extension is still running."
+                return
+            }
+
+            do {
+                let exportURL = try saveExportedTunnelLog(response)
+                exportedTunnelLogURL = exportURL
+                SharedLogger.info("Tunnel log exported to \(exportURL.lastPathComponent)")
+            } catch {
+                exportTunnelLogError = "Failed to save the exported tunnel log: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func saveExportedTunnelLog(_ data: Data) throws -> URL {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+
+        let url = documents.appendingPathComponent("vbridge-tunnel-log-\(formatter.string(from: Date())).log")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+}
+
+private struct LogShareActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
