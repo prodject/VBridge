@@ -19,20 +19,23 @@ private enum WidgetActionStore {
 
     @MainActor
     static func storeConnectAction() {
-        defaults?.set("connect", forKey: key)
-        defaults?.synchronize()
+        guard let defaults else { return }
+        defaults.set("connect", forKey: key)
+        defaults.synchronize()
     }
 
     @MainActor
     static func storeDisconnectAction() {
-        defaults?.set("disconnect", forKey: key)
-        defaults?.synchronize()
+        guard let defaults else { return }
+        defaults.set("disconnect", forKey: key)
+        defaults.synchronize()
     }
 
     @MainActor
     static func storeReconnectAction() {
-        defaults?.set("reconnect", forKey: key)
-        defaults?.synchronize()
+        guard let defaults else { return }
+        defaults.set("reconnect", forKey: key)
+        defaults.synchronize()
     }
 }
 
@@ -1507,7 +1510,7 @@ private struct VBridgeWidget: Widget {
                 .containerBackground(.clear, for: .widget)
         }
         .configurationDisplayName("VBridge")
-        .description("Shows connection count, relay IP, and refreshes when you open it.")
+        .description("Shows connection count and relay IP when shared app-extension storage is available.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
     }

@@ -4,7 +4,7 @@ import AppIntents
 @available(iOS 16.0, *)
 struct ToggleVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Toggle VBridge VPN"
-    static var description = IntentDescription("Opens VBridge and toggles the tunnel.")
+    static var description = IntentDescription("Opens VBridge and toggles the tunnel when shared app-extension storage is available.")
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
@@ -17,7 +17,7 @@ struct ToggleVPNIntent: AppIntent {
 @available(iOS 16.0, *)
 struct ConnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Connect VBridge VPN"
-    static var description = IntentDescription("Opens VBridge and connects the tunnel.")
+    static var description = IntentDescription("Opens VBridge and connects the tunnel when shared app-extension storage is available.")
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
@@ -30,7 +30,7 @@ struct ConnectVPNIntent: AppIntent {
 @available(iOS 16.0, *)
 struct DisconnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Disconnect VBridge VPN"
-    static var description = IntentDescription("Opens VBridge and disconnects the tunnel.")
+    static var description = IntentDescription("Opens VBridge and disconnects the tunnel when shared app-extension storage is available.")
     static var openAppWhenRun = true
     static var isDiscoverable = true
 
@@ -43,7 +43,7 @@ struct DisconnectVPNIntent: AppIntent {
 @available(iOS 16.0, *)
 struct ReconnectVPNIntent: AppIntent {
     static var title: LocalizedStringResource = "Reconnect VBridge VPN"
-    static var description = IntentDescription("Opens VBridge, disconnects the current tunnel, and connects it again.")
+    static var description = IntentDescription("Opens VBridge, disconnects the current tunnel, and connects it again when shared app-extension storage is available.")
     static var openAppWhenRun = true
     static var isDiscoverable = true
 

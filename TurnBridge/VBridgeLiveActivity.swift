@@ -164,7 +164,6 @@ struct VBridgeWidgetSnapshot: Codable, Hashable {
 
 @available(iOS 16.1, *)
 enum VBridgeWidgetSnapshotStore {
-    private static let appGroupID = "group.com.prodject.vbridge"
     private static let snapshotKey = "vbridge.widget.snapshot"
 
     private static let encoder: JSONEncoder = {
@@ -180,7 +179,8 @@ enum VBridgeWidgetSnapshotStore {
     }()
 
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+        guard let groupID = SharedLogger.appGroupID else { return nil }
+        return UserDefaults(suiteName: groupID)
     }
 
     static func load() -> VBridgeWidgetSnapshot? {
@@ -211,7 +211,6 @@ enum VBridgeWidgetSnapshotStore {
 
 @available(iOS 16.1, *)
 enum VBridgeLiveActivityStore {
-    private static let appGroupID = "group.com.prodject.vbridge"
     private static let snapshotKey = "vbridge.live.activity.snapshot"
 
     private static let encoder: JSONEncoder = {
@@ -227,7 +226,8 @@ enum VBridgeLiveActivityStore {
     }()
 
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+        guard let groupID = SharedLogger.appGroupID else { return nil }
+        return UserDefaults(suiteName: groupID)
     }
 
     static func load() -> VBridgeLiveActivitySnapshot? {

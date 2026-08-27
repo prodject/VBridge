@@ -40,6 +40,9 @@ final class CaptchaBridge: ObservableObject {
             defaults = UserDefaults(suiteName: groupID)
         } else {
             defaults = nil
+            SharedLogger.warning(
+                "Captcha bridge is running without App Group shared storage. Extension-driven captcha handoff is unavailable in this build."
+            )
         }
         refresh()
         startMonitoring()
@@ -125,6 +128,7 @@ final class CaptchaBridge: ObservableObject {
     }
 
     private func startMonitoring() {
+        guard defaults != nil else { return }
         monitoringTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
@@ -134,6 +138,7 @@ final class CaptchaBridge: ObservableObject {
     }
 
     private func startNotificationObserver() {
+        guard defaults != nil else { return }
         let observer = NotificationObserver { [weak self] in
             Task { @MainActor in
                 self?.refresh()

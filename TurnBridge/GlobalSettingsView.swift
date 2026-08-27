@@ -1130,6 +1130,13 @@ struct GlobalSettingsView: View {
                     }
                 }
             }
+            if SharedLogger.isDegradedResignedBuild {
+                Section {
+                    Text("This build is running without the shared App Group container. Split-tunnel rules are stored locally in the app, but widgets, live activities, and shortcut control actions may be unavailable.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
 
             Section(header: Text("Captcha")) {
                 Toggle(isOn: $manualCaptcha) {

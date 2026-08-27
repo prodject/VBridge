@@ -468,6 +468,15 @@ struct ContentView: View {
     @State private var pendingTunnelRestartReason = ""
     @AppStorage("deploy.launchAction") private var deployLaunchActionRaw = ""
     @AppStorage("deploy.lastPromptedWDTTUpdateKey") private var lastPromptedWDTTUpdateKey = ""
+
+    private var isExtensionTelemetryUnavailable: Bool {
+        !SharedLogger.hasAppGroupContainer &&
+        (vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting)
+    }
+
+    private var extensionTelemetryUnavailableMessage: String {
+        "Statistics unavailable: this build cannot reach the tunnel extension because the shared App Group is missing. The VPN itself may still be working."
+    }
     private let bundledWDTTServerVersion = 15
 
     // PacketTunnelProvider may spend up to 120s in VK/TURN bootstrap and
@@ -1789,6 +1798,11 @@ struct ContentView: View {
     }
 
     private func requestProviderSoftReconnect() async -> Bool {
+        guard SharedLogger.hasAppGroupContainer else {
+            SharedLogger.info("Provider soft reconnect unavailable: App Group IPC disabled in this build")
+            return false
+        }
+
         await withCheckedContinuation { continuation in
             guard let manager = tunnelManagerStore.manager,
                   let session = manager.connection as? NETunnelProviderSession else {
@@ -1813,6 +1827,10 @@ struct ContentView: View {
     }
 
     private func probeTunnelProviderHealth() async -> Bool {
+        guard SharedLogger.hasAppGroupContainer else {
+            return true
+        }
+
         await withCheckedContinuation { continuation in
             guard let manager = tunnelManagerStore.manager,
                   let session = manager.connection as? NETunnelProviderSession,
@@ -2690,9 +2708,19 @@ struct ContentView: View {
             }
         }()
 
+        let progressLabel: String = {
+            if let connectionProgressText {
+                return connectionProgressText
+            }
+            if isExtensionTelemetryUnavailable {
+                return "Statistics unavailable"
+            }
+            return "0/0"
+        }()
+
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(connectionProgressText ?? "0/0")
+                Text(progressLabel)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(colorScheme == .dark ? .white.opacity(0.82) : .black.opacity(0.78))
 
@@ -2701,6 +2729,13 @@ struct ContentView: View {
                 Text(statusLabel)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(colorScheme == .dark ? .white.opacity(0.66) : .black.opacity(0.54))
+            }
+
+            if isExtensionTelemetryUnavailable {
+                Text(extensionTelemetryUnavailableMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
@@ -3266,6 +3301,9 @@ struct ContentView: View {
     }
 
     private func loadCaptchaRecoveryRequest() -> CaptchaRecoveryRequest? {
+        guard SharedLogger.hasAppGroupContainer else {
+            return nil
+        }
         guard let groupID = SharedLogger.appGroupID,
               let defaults = UserDefaults(suiteName: groupID),
               let data = defaults.data(forKey: "captcha.recovery.request") else {
@@ -3275,6 +3313,9 @@ struct ContentView: View {
     }
 
     private func clearCaptchaRecoveryRequest() {
+        guard SharedLogger.hasAppGroupContainer else {
+            return
+        }
         guard let groupID = SharedLogger.appGroupID,
               let defaults = UserDefaults(suiteName: groupID) else {
             return

@@ -18,6 +18,9 @@ struct VBridge: App {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         SharedLogger.info("App launched: version=\(version), build=\(build)")
+        if SharedLogger.isDegradedResignedBuild {
+            SharedLogger.warning("Running without shared App Group container. \(SharedLogger.appGroupDiagnostics)")
+        }
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
 #if !targetEnvironment(macCatalyst)
         if #available(iOS 16.0, *) {

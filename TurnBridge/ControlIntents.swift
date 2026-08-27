@@ -30,7 +30,7 @@ struct VBridgeControlValueProvider: ControlValueProvider {
 @available(iOS 18.0, *)
 struct ToggleVPNControlIntent: SetValueIntent {
     static var title: LocalizedStringResource = "VBridge VPN"
-    static var description = IntentDescription("Opens VBridge and connects or disconnects the last used profile.")
+    static var description = IntentDescription("Opens VBridge and connects or disconnects the last used profile when shared app-extension storage is available.")
     static var openAppWhenRun = true
     static var isDiscoverable = true
 

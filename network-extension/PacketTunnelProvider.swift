@@ -23,6 +23,13 @@ private let splitTunnelRulesFileName = "split-tunnel-rules.txt"
 private let goRuntimeMemoryLimit = "24MiB"
 private let packetTunnelBuildMarker = "PT_BUILD_2026_08_26_A"
 
+private func sharedDefaultsForTunnel() -> UserDefaults? {
+    guard let groupID = SharedLogger.appGroupID else {
+        return nil
+    }
+    return UserDefaults(suiteName: groupID)
+}
+
 private func configureGoRuntimeMemoryBeforeFirstCall() {
     setenv("GOMEMLIMIT", goRuntimeMemoryLimit, 1)
     setenv("GOGC", "25", 1)
@@ -40,9 +47,8 @@ private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, Un
     guard let messageCStr else { return }
     let payload = String(cString: messageCStr)
     guard let payloadData = payload.data(using: .utf8) else { return }
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
-        sharedLogger.error("[TP]: unable to access shared defaults for captcha payload")
+    guard let defaults = sharedDefaultsForTunnel() else {
+        sharedLogger.error("[TP]: shared defaults unavailable for captcha payload; degraded build cannot hand captcha to app UI")
         return
     }
 
@@ -59,8 +65,7 @@ private let goProxyCaptchaCallback: @convention(c) (UnsafeMutableRawPointer?, Un
 }
 
 private func clearCaptchaRequest() {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
+    guard let defaults = sharedDefaultsForTunnel() else {
         return
     }
 
@@ -76,8 +81,7 @@ private func clearCaptchaRequest() {
 }
 
 private func storeCaptchaRecoveryRequest(reason: String) {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
+    guard let defaults = sharedDefaultsForTunnel() else {
         return
     }
 
@@ -103,8 +107,7 @@ private func storeCaptchaRecoveryRequest(reason: String) {
 }
 
 private func clearCaptchaRecoveryRequest() {
-    guard let groupID = SharedLogger.appGroupID,
-          let defaults = UserDefaults(suiteName: groupID) else {
+    guard let defaults = sharedDefaultsForTunnel() else {
         return
     }
 

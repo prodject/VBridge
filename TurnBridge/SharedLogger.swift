@@ -139,6 +139,19 @@ public struct SharedLogger {
 
     static var appGroupID: String? { _appGroupID }
 
+    static var hasAppGroupContainer: Bool {
+        guard let groupID = appGroupID else { return false }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID) != nil
+    }
+
+    static var isDegradedResignedBuild: Bool {
+        !hasAppGroupContainer
+    }
+
+    static var appGroupDiagnostics: String {
+        AppEntitlements.appGroupDiagnosis(required: defaultAppGroupID)
+    }
+
     private static func appGroupsFromBinary() -> [String]? {
         // Try own executable first
         if let path = Bundle.main.executablePath,
@@ -517,6 +530,18 @@ public struct SharedLogger {
             return []
         }
         return content.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    nonisolated public static func logAvailabilityDescription() -> String {
+        if hasAppGroupContainer {
+            return "Shared App Group logging is available."
+        }
+
+        if !Bundle.main.bundlePath.hasSuffix(".appex"), logFileURL != nil {
+            return "Shared App Group logging is unavailable. The app is using a local fallback log file, so tunnel statistics and extension-side logs may be unavailable."
+        }
+
+        return "Shared App Group logging is unavailable in this process."
     }
 
     // MARK: - Clear

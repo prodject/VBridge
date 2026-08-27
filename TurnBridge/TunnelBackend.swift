@@ -507,6 +507,13 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
     }
 
     private func scheduleProviderLaunchProbe(_ session: NETunnelProviderSession) {
+        guard SharedLogger.hasAppGroupContainer else {
+            SharedLogger.info(
+                "Skipping packet tunnel provider probe: App Group IPC unavailable in this build"
+            )
+            return
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             let message = Data("vbridge_provider_probe".utf8)
             do {

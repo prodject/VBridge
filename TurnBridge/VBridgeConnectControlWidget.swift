@@ -22,7 +22,7 @@ struct VBridgeConnectControlWidget: ControlWidget {
             .tint(.blue)
         }
         .displayName("VBridge")
-        .description("Connect or disconnect the last used VPN profile from Control Center.")
+        .description("Connect or disconnect the last used VPN profile from Control Center when shared storage is available.")
     }
 }
 #endif
