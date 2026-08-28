@@ -469,14 +469,6 @@ struct ContentView: View {
     @AppStorage("deploy.launchAction") private var deployLaunchActionRaw = ""
     @AppStorage("deploy.lastPromptedWDTTUpdateKey") private var lastPromptedWDTTUpdateKey = ""
 
-    private var isExtensionTelemetryUnavailable: Bool {
-        !SharedLogger.hasAppGroupContainer &&
-        (vpnStatus == .connected || vpnStatus == .connecting || vpnStatus == .reasserting)
-    }
-
-    private var extensionTelemetryUnavailableMessage: String {
-        "Statistics unavailable: this build cannot reach the tunnel extension because the shared App Group is missing. The VPN itself may still be working."
-    }
     private let bundledWDTTServerVersion = 15
 
     // PacketTunnelProvider may spend up to 120s in VK/TURN bootstrap and
@@ -2712,9 +2704,6 @@ struct ContentView: View {
             if let connectionProgressText {
                 return connectionProgressText
             }
-            if isExtensionTelemetryUnavailable {
-                return "Statistics unavailable"
-            }
             return "0/0"
         }()
 
@@ -2729,13 +2718,6 @@ struct ContentView: View {
                 Text(statusLabel)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(colorScheme == .dark ? .white.opacity(0.66) : .black.opacity(0.54))
-            }
-
-            if isExtensionTelemetryUnavailable {
-                Text(extensionTelemetryUnavailableMessage)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {

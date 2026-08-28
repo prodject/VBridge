@@ -492,8 +492,6 @@ public struct SharedLogger {
         ispName: String? = nil,
         ipAddress: String? = nil
     ) {
-        guard appGroupID != nil else { return }
-
         let phase = rawStatus.flatMap(normalizedWidgetState(from:))
         VBridgeLiveActivityStore.update(
             profileName: profileName,
@@ -511,8 +509,6 @@ public struct SharedLogger {
     }
 
     private static func updateWidgetLiveStateIfNeeded(message: String) {
-        guard appGroupID != nil else { return }
-
         var phase: VBridgeLiveActivityPhase?
         if message.contains("VPN status:") {
             let statusValue = message.replacingOccurrences(of: "VPN status:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)

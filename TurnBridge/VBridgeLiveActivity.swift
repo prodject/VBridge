@@ -249,37 +249,41 @@ enum VBridgeLiveActivityStore {
         return decoder
     }()
 
-    private static var defaults: UserDefaults? {
-        guard let groupID = LiveActivitySharedStore.appGroupID() else { return nil }
-        return UserDefaults(suiteName: groupID)
+    private static var defaults: UserDefaults {
+        if let groupID = LiveActivitySharedStore.appGroupID(),
+           let sharedDefaults = UserDefaults(suiteName: groupID) {
+            return sharedDefaults
+        }
+        return .standard
     }
 
     static func load() -> VBridgeLiveActivitySnapshot? {
-        guard let data = defaults?.data(forKey: snapshotKey) else { return nil }
+        guard let data = defaults.data(forKey: snapshotKey) else { return nil }
         return try? decoder.decode(VBridgeLiveActivitySnapshot.self, from: data)
     }
 
     static func save(_ snapshot: VBridgeLiveActivitySnapshot) {
-        guard let defaults else { return }
         guard let data = try? encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
         defaults.synchronize()
-        VBridgeWidgetSnapshotStore.save(
-            VBridgeWidgetSnapshot(
-                profileName: snapshot.profileName,
-                phase: snapshot.content.phase,
-                activeConnections: snapshot.content.activeConnections,
-                totalConnections: snapshot.content.totalConnections,
-                relayIP: snapshot.content.relayIP,
-                estimatedRemainingSeconds: snapshot.content.estimatedRemainingSeconds,
-                downloadSpeedMbps: snapshot.content.downloadSpeedMbps,
-                uploadSpeedMbps: snapshot.content.uploadSpeedMbps,
-                ispName: snapshot.content.ispName,
-                ipAddress: snapshot.content.ipAddress,
-                pingSamples: snapshot.content.pingSamples,
-                updatedAt: snapshot.content.updatedAt
+        if LiveActivitySharedStore.appGroupID() != nil {
+            VBridgeWidgetSnapshotStore.save(
+                VBridgeWidgetSnapshot(
+                    profileName: snapshot.profileName,
+                    phase: snapshot.content.phase,
+                    activeConnections: snapshot.content.activeConnections,
+                    totalConnections: snapshot.content.totalConnections,
+                    relayIP: snapshot.content.relayIP,
+                    estimatedRemainingSeconds: snapshot.content.estimatedRemainingSeconds,
+                    downloadSpeedMbps: snapshot.content.downloadSpeedMbps,
+                    uploadSpeedMbps: snapshot.content.uploadSpeedMbps,
+                    ispName: snapshot.content.ispName,
+                    ipAddress: snapshot.content.ipAddress,
+                    pingSamples: snapshot.content.pingSamples,
+                    updatedAt: snapshot.content.updatedAt
+                )
             )
-        )
+        }
         reloadWidgetTimelinesIfAvailable()
     }
 
@@ -373,9 +377,11 @@ enum VBridgeLiveActivityStore {
     }
 
     static func clear() {
-        defaults?.removeObject(forKey: snapshotKey)
-        defaults?.synchronize()
-        VBridgeWidgetSnapshotStore.clear()
+        defaults.removeObject(forKey: snapshotKey)
+        defaults.synchronize()
+        if LiveActivitySharedStore.appGroupID() != nil {
+            VBridgeWidgetSnapshotStore.clear()
+        }
     }
 
     private static func reloadWidgetTimelinesIfAvailable() {
