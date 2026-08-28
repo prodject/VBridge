@@ -204,7 +204,7 @@ enum ServerAdminBridge {
     static func setPassword(_ target: ServerAdminTarget, clientPassword: String, newPassword: String) async throws -> ServerAdminEnvelope {
         let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedNewPassword = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await call(ServerAdminBridgeRequest(
+        return try await call(ServerAdminBridgeRequest(
             action: ServerAdminAction.setPassword.rawValue,
             host: target.host,
             user: target.user,
@@ -218,7 +218,7 @@ enum ServerAdminBridge {
 
     static func setExpiry(_ target: ServerAdminTarget, clientPassword: String, days: Int?, expiresAt: Int64?) async throws -> ServerAdminEnvelope {
         let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await call(ServerAdminBridgeRequest(
+        return try await call(ServerAdminBridgeRequest(
             action: ServerAdminAction.setExpiry.rawValue,
             host: target.host,
             user: target.user,
@@ -233,7 +233,7 @@ enum ServerAdminBridge {
 
     static func run(_ action: ServerAdminAction, target: ServerAdminTarget, clientPassword: String) async throws -> ServerAdminEnvelope {
         let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await call(ServerAdminBridgeRequest(
+        return try await call(ServerAdminBridgeRequest(
             action: action.rawValue,
             host: target.host,
             user: target.user,
