@@ -105,9 +105,24 @@ func (r deployRequest) isCSQTT() bool {
 	return r.DeployKind == "csqtt"
 }
 
+func (r deployRequest) isWDTTStable() bool {
+	return r.DeployKind == "wdtt"
+}
+
+func (r deployRequest) isWDTTPlus() bool {
+	return r.DeployKind == "wdtt-plus"
+}
+
+func (r deployRequest) isWDTTFamily() bool {
+	return r.isWDTTStable() || r.isWDTTPlus()
+}
+
 func (r deployRequest) deployLabel() string {
 	if r.isCSQTT() {
 		return "CSQTT"
+	}
+	if r.isWDTTPlus() {
+		return "WDTT Plus"
 	}
 	return "WDTT"
 }
@@ -541,7 +556,7 @@ func runDeploy(req deployRequest) deployResponse {
 func (r *deployRequest) normalize() {
 	r.DeployKind = strings.TrimSpace(strings.ToLower(r.DeployKind))
 	if r.DeployKind == "" {
-		r.DeployKind = "wdtt"
+		r.DeployKind = "wdtt-plus"
 	}
 	r.Action = strings.TrimSpace(strings.ToLower(r.Action))
 	if r.Action == "" {
@@ -583,7 +598,7 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
-	if r.DeployKind != "wdtt" && r.DeployKind != "csqtt" {
+	if !r.isWDTTFamily() && r.DeployKind != "csqtt" {
 		return fmt.Errorf("unsupported deploy kind %q", r.DeployKind)
 	}
 	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "live_log" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
@@ -622,8 +637,14 @@ func (r deployRequest) validate() error {
 	if (r.Action == "install" || r.Action == "update_preserve" || r.Action == "uninstall") && r.DeployScript == "" {
 		return errors.New("deploy script path is empty")
 	}
-	if r.DeployKind == "wdtt" && (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
+	if r.isWDTTFamily() && (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
 		return errors.New("WDTT main password is empty")
+	}
+	if r.isWDTTStable() {
+		switch r.Action {
+		case "update_preserve", "cleanup_devices", "export_state", "import_state", "reinstall":
+			return fmt.Errorf("deploy action %q is not supported for WDTT", r.Action)
+		}
 	}
 	if r.DeployKind == "csqtt" && (r.Action == "install" || r.Action == "update_preserve") && strings.TrimSpace(r.CSQTTTunnelPassword) == "" {
 		return errors.New("CSQTT tunnel password is empty")

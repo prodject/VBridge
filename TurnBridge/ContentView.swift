@@ -3199,8 +3199,8 @@ struct ContentView: View {
 
     private func shouldSuggestWDTTServerUpdate(serverVersion: String, updateKey: String) -> Bool {
         let defaults = UserDefaults.standard
-        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdtt.rawValue
-        guard deployKind == DeployServerKind.wdtt.rawValue else { return false }
+        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdttPlus.rawValue
+        guard deployKind == DeployServerKind.wdttPlus.rawValue else { return false }
 
         let host = (defaults.string(forKey: "deploy.host") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let password = defaults.string(forKey: "deploy.password") ?? ""
@@ -3213,8 +3213,8 @@ struct ContentView: View {
 
     private func fetchWDTTServerVersionIfNeeded() async -> String? {
         let defaults = UserDefaults.standard
-        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdtt.rawValue
-        guard deployKind == DeployServerKind.wdtt.rawValue else { return nil }
+        let deployKind = defaults.string(forKey: "deploy.kind") ?? DeployServerKind.wdttPlus.rawValue
+        guard deployKind == DeployServerKind.wdttPlus.rawValue else { return nil }
 
         let host = (defaults.string(forKey: "deploy.host") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let user = (defaults.string(forKey: "deploy.user") ?? "root").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3224,7 +3224,7 @@ struct ContentView: View {
         guard !host.isEmpty, !password.isEmpty, !mainPassword.isEmpty, (1...65535).contains(sshPort) else { return nil }
 
         let request = WDTTDeployStatusRequest(
-            deployKind: DeployServerKind.wdtt.rawValue,
+            deployKind: DeployServerKind.wdttPlus.rawValue,
             action: "status",
             host: host,
             user: user.isEmpty ? "root" : user,

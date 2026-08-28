@@ -6,6 +6,7 @@ import Foundation
 
 enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
     case wdtt
+    case wdttPlus = "wdtt-plus"
     case csqtt
 
     var id: String { rawValue }
@@ -14,6 +15,8 @@ enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .wdtt:
             return "WDTT"
+        case .wdttPlus:
+            return "WDTT Plus"
         case .csqtt:
             return "CSQTT"
         }
@@ -204,7 +207,7 @@ struct DeploySettingsLink: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         nonce = try container.decode(UUID.self, forKey: .nonce)
-        deployKind = try container.decodeIfPresent(DeployServerKind.self, forKey: .deployKind) ?? .wdtt
+        deployKind = try container.decodeIfPresent(DeployServerKind.self, forKey: .deployKind) ?? .wdttPlus
         host = try container.decode(String.self, forKey: .host)
         user = try container.decode(String.self, forKey: .user)
         password = try container.decode(String.self, forKey: .password)

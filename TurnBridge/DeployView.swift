@@ -112,7 +112,7 @@ struct DeployView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
-    @AppStorage("deploy.kind") private var deployKind = DeployServerKind.wdtt.rawValue
+    @AppStorage("deploy.kind") private var deployKind = DeployServerKind.wdttPlus.rawValue
     @AppStorage("deploy.launchAction") private var launchActionRaw = ""
     @AppStorage("deploy.host") private var host = ""
     @AppStorage("deploy.user") private var user = "root"
@@ -213,7 +213,7 @@ struct DeployView: View {
                 }
             }
 
-            if selectedDeployKind == .wdtt {
+            if isWDTTFamily {
                 Section(header: Text("DNS")) {
                     TextField("Primary DNS", text: $dns1)
                         .textInputAutocapitalization(.never)
@@ -227,7 +227,7 @@ struct DeployView: View {
                 }
             }
 
-            if selectedDeployKind == .wdtt {
+            if isWDTTFamily {
                 Section(header: Text("Secrets")) {
                     secretField("WDTT Main Password", text: $mainPassword)
 
@@ -310,7 +310,7 @@ struct DeployView: View {
             }
 
             Section {
-                if selectedDeployKind == .wdtt || selectedDeployKind == .csqtt {
+                if supportsWDTTPlusManagement || selectedDeployKind == .csqtt {
                     NavigationLink {
                         ServerManagementView(
                             target: serverManagementTarget,
@@ -322,7 +322,7 @@ struct DeployView: View {
                     .disabled(serverManagementTarget == nil)
                 }
 
-                if selectedDeployKind == .wdtt {
+                if supportsOutboundManagement {
                     NavigationLink {
                         OutboundManagementView(
                             target: serverOutboundTarget,
@@ -347,7 +347,7 @@ struct DeployView: View {
                 }
                 .disabled(!canConnect)
 
-                if selectedDeployKind == .wdtt {
+                if supportsBackupRestore {
                     Button {
                         run(.exportState)
                     } label: {
@@ -363,7 +363,7 @@ struct DeployView: View {
                     .disabled(!canUseStateArchive)
                 }
 
-                if selectedDeployKind == .wdtt {
+                if isWDTTStable {
                     Button {
                         runInstall(.stable)
                     } label: {
@@ -376,6 +376,9 @@ struct DeployView: View {
                     }
                     .disabled(!canInstall)
 
+                }
+
+                if isWDTTPlus {
                     Button {
                         runInstall(.plus)
                     } label: {
@@ -387,7 +390,7 @@ struct DeployView: View {
                         )
                     }
                     .disabled(!canInstall)
-                } else {
+                } else if selectedDeployKind == .csqtt {
                     Button {
                         run(.install)
                     } label: {
@@ -396,7 +399,7 @@ struct DeployView: View {
                     .disabled(!canInstall)
                 }
 
-                if selectedDeployKind == .wdtt {
+                if supportsUpdatePreserve {
                     Button {
                         run(.updatePreserve)
                     } label: {
@@ -412,7 +415,7 @@ struct DeployView: View {
                 }
                 .disabled(!canConnect)
 
-                if selectedDeployKind == .wdtt {
+                if supportsCleanupDevices {
                     Button(role: .destructive) {
                         showCleanupConfirmation = true
                     } label: {
@@ -421,12 +424,14 @@ struct DeployView: View {
                     .disabled(!canCleanupDevices)
                 }
 
-                Button(role: .destructive) {
-                    showReinstallConfirmation = true
-                } label: {
-                    Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                if supportsReinstall {
+                    Button(role: .destructive) {
+                        showReinstallConfirmation = true
+                    } label: {
+                        Label(isRunning && currentAction == .reinstall ? "Reinstalling..." : "Reinstall", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(!canInstall)
                 }
-                .disabled(!canInstall)
 
                 Button(role: .destructive) {
                     run(.uninstall)
@@ -436,7 +441,7 @@ struct DeployView: View {
                 .disabled(!canConnect)
             }
 
-            if selectedDeployKind == .wdtt {
+            if isWDTTPlus {
                 Section(header: Text("Advanced Server")) {
                     Toggle("Use Existing TUN Interface", isOn: $wdttExistingTunEnabled)
 
@@ -630,31 +635,71 @@ struct DeployView: View {
     }
 
     private var selectedDeployKind: DeployServerKind {
-        DeployServerKind(rawValue: deployKind) ?? .wdtt
+        DeployServerKind(rawValue: deployKind) ?? .wdttPlus
+    }
+
+    private var isWDTTStable: Bool {
+        selectedDeployKind == .wdtt
+    }
+
+    private var isWDTTPlus: Bool {
+        selectedDeployKind == .wdttPlus
+    }
+
+    private var isWDTTFamily: Bool {
+        isWDTTStable || isWDTTPlus
+    }
+
+    private var supportsWDTTPlusManagement: Bool {
+        isWDTTPlus
+    }
+
+    private var supportsBackupRestore: Bool {
+        isWDTTPlus
+    }
+
+    private var supportsCleanupDevices: Bool {
+        isWDTTPlus
+    }
+
+    private var supportsUpdatePreserve: Bool {
+        isWDTTPlus
+    }
+
+    private var supportsReinstall: Bool {
+        isWDTTPlus || selectedDeployKind == .csqtt
+    }
+
+    private var supportsOutboundManagement: Bool {
+        isWDTTPlus
+    }
+
+    private var supportsExportServer: Bool {
+        isWDTTPlus
     }
 
     private var serverArchitectures: [String] {
-        selectedDeployKind == .wdtt ? wdttServerArchitectures : ["amd64"]
+        isWDTTFamily ? wdttServerArchitectures : ["amd64"]
     }
 
     private var defaultPrimaryPort: Int {
-        selectedDeployKind == .wdtt ? 56000 : 46000
+        isWDTTFamily ? 56000 : 46000
     }
 
     private var defaultSecondaryPort: Int {
-        selectedDeployKind == .wdtt ? 56001 : 46002
+        isWDTTFamily ? 56001 : 46002
     }
 
     private var primaryPortTitle: String {
-        selectedDeployKind == .wdtt ? "DTLS Port" : "Peer Port"
+        isWDTTFamily ? "DTLS Port" : "Peer Port"
     }
 
     private var secondaryPortTitle: String {
-        selectedDeployKind == .wdtt ? "WireGuard Port" : "Web Port"
+        isWDTTFamily ? "WireGuard Port" : "Web Port"
     }
 
     private var installedStatusTitle: String {
-        selectedDeployKind == .wdtt ? "WDTT installed" : "CSQTT installed"
+        isWDTTFamily ? "\(selectedDeployKind.title) installed" : "CSQTT installed"
     }
 
     private var canConnect: Bool {
@@ -669,21 +714,21 @@ struct DeployView: View {
         canConnect &&
         isValidPort(effectiveDTLSPort) &&
         isValidPort(effectiveWGPort) &&
-        (selectedDeployKind == .wdtt
+        (isWDTTFamily
             ? isSecretValueValid(mainPassword)
             : isSecretValueValid(csqttTunnelPassword) && isSecretValueValid(csqttWebPassword))
     }
 
     private var canUpdatePreserve: Bool {
-        canInstall
+        supportsUpdatePreserve && canInstall
     }
 
     private var canUseStateArchive: Bool {
-        selectedDeployKind == .wdtt && canConnect
+        supportsBackupRestore && canConnect
     }
 
     private var canCleanupDevices: Bool {
-        selectedDeployKind == .wdtt && canConnect
+        supportsCleanupDevices && canConnect
     }
 
     private func isSecretValueValid(_ value: String) -> Bool {
@@ -1003,11 +1048,11 @@ struct DeployView: View {
 
     private func makeRequest(_ action: DeployAction, wdttInstallFlavor: WDTTInstallFlavor? = nil) throws -> DeployRequest {
         let scriptName: String = {
-            guard selectedDeployKind == .wdtt else { return "csqtt-deploy" }
+            guard isWDTTFamily else { return "csqtt-deploy" }
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.scriptName
             }
-            return "wdtt-plus"
+            return isWDTTPlus ? "wdtt-plus" : "wdtt"
         }()
         let scriptURL = Bundle.main.url(forResource: scriptName, withExtension: "sh")
         if (action == .install || action == .updatePreserve || action == .uninstall), scriptURL == nil {
@@ -1015,11 +1060,11 @@ struct DeployView: View {
         }
 
         let binaryPrefix: String = {
-            guard selectedDeployKind == .wdtt else { return "csqtt" }
+            guard isWDTTFamily else { return "csqtt" }
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.binaryPrefix
             }
-            return "wdtt-plus"
+            return isWDTTPlus ? "wdtt-plus" : "wdtt"
         }()
         let binaryName = "\(binaryPrefix)-linux-\(serverArch)"
         let binaryURL = Bundle.main.url(forResource: binaryName, withExtension: nil)
@@ -1079,7 +1124,7 @@ struct DeployView: View {
         if dns2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let value = nonEmpty(response.dns2) {
             dns2 = value
         }
-        if selectedDeployKind == .wdtt, mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
+        if isWDTTFamily, mainPassword.isEmpty, let value = nonEmpty(response.mainPassword) {
             mainPassword = value
         }
         if selectedDeployKind == .csqtt, csqttTunnelPassword.isEmpty, let value = nonEmpty(response.csqttTunnelPassword) {
@@ -1124,6 +1169,10 @@ struct DeployView: View {
             manualPorts = wdttManualPorts
             dtlsPort = wdttDtlsPort
             wgPort = wdttWgPort
+        case .wdttPlus:
+            manualPorts = wdttManualPorts
+            dtlsPort = wdttDtlsPort
+            wgPort = wdttWgPort
         case .csqtt:
             manualPorts = csqttManualPorts
             dtlsPort = csqttPeerPort
@@ -1135,6 +1184,10 @@ struct DeployView: View {
     private func persistVisiblePorts(for kind: DeployServerKind) {
         switch kind {
         case .wdtt:
+            wdttManualPorts = manualPorts
+            wdttDtlsPort = dtlsPort
+            wdttWgPort = wgPort
+        case .wdttPlus:
             wdttManualPorts = manualPorts
             wdttDtlsPort = dtlsPort
             wdttWgPort = wgPort
@@ -1160,7 +1213,7 @@ struct DeployView: View {
         guard !actionValue.isEmpty else { return }
         launchActionRaw = ""
 
-        guard selectedDeployKind == .wdtt, let action = DeployAction(rawValue: actionValue) else {
+        guard isWDTTPlus, let action = DeployAction(rawValue: actionValue) else {
             return
         }
 
@@ -1219,6 +1272,9 @@ struct DeployView: View {
     private var serverManagementTarget: ServerManagementTarget? {
         switch selectedDeployKind {
         case .wdtt:
+            guard let target = serverAdminTarget else { return nil }
+            return .wdtt(target)
+        case .wdttPlus:
             guard let target = serverAdminTarget else { return nil }
             return .wdtt(target)
         case .csqtt:
@@ -1306,7 +1362,7 @@ struct DeployView: View {
         let safeHost = host
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        let prefix = selectedDeployKind == .wdtt ? "wdtt-server-logs" : "csqtt-server-logs"
+        let prefix = isWDTTFamily ? "\(selectedDeployKind.rawValue)-server-logs" : "csqtt-server-logs"
         let filename = "\(prefix)-\(safeHost.isEmpty ? "server" : safeHost)-\(stamp).log"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         do {
