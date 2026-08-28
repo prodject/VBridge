@@ -2408,6 +2408,7 @@ struct ContentView: View {
 
     private func runSpeedTest() async -> SpeedMeasurementResult {
         SharedLogger.info("Speed test started")
+        async let publicIPInfo = PublicIPInfoService().fetch()
 
         let downloadMbps = await measureCloudflareDownloadSpeed()
         if Task.isCancelled {
@@ -2421,12 +2422,14 @@ struct ContentView: View {
         }
         SharedLogger.info("Speed test upload result: \(formattedSpeed(uploadMbps))")
 
+        let resolvedPublicIPInfo = await publicIPInfo
+
         if downloadMbps != nil || uploadMbps != nil {
             return SpeedMeasurementResult(
                 downloadMbps: downloadMbps,
                 uploadMbps: uploadMbps,
-                ispName: nil,
-                ipAddress: nil
+                ispName: resolvedPublicIPInfo?.ispName,
+                ipAddress: resolvedPublicIPInfo?.ipAddress
             )
         }
 
@@ -2435,8 +2438,8 @@ struct ContentView: View {
         return SpeedMeasurementResult(
             downloadMbps: runtimeResult.downloadMbps,
             uploadMbps: runtimeResult.uploadMbps,
-            ispName: runtimeResult.ispName,
-            ipAddress: runtimeResult.ipAddress
+            ispName: resolvedPublicIPInfo?.ispName ?? runtimeResult.ispName,
+            ipAddress: resolvedPublicIPInfo?.ipAddress ?? runtimeResult.ipAddress
         )
     }
 
