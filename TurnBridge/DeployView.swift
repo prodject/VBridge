@@ -67,6 +67,47 @@ private struct DeployResponse: Decodable, Sendable {
     var botToken: String?
 }
 
+private enum WDTTInstallFlavor {
+    case stable
+    case plus
+
+    var buttonTitle: String {
+        switch self {
+        case .stable:
+            return "Install WDTT"
+        case .plus:
+            return "Install WDTT Plus"
+        }
+    }
+
+    var progressTitle: String {
+        switch self {
+        case .stable:
+            return "Installing WDTT..."
+        case .plus:
+            return "Installing WDTT Plus..."
+        }
+    }
+
+    var scriptName: String {
+        switch self {
+        case .stable:
+            return "wdtt"
+        case .plus:
+            return "wdtt-plus"
+        }
+    }
+
+    var binaryPrefix: String {
+        switch self {
+        case .stable:
+            return "wdtt"
+        case .plus:
+            return "wdtt-plus"
+        }
+    }
+}
+
 struct DeployView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -123,6 +164,7 @@ struct DeployView: View {
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
+    @State private var currentInstallFlavor: WDTTInstallFlavor?
     private let wdttServerArchitectures = ["amd64", "arm64"]
     private let maxPasswordsOptions = [10, 25, 50, 75, 100, 150, 200, 300, 500]
     private let maxWorkersPerAccessOptions = [0, 9, 18, 27, 36, 45, 54, 72, 90, 108]
@@ -321,12 +363,38 @@ struct DeployView: View {
                     .disabled(!canUseStateArchive)
                 }
 
-                Button {
-                    run(.install)
-                } label: {
-                    Label(isRunning && currentAction == .install ? "Installing..." : "Install", systemImage: "icloud.and.arrow.up")
+                if selectedDeployKind == .wdtt {
+                    Button {
+                        runInstall(.stable)
+                    } label: {
+                        Label(
+                            isRunning && currentAction == .install && currentInstallFlavor == .stable
+                                ? WDTTInstallFlavor.stable.progressTitle
+                                : WDTTInstallFlavor.stable.buttonTitle,
+                            systemImage: "arrow.down.circle"
+                        )
+                    }
+                    .disabled(!canInstall)
+
+                    Button {
+                        runInstall(.plus)
+                    } label: {
+                        Label(
+                            isRunning && currentAction == .install && currentInstallFlavor == .plus
+                                ? WDTTInstallFlavor.plus.progressTitle
+                                : WDTTInstallFlavor.plus.buttonTitle,
+                            systemImage: "icloud.and.arrow.up"
+                        )
+                    }
+                    .disabled(!canInstall)
+                } else {
+                    Button {
+                        run(.install)
+                    } label: {
+                        Label(isRunning && currentAction == .install ? "Installing..." : "Install", systemImage: "icloud.and.arrow.up")
+                    }
+                    .disabled(!canInstall)
                 }
-                .disabled(!canInstall)
 
                 if selectedDeployKind == .wdtt {
                     Button {
@@ -629,6 +697,7 @@ struct DeployView: View {
 
     private func run(_ action: DeployAction) {
         guard !isRunning else { return }
+        currentInstallFlavor = nil
         if action == .reinstall {
             runReinstall()
             return
@@ -680,6 +749,51 @@ struct DeployView: View {
                 }
                 if !response.output.isEmpty {
                     SharedLogger.info("\(selectedDeployKind.title) deploy output:\n\(response.output)")
+                }
+            }
+        }
+    }
+
+    private func runInstall(_ flavor: WDTTInstallFlavor) {
+        guard !isRunning else { return }
+
+        let request: DeployRequest
+        do {
+            request = try makeRequest(.install, wdttInstallFlavor: flavor)
+        } catch {
+            resultTitle = "Deploy Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
+            return
+        }
+
+        isRunning = true
+        currentAction = .install
+        currentInstallFlavor = flavor
+        output = ""
+        startLiveOutputPolling(for: request)
+
+        Task {
+            let response = await perform(request)
+            await MainActor.run {
+                stopLiveOutputPolling()
+                isRunning = false
+                currentAction = nil
+                currentInstallFlavor = nil
+                output = response.output
+                updateStatusIndicators(response)
+                resultTitle = response.ok ? "Deploy Complete" : "Deploy Failed"
+                resultMessage = response.message
+                showAlert = true
+
+                let flavorLabel = flavor == .stable ? "WDTT" : "WDTT Plus"
+                if response.ok {
+                    SharedLogger.info("\(flavorLabel) deploy install completed")
+                } else {
+                    SharedLogger.error("\(flavorLabel) deploy install failed: \(response.message)")
+                }
+                if !response.output.isEmpty {
+                    SharedLogger.info("\(flavorLabel) deploy output:\n\(response.output)")
                 }
             }
         }
@@ -887,14 +1001,27 @@ struct DeployView: View {
         liveOutputTask = nil
     }
 
-    private func makeRequest(_ action: DeployAction) throws -> DeployRequest {
-        let scriptName = selectedDeployKind == .wdtt ? "wdtt-deploy" : "csqtt-deploy"
+    private func makeRequest(_ action: DeployAction, wdttInstallFlavor: WDTTInstallFlavor? = nil) throws -> DeployRequest {
+        let scriptName: String = {
+            guard selectedDeployKind == .wdtt else { return "csqtt-deploy" }
+            if action == .install, let wdttInstallFlavor {
+                return wdttInstallFlavor.scriptName
+            }
+            return "wdtt-plus"
+        }()
         let scriptURL = Bundle.main.url(forResource: scriptName, withExtension: "sh")
         if (action == .install || action == .updatePreserve || action == .uninstall), scriptURL == nil {
             throw DeployError.missingAsset("\(scriptName).sh")
         }
 
-        let binaryName = selectedDeployKind == .wdtt ? "wdtt-server-linux-\(serverArch)" : "csqtt-linux-\(serverArch)"
+        let binaryPrefix: String = {
+            guard selectedDeployKind == .wdtt else { return "csqtt" }
+            if action == .install, let wdttInstallFlavor {
+                return wdttInstallFlavor.binaryPrefix
+            }
+            return "wdtt-plus"
+        }()
+        let binaryName = "\(binaryPrefix)-linux-\(serverArch)"
         let binaryURL = Bundle.main.url(forResource: binaryName, withExtension: nil)
 
         if (action == .install || action == .updatePreserve), binaryURL == nil {
