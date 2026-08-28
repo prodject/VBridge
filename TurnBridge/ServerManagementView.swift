@@ -202,7 +202,7 @@ struct ServerManagementView: View {
                     Section(header: Text("Client")) {
                         TextField("Label", text: $newClientLabel)
                         if isWDTTManagement {
-                            TextField("VK Hash", text: $newClientHash)
+                            TextField("VK Hash (optional)", text: $newClientHash)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         }
@@ -265,7 +265,7 @@ struct ServerManagementView: View {
                         }
                         TextField("Label", text: $editedLabel)
                         if isWDTTManagement {
-                            TextField("VK Hash", text: $editedHash)
+                            TextField("VK Hash (optional)", text: $editedHash)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         }

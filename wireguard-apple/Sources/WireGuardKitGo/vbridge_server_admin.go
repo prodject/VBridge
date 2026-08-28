@@ -180,38 +180,38 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 	case "create":
 		args := []string{"create", "--days", fmt.Sprint(maxInt(0, minInt(r.Days, 365)))}
 		if r.Label != "" {
-			args = append(args, "--label", shellQuoteDeploy(r.Label))
+			args = append(args, "--label", r.Label)
 		}
 		if r.VKHash != "" {
-			args = append(args, "--vk-hash", shellQuoteDeploy(r.VKHash))
+			args = append(args, "--vk-hash", r.VKHash)
 		}
 		if r.Ports != "" {
-			args = append(args, "--ports", shellQuoteDeploy(r.Ports))
+			args = append(args, "--ports", r.Ports)
 		}
 		if r.ClientPassword != "" {
-			args = append(args, "--client-password", shellQuoteDeploy(r.ClientPassword))
+			args = append(args, "--client-password", r.ClientPassword)
 		}
 		return args, nil
 	case "delete", "unbind", "activate", "deactivate":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		return []string{r.Action, "--password", shellQuoteDeploy(r.ClientPassword)}, nil
+		return []string{r.Action, "--password", r.ClientPassword}, nil
 	case "set-label":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		return []string{"set-label", "--password", shellQuoteDeploy(r.ClientPassword), "--label", shellQuoteDeploy(r.Label)}, nil
+		return []string{"set-label", "--password", r.ClientPassword, "--label", r.Label}, nil
 	case "set-hash":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		return []string{"set-hash", "--password", shellQuoteDeploy(r.ClientPassword), "--vk-hash", shellQuoteDeploy(r.VKHash)}, nil
+		return []string{"set-hash", "--password", r.ClientPassword, "--vk-hash", r.VKHash}, nil
 	case "set-ports":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		return []string{"set-ports", "--password", shellQuoteDeploy(r.ClientPassword), "--ports", shellQuoteDeploy(r.Ports)}, nil
+		return []string{"set-ports", "--password", r.ClientPassword, "--ports", r.Ports}, nil
 	case "set-password":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
@@ -219,28 +219,28 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 		if r.NewPassword == "" {
 			return nil, fmt.Errorf("new password is empty")
 		}
-		return []string{"set-password", "--password", shellQuoteDeploy(r.ClientPassword), "--new-password", shellQuoteDeploy(r.NewPassword)}, nil
+		return []string{"set-password", "--password", r.ClientPassword, "--new-password", r.NewPassword}, nil
 	case "set-expiry":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
 		if r.ExpiresAt != nil {
-			return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--expires-at", fmt.Sprint(*r.ExpiresAt)}, nil
+			return []string{"set-expiry", "--password", r.ClientPassword, "--expires-at", fmt.Sprint(*r.ExpiresAt)}, nil
 		}
-		return []string{"set-expiry", "--password", shellQuoteDeploy(r.ClientPassword), "--days", fmt.Sprint(maxInt(0, minInt(r.Days, 365)))}, nil
+		return []string{"set-expiry", "--password", r.ClientPassword, "--days", fmt.Sprint(maxInt(0, minInt(r.Days, 365)))}, nil
 	case "update-client":
 		if r.ClientPassword == "" {
 			return nil, fmt.Errorf("client password is empty")
 		}
-		args := []string{"update-client", "--password", shellQuoteDeploy(r.ClientPassword)}
+		args := []string{"update-client", "--password", r.ClientPassword}
 		if r.Label != "" {
-			args = append(args, "--label", shellQuoteDeploy(r.Label))
+			args = append(args, "--label", r.Label)
 		}
 		if r.VKHash != "" {
-			args = append(args, "--vk-hash", shellQuoteDeploy(r.VKHash))
+			args = append(args, "--vk-hash", r.VKHash)
 		}
 		if r.Ports != "" {
-			args = append(args, "--ports", shellQuoteDeploy(r.Ports))
+			args = append(args, "--ports", r.Ports)
 		}
 		return args, nil
 	case "cleanup-expired":
