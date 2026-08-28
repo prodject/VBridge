@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import CoreImage.CIFilterBuiltins
+import Security
 
 struct ServerManagementView: View {
     let target: ServerManagementTarget?
@@ -210,9 +211,16 @@ struct ServerManagementView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         if isWDTTManagement {
-                            TextField("Password", text: $newClientPassword)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
+                            HStack {
+                                TextField("Password", text: $newClientPassword)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                Button("Generate") {
+                                    newClientPassword = generateClientPassword()
+                                }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                            }
                         }
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Duration")
@@ -283,9 +291,16 @@ struct ServerManagementView: View {
 
                     if isWDTTManagement {
                         Section(header: Text("Password")) {
-                            TextField("New Password", text: $editedNewPassword)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
+                            HStack {
+                                TextField("New Password", text: $editedNewPassword)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                Button("Generate") {
+                                    editedNewPassword = generateClientPassword()
+                                }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                            }
                         }
                     }
 
@@ -702,6 +717,16 @@ struct ServerManagementView: View {
             .split(separator: ",", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .joined(separator: ",")
+    }
+
+    private func generateClientPassword(length: Int = 16) -> String {
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789")
+        var bytes = [UInt8](repeating: 0, count: max(length, 12))
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            return UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(max(length, 12)).description
+        }
+        return String(bytes.map { alphabet[Int($0) % alphabet.count] })
     }
 }
 
