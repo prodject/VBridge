@@ -202,6 +202,8 @@ enum ServerAdminBridge {
     }
 
     static func setPassword(_ target: ServerAdminTarget, clientPassword: String, newPassword: String) async throws -> ServerAdminEnvelope {
+        let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedNewPassword = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         try await call(ServerAdminBridgeRequest(
             action: ServerAdminAction.setPassword.rawValue,
             host: target.host,
@@ -209,12 +211,13 @@ enum ServerAdminBridge {
             password: target.password,
             port: target.port,
             mainPassword: target.mainPassword,
-            clientPassword: clientPassword,
-            newPassword: newPassword
+            clientPassword: normalizedClientPassword,
+            newPassword: normalizedNewPassword
         ))
     }
 
     static func setExpiry(_ target: ServerAdminTarget, clientPassword: String, days: Int?, expiresAt: Int64?) async throws -> ServerAdminEnvelope {
+        let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         try await call(ServerAdminBridgeRequest(
             action: ServerAdminAction.setExpiry.rawValue,
             host: target.host,
@@ -222,13 +225,14 @@ enum ServerAdminBridge {
             password: target.password,
             port: target.port,
             mainPassword: target.mainPassword,
-            clientPassword: clientPassword,
+            clientPassword: normalizedClientPassword,
             days: days,
             expiresAt: expiresAt
         ))
     }
 
     static func run(_ action: ServerAdminAction, target: ServerAdminTarget, clientPassword: String) async throws -> ServerAdminEnvelope {
+        let normalizedClientPassword = clientPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         try await call(ServerAdminBridgeRequest(
             action: action.rawValue,
             host: target.host,
@@ -236,7 +240,7 @@ enum ServerAdminBridge {
             password: target.password,
             port: target.port,
             mainPassword: target.mainPassword,
-            clientPassword: clientPassword
+            clientPassword: normalizedClientPassword
         ))
     }
 
