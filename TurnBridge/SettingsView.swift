@@ -19,7 +19,6 @@ struct SettingsView: View {
     @State private var showScannerError = false
     @State private var scannerErrorMessage = ""
     @State private var showLinkGeneratedAlert = false
-    @State private var showVKCallCreator = false
     @State private var vkCallCreatorStatus: String?
 
     private let wdttTunnelMTUPresets: [Int?] = [nil, 1280, 1320, 1360, 1380, 1400, 1420, 1440, 1500]
@@ -149,11 +148,9 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-
                 Section {
                     Button {
-                        vkCallCreatorStatus = nil
-                        showVKCallCreator = true
+                        createVKCallLinkFromSavedSession()
                     } label: {
                         Label("Get VK Call URL", systemImage: "phone.badge.plus")
                     }
@@ -164,7 +161,7 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    Text("Creates a new VK call from the VK account you confirm on the next screen and inserts its link at the top of this profile.")
+                    Text("Creates a new VK call from the saved VK session and inserts its link at the top of this profile.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -323,14 +320,6 @@ struct SettingsView: View {
                 }
             )
             .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showVKCallCreator) {
-            VKCallURLCreatorView(
-                onSuccess: { link in
-                    applyCreatedVKCallLink(link)
-                },
-                onCancel: {}
-            )
         }
         .onDisappear {
             guard let draft else { return }
@@ -502,6 +491,30 @@ struct SettingsView: View {
 
         binding(\.vkLink).wrappedValue = ([trimmedLink] + existingLines).joined(separator: "\n")
         vkCallCreatorStatus = "Call created and added as the first link."
+    }
+
+    private func createVKCallLinkFromSavedSession() {
+        guard let token = VKAuthSessionStore.loadAccessToken() else {
+            vkCallCreatorStatus = "No saved VK sessions. Run VK Authorization in Settings -> Extended Features."
+            return
+        }
+
+        vkCallCreatorStatus = "Creating VK call..."
+        Task {
+            do {
+                let link = try await VKCallsStartAPI.createCall(accessToken: token)
+                await MainActor.run {
+                    applyCreatedVKCallLink(link)
+                }
+            } catch {
+                await MainActor.run {
+                    if case VKCallURLCreatorError.vkError = error {
+                        VKAuthSessionStore.clear()
+                    }
+                    vkCallCreatorStatus = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {

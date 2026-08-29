@@ -1058,6 +1058,8 @@ struct GlobalSettingsView: View {
     @AppStorage("tetherProxyEnabled") private var tetherProxyEnabled = false
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
     @State private var trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
+    @State private var showVKAuthorization = false
+    @State private var vkAuthorizationStatus = VKAuthSessionStore.loadAccessToken() == nil ? "No saved VK sessions" : "VK session saved"
 
     var body: some View {
         Form {
@@ -1125,6 +1127,17 @@ struct GlobalSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Trusted Wi-Fi")
                         Text(trustedWiFiSummary)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Button {
+                    showVKAuthorization = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("VK Authorization")
+                        Text(vkAuthorizationStatus)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -1213,8 +1226,17 @@ struct GlobalSettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showVKAuthorization) {
+            VKAuthorizationView(
+                onSuccess: {
+                    vkAuthorizationStatus = "VK session saved"
+                },
+                onCancel: {}
+            )
+        }
         .onAppear {
             trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
+            vkAuthorizationStatus = VKAuthSessionStore.loadAccessToken() == nil ? "No saved VK sessions" : "VK session saved"
         }
     }
 }

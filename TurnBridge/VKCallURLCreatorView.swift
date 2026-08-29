@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import Security
 
 enum VKCallURLCreatorError: LocalizedError {
     case invalidResponse
@@ -91,12 +92,66 @@ enum VKCallsStartAPI {
     }
 }
 
-struct VKCallURLCreatorView: View {
-    let onSuccess: (String) -> Void
+enum VKAuthSessionStore {
+    private static let service = "app.vbridge.vk-auth"
+    private static let account = "vk-calls-access-token"
+
+    static func loadAccessToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
+              let data = item as? Data,
+              let token = String(data: data, encoding: .utf8),
+              !token.isEmpty else {
+            return nil
+        }
+        return token
+    }
+
+    static func saveAccessToken(_ token: String) {
+        let data = Data(token.utf8)
+        let baseQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+
+        let attributes: [String: Any] = [
+            kSecValueData as String: data
+        ]
+
+        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecItemNotFound {
+            var insertQuery = baseQuery
+            insertQuery[kSecValueData as String] = data
+            SecItemAdd(insertQuery as CFDictionary, nil)
+        }
+    }
+
+    static func clear() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+struct VKAuthorizationView: View {
+    let onSuccess: () -> Void
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var statusText = "Open VK authorization and confirm the account that should own the call."
+    @State private var statusText = "Open VK authorization and confirm the account that should be saved."
     @State private var isCompleting = false
 
     var body: some View {
@@ -117,7 +172,7 @@ struct VKCallURLCreatorView: View {
                     .multilineTextAlignment(.center)
                     .padding(12)
             }
-            .navigationTitle("Create VK Call")
+            .navigationTitle("VK Authorization")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -134,20 +189,13 @@ struct VKCallURLCreatorView: View {
     private func complete(with token: String) {
         guard !isCompleting else { return }
         isCompleting = true
-        statusText = "Creating VK call..."
+        statusText = "Saving VK session..."
 
         Task {
-            do {
-                let link = try await VKCallsStartAPI.createCall(accessToken: token)
-                await MainActor.run {
-                    dismiss()
-                    onSuccess(link)
-                }
-            } catch {
-                await MainActor.run {
-                    isCompleting = false
-                    statusText = error.localizedDescription
-                }
+            await MainActor.run {
+                VKAuthSessionStore.saveAccessToken(token)
+                dismiss()
+                onSuccess()
             }
         }
     }
