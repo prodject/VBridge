@@ -46,16 +46,10 @@ struct ServerManagementView: View {
                     } label: {
                         Label(isLoadingClients ? "Refreshing..." : "Refresh Clients", systemImage: "arrow.clockwise")
                     }
+                    .buttonStyle(.bordered)
                     .disabled(!canManage || isLoadingClients)
 
                     Spacer()
-
-                    Button {
-                        exportClients()
-                    } label: {
-                        Label("Export Clients", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(!canManage || serverClients.isEmpty)
 
                     Button {
                         newClientPorts = defaultPortsValue
@@ -63,8 +57,18 @@ struct ServerManagementView: View {
                     } label: {
                         Label("New Client", systemImage: "plus")
                     }
+                    .buttonStyle(.borderedProminent)
                     .disabled(!canManage)
                 }
+                .buttonStyle(.borderless)
+
+                Button {
+                    exportClients()
+                } label: {
+                    Label("Export Clients", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canManage || serverClients.isEmpty)
 
                 if serverClients.isEmpty {
                     Text(isLoadingClients ? "Loading clients..." : "No clients loaded.")
@@ -218,7 +222,7 @@ struct ServerManagementView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         if isWDTTManagement {
-                            HStack {
+                            VStack(alignment: .leading, spacing: 8) {
                                 TextField("Password", text: $newClientPassword)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
@@ -227,6 +231,7 @@ struct ServerManagementView: View {
                                 }
                                 .font(.caption)
                                 .buttonStyle(.bordered)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
                         VStack(alignment: .leading, spacing: 8) {
@@ -298,7 +303,7 @@ struct ServerManagementView: View {
 
                     if isWDTTManagement {
                         Section(header: Text("Password")) {
-                            HStack {
+                            VStack(alignment: .leading, spacing: 8) {
                                 TextField("New Password", text: $editedNewPassword)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
@@ -307,6 +312,7 @@ struct ServerManagementView: View {
                                 }
                                 .font(.caption)
                                 .buttonStyle(.bordered)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
                     }
@@ -754,11 +760,13 @@ struct ServerManagementView: View {
     }
 
     private func generateClientPassword(length: Int = 16) -> String {
-        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789")
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789")
         var bytes = [UInt8](repeating: 0, count: max(length, 12))
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         guard status == errSecSuccess else {
-            return UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(max(length, 12)).description
+            return String((0..<max(length, 12)).map { _ in
+                alphabet.randomElement() ?? "A"
+            })
         }
         return String(bytes.map { alphabet[Int($0) % alphabet.count] })
     }
