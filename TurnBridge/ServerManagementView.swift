@@ -51,6 +51,13 @@ struct ServerManagementView: View {
                     Spacer()
 
                     Button {
+                        exportClients()
+                    } label: {
+                        Label("Export Clients", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(!canManage || serverClients.isEmpty)
+
+                    Button {
                         newClientPorts = defaultPortsValue
                         showCreateClientSheet = true
                     } label: {
@@ -632,10 +639,10 @@ struct ServerManagementView: View {
                 guard let text = String(data: data, encoding: .utf8) else {
                     throw NSError(domain: "ServerManagementView", code: 1, userInfo: [NSLocalizedDescriptionKey: "The selected file is not valid UTF-8 text."])
                 }
-                _ = try await ServerAdminBridge.importClient(wdttTarget, transferText: text)
+                let response = try await ServerAdminBridge.importClient(wdttTarget, transferText: text)
                 await MainActor.run {
                     resultTitle = "Import Complete"
-                    resultMessage = "The client was imported."
+                    resultMessage = response.message
                     showAlert = true
                     refreshServerClients()
                 }
@@ -646,6 +653,33 @@ struct ServerManagementView: View {
                     showAlert = true
                 }
             }
+        }
+    }
+
+    private func exportClients() {
+        guard let target, !serverClients.isEmpty else { return }
+
+        do {
+            let text: String
+            let filenamePrefix: String
+
+            switch target {
+            case .wdtt:
+                text = try ServerAdminBridge.exportClients(serverClients)
+                filenamePrefix = "wdtt-clients"
+            case .csqtt:
+                text = try CSQTTAdminBridge.exportClients(serverClients)
+                filenamePrefix = "csqtt-clients"
+            }
+
+            let timestamp = ISO8601DateFormatter.compactFileNameTimestamp.string(from: Date())
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(filenamePrefix)-\(timestamp).json")
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            shareItems = [url]
+        } catch {
+            resultTitle = "Export Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
         }
     }
 
@@ -728,6 +762,15 @@ struct ServerManagementView: View {
         }
         return String(bytes.map { alphabet[Int($0) % alphabet.count] })
     }
+}
+
+private extension ISO8601DateFormatter {
+    static let compactFileNameTimestamp: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 }
 
 private struct ServerManagementActivityView: UIViewControllerRepresentable {

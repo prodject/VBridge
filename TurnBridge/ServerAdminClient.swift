@@ -25,7 +25,7 @@ struct CSQTTAdminTarget: Encodable, Sendable {
     var webPassword: String
 }
 
-struct ServerAdminClientInfo: Decodable, Identifiable, Sendable {
+struct ServerAdminClientInfo: Codable, Identifiable, Sendable {
     var password: String
     var label: String?
     var vkHash: String?
@@ -54,6 +54,14 @@ struct ServerAdminClientTransferPayload: Codable, Sendable {
     var vkHash: String?
     var expiresAt: Int64
     var deactivated: Bool
+}
+
+struct ServerAdminClientsExportPayload: Codable, Sendable {
+    var format: String
+    var version: Int
+    var exportedAt: Int64
+    var transport: String
+    var clients: [ServerAdminClientInfo]
 }
 
 struct ServerAdminEnvelope: Decodable, Sendable {
@@ -154,6 +162,16 @@ extension ServerAdminClientTransferPayload {
         case vkHash = "vk_hash"
         case expiresAt = "expires_at"
         case deactivated
+    }
+}
+
+extension ServerAdminClientsExportPayload {
+    private enum CodingKeys: String, CodingKey {
+        case format
+        case version
+        case exportedAt = "exported_at"
+        case transport
+        case clients
     }
 }
 
@@ -273,12 +291,52 @@ enum ServerAdminBridge {
         return text
     }
 
+    static func exportClients(_ clients: [ServerAdminClientInfo]) throws -> String {
+        let payload = ServerAdminClientsExportPayload(
+            format: "wdtt-clients",
+            version: 1,
+            exportedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            transport: "wdtt",
+            clients: clients
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(payload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "ServerAdminBridge", code: 8, userInfo: [NSLocalizedDescriptionKey: "Failed to encode clients export JSON."])
+        }
+        return text
+    }
+
     static func importClient(_ target: ServerAdminTarget, transferText: String, defaultPorts: String = "56000,56001,9000") async throws -> ServerAdminEnvelope {
         let data = Data(transferText.utf8)
-        let payload = try JSONDecoder().decode(ServerAdminClientTransferPayload.self, from: data)
-        guard payload.format == "wdtt-plus-client", payload.version == 1 else {
-            throw NSError(domain: "ServerAdminBridge", code: 6, userInfo: [NSLocalizedDescriptionKey: "Unsupported client transfer format."])
+        let decoder = JSONDecoder()
+
+        if let payload = try? decoder.decode(ServerAdminClientTransferPayload.self, from: data) {
+            guard payload.format == "wdtt-plus-client", payload.version == 1 else {
+                throw NSError(domain: "ServerAdminBridge", code: 6, userInfo: [NSLocalizedDescriptionKey: "Unsupported client transfer format."])
+            }
+            return try await importSingleClient(target, payload: payload, defaultPorts: defaultPorts)
         }
+
+        if let payload = try? decoder.decode(ServerAdminClientsExportPayload.self, from: data) {
+            guard payload.version == 1, payload.transport == "wdtt", payload.format == "wdtt-clients" else {
+                throw NSError(domain: "ServerAdminBridge", code: 9, userInfo: [NSLocalizedDescriptionKey: "Unsupported clients export format."])
+            }
+            guard !payload.clients.isEmpty else {
+                throw NSError(domain: "ServerAdminBridge", code: 10, userInfo: [NSLocalizedDescriptionKey: "The selected clients export file is empty."])
+            }
+            return try await importClients(target, clients: payload.clients, defaultPorts: defaultPorts)
+        }
+
+        throw NSError(domain: "ServerAdminBridge", code: 11, userInfo: [NSLocalizedDescriptionKey: "Unsupported client import file."])
+    }
+
+    private static func importSingleClient(
+        _ target: ServerAdminTarget,
+        payload: ServerAdminClientTransferPayload,
+        defaultPorts: String
+    ) async throws -> ServerAdminEnvelope {
         let now = Int64(Date().timeIntervalSince1970)
         if payload.expiresAt > 0, payload.expiresAt <= now {
             throw NSError(domain: "ServerAdminBridge", code: 7, userInfo: [NSLocalizedDescriptionKey: "The transferred client has already expired."])
@@ -297,6 +355,50 @@ enum ServerAdminBridge {
             _ = try await run(.deactivate, target: target, clientPassword: payload.password)
         }
         return response
+    }
+
+    private static func importClients(
+        _ target: ServerAdminTarget,
+        clients: [ServerAdminClientInfo],
+        defaultPorts: String
+    ) async throws -> ServerAdminEnvelope {
+        let now = Int64(Date().timeIntervalSince1970)
+        var importedCount = 0
+
+        for client in clients {
+            let expiresAt = client.expiresAt ?? 0
+            if expiresAt > 0, expiresAt <= now {
+                continue
+            }
+
+            let response = try await create(target, request: ServerAdminCreateRequest(
+                label: client.label ?? "",
+                vkHash: client.vkHash ?? "",
+                ports: client.ports?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? client.ports! : defaultPorts,
+                days: 0,
+                clientPassword: client.password
+            ))
+
+            if expiresAt > 0 {
+                _ = try await setExpiry(target, clientPassword: client.password, days: nil, expiresAt: expiresAt)
+            }
+            if !client.isActive {
+                _ = try await run(.deactivate, target: target, clientPassword: client.password)
+            }
+            importedCount += 1
+
+            if !response.ok {
+                throw NSError(domain: "ServerAdminBridge", code: 12, userInfo: [NSLocalizedDescriptionKey: response.message])
+            }
+        }
+
+        return ServerAdminEnvelope(
+            ok: true,
+            status: "success",
+            message: "Imported \(importedCount) clients.",
+            output: nil,
+            state: nil
+        )
     }
 
     private static func call(_ request: ServerAdminBridgeRequest) async throws -> ServerAdminEnvelope {
@@ -443,6 +545,23 @@ enum CSQTTAdminBridge {
             components.queryItems = [URLQueryItem(name: "name", value: label)]
         }
         return components.url?.absoluteString
+    }
+
+    static func exportClients(_ clients: [ServerAdminClientInfo]) throws -> String {
+        let payload = ServerAdminClientsExportPayload(
+            format: "csqtt-clients",
+            version: 1,
+            exportedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            transport: "csqtt",
+            clients: clients
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(payload)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "CSQTTAdminBridge", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to encode clients export JSON."])
+        }
+        return text
     }
 
     private static func call(_ request: CSQTTAdminBridgeRequest) async throws -> ServerAdminEnvelope {
