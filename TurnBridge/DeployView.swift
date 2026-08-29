@@ -163,8 +163,8 @@ struct DeployView: View {
     @State private var lastLoadedDeployKind: DeployServerKind?
     @State private var liveOutputTask: Task<Void, Never>?
     @State private var serverConnected: Bool?
-    @State private var wdttInstalled: Bool?
-    @State private var readyToConnect: Bool?
+    @State private var reportedInstalled: Bool?
+    @State private var reportedReadyToConnect: Bool?
     @State private var detectedDeployKind: String?
     @State private var currentInstallFlavor: WDTTInstallFlavor?
     private let wdttServerArchitectures = ["amd64", "arm64"]
@@ -210,8 +210,8 @@ struct DeployView: View {
             if hasSavedServerSettings {
                 Section(header: Text("Server Status")) {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
-                    DeployStatusRow(title: installedStatusTitle, value: wdttInstalled, isChecking: isCheckingServerStatus)
-                    DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
+                    DeployStatusRow(title: installedStatusTitle, value: displayedInstalledStatus, isChecking: isCheckingServerStatus)
+                    DeployStatusRow(title: "Ready to connect", value: displayedReadyToConnectStatus, isChecking: isCheckingServerStatus)
                     if let detectedServerKindTitle {
                         HStack {
                             Text("Detected on server")
@@ -740,6 +740,22 @@ struct DeployView: View {
         return "Selected Deploy type is \(selectedDeployKind.title), but the server looks like \(detectedServerKindTitle ?? "another type")."
     }
 
+    private var displayedInstalledStatus: Bool? {
+        guard let reportedInstalled else { return nil }
+        guard let detectedDeployKind, !detectedDeployKind.isEmpty else {
+            return reportedInstalled
+        }
+        return detectedDeployKind == selectedDeployKind.rawValue ? reportedInstalled : false
+    }
+
+    private var displayedReadyToConnectStatus: Bool? {
+        guard let reportedReadyToConnect else { return nil }
+        guard let detectedDeployKind, !detectedDeployKind.isEmpty else {
+            return reportedReadyToConnect
+        }
+        return detectedDeployKind == selectedDeployKind.rawValue ? reportedReadyToConnect : false
+    }
+
     private var canConnect: Bool {
         !isRunning && !isCheckingServerStatus && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && isSSHPortValid
     }
@@ -1143,23 +1159,9 @@ struct DeployView: View {
 
     private func updateStatusIndicators(_ response: DeployResponse) {
         serverConnected = response.serverConnected
+        reportedInstalled = response.wdttInstalled
+        reportedReadyToConnect = response.readyToConnect
         detectedDeployKind = nonEmpty(response.detectedDeployKind)
-
-        if selectedDeployKind == .csqtt {
-            let matchesSelectedKind = detectedDeployKind == DeployServerKind.csqtt.rawValue || detectedDeployKind == nil
-            wdttInstalled = matchesSelectedKind ? response.wdttInstalled : false
-            readyToConnect = matchesSelectedKind ? response.readyToConnect : false
-            return
-        }
-
-        if let detectedDeployKind {
-            let matchesSelectedKind = detectedDeployKind == selectedDeployKind.rawValue
-            wdttInstalled = matchesSelectedKind ? response.wdttInstalled : false
-            readyToConnect = matchesSelectedKind ? response.readyToConnect : false
-        } else {
-            wdttInstalled = response.wdttInstalled
-            readyToConnect = response.readyToConnect
-        }
     }
 
     private func applyDiscoveredServerSettings(_ response: DeployResponse) {
@@ -1212,8 +1214,8 @@ struct DeployView: View {
 
     private func clearStatusIndicators() {
         serverConnected = nil
-        wdttInstalled = nil
-        readyToConnect = nil
+        reportedInstalled = nil
+        reportedReadyToConnect = nil
         detectedDeployKind = nil
     }
 
