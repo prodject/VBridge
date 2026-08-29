@@ -621,7 +621,7 @@ struct ConfigParser {
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
         let hashes = hashesValue
             .split(separator: ",", omittingEmptySubsequences: false)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { stripVKJoinPrefix(String($0)).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
         guard !trimmedHost.isEmpty else {

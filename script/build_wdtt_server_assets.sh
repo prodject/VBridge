@@ -5,9 +5,8 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 assets_dir="$project_root/TurnBridge/DeployAssets"
+stable_server_dir="$project_root/third_party/wdtt-server"
 plus_server_dir="$project_root/third_party/wdtt-server"
-legacy_repo_url="https://github.com/amurcanov/proxy-turn-vk-android"
-legacy_repo_ref="10b7fbc1b8a016d234cab5bcae4eef689e6690e4"
 
 GO_BIN=$(command -v go 2>/dev/null || true)
 if [ -z "$GO_BIN" ] && [ -x /opt/homebrew/bin/go ]; then
@@ -39,20 +38,6 @@ build_one() {
     )
     chmod 0644 "$out"
 }
-
-prepare_legacy_repo() {
-    worktree=$(mktemp -d "${TMPDIR:-/tmp}/wdtt-src.XXXXXX")
-    git clone --depth 1 "$legacy_repo_url" "$worktree" >&2
-    git -C "$worktree" checkout --detach "$legacy_repo_ref" >&2
-    stable_dir="$worktree/app/src/main/assets/linux-server"
-    [ -d "$stable_dir" ] || {
-        printf '%s\n' "stable WDTT source path not found at $stable_dir" >&2
-        exit 1
-    }
-    printf '%s\n' "$stable_dir"
-}
-
-stable_server_dir=$(prepare_legacy_repo)
 
 build_one "$stable_server_dir" "wdtt" amd64
 build_one "$stable_server_dir" "wdtt" arm64

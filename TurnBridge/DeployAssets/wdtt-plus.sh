@@ -26,6 +26,7 @@ readonly WDTT_IFACE="wdtt0"
 readonly WDTT_CONFIG_DIR="/etc/wdtt"
 readonly WDTT_ACCESS_DB="passwords.json"
 readonly WDTT_WG_KEYS="wg-keys.dat"
+readonly WDTT_DEPLOY_KIND_FILE="${WDTT_CONFIG_DIR}/deploy-kind"
 readonly IPT_COMMENT="WDTT_MANAGED"
 readonly IPT_MIRROR_COMMENT="WDTT_MIRRORED"
 
@@ -496,6 +497,8 @@ setup_wdtt_binary() {
     fi
 
     mkdir -p "$WDTT_CONFIG_DIR"
+    printf '%s\n' "wdtt-plus" > "$WDTT_DEPLOY_KIND_FILE"
+    chmod 600 "$WDTT_DEPLOY_KIND_FILE"
 }
 
 # ─── Systemd-сервис WDTT ─────────────────────────────────────────────────────
@@ -583,6 +586,7 @@ do_uninstall() {
 
     rm -f /usr/local/bin/wdtt-server
     cleanup_config_dir_keep_access_db
+    rm -f "$WDTT_DEPLOY_KIND_FILE"
     rm -f /etc/sysctl.d/99-wdtt.conf
     sysctl --system >/dev/null 2>&1 || true
 

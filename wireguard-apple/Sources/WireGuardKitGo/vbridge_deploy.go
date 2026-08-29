@@ -963,6 +963,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		"printf 'WDTT_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
 		"if [ \"$binary_installed\" = \"1\" ]; then /usr/local/bin/wdtt-server --version 2>/dev/null | head -n 1 | sed 's/^/WDTT_VERSION|/'; fi",
 		"if [ -f /etc/systemd/system/wdtt.service ]; then sed -n 's/^ExecStart=//p' /etc/systemd/system/wdtt.service | tail -n 1 | sed 's/^/WDTT_EXECSTART|/'; fi",
+		"if [ -f /etc/wdtt/deploy-kind ]; then tr -d '\\r' </etc/wdtt/deploy-kind | head -n 1 | sed 's/^/WDTT_KIND|/'; fi",
 		"if [ -S /run/wdtt/admin.sock ]; then printf 'WDTT_ADMINSOCK|1\\n'; else printf 'WDTT_ADMINSOCK|0\\n'; fi",
 	}, "; ")
 
@@ -980,6 +981,13 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		if strings.HasPrefix(line, "WDTT_EXECSTART|") {
 			mergeDeployStatusConfig(&checks, parseWDTTExecStart(strings.TrimPrefix(line, "WDTT_EXECSTART|")))
 			checks.DetectedDeployKind = detectWDTTDeployKind(strings.TrimPrefix(line, "WDTT_EXECSTART|"), checks.DetectedDeployKind)
+			continue
+		}
+		if strings.HasPrefix(line, "WDTT_KIND|") {
+			kind := strings.TrimSpace(strings.TrimPrefix(line, "WDTT_KIND|"))
+			if kind == "wdtt" || kind == "wdtt-plus" {
+				checks.DetectedDeployKind = kind
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "WDTT_ADMINSOCK|") {

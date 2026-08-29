@@ -20,6 +20,7 @@ readonly WDTT_ARGS="${WDTT_ARGS:-}"
 readonly WDTT_IFACE="wdtt0"
 readonly WDTT_CONFIG_DIR="/etc/wdtt"
 readonly WDTT_ACCESS_DB="passwords.json"
+readonly WDTT_DEPLOY_KIND_FILE="${WDTT_CONFIG_DIR}/deploy-kind"
 readonly IPT_COMMENT="WDTT_MANAGED"
 readonly IPT_MIRROR_COMMENT="WDTT_MIRRORED"
 
@@ -258,6 +259,8 @@ install_server() {
     install -m 0755 /tmp/wdtt-server /usr/local/bin/wdtt-server
     mkdir -p "$WDTT_CONFIG_DIR"
     chmod 700 "$WDTT_CONFIG_DIR"
+    printf '%s\n' "wdtt" > "$WDTT_DEPLOY_KIND_FILE"
+    chmod 600 "$WDTT_DEPLOY_KIND_FILE"
 
     prog 0.60 "Настройка firewall..."
     fw_add_input_udp "$DTLS_PORT"
@@ -305,6 +308,7 @@ uninstall_server() {
     pkill -f '/usr/local/bin/wdtt-server' 2>/dev/null || true
     ip link show "$WDTT_IFACE" >/dev/null 2>&1 && ip link del "$WDTT_IFACE" 2>/dev/null || true
     fw_cleanup
+    rm -f "$WDTT_DEPLOY_KIND_FILE"
     rm -f /usr/local/bin/wdtt-server
     log_info "WDTT удалён."
 }
