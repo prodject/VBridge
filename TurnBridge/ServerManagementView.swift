@@ -46,7 +46,7 @@ struct ServerManagementView: View {
                     } label: {
                         Label(isLoadingClients ? "Refreshing..." : "Refresh Clients", systemImage: "arrow.clockwise")
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.bordered)
                     .disabled(!canManage || isLoadingClients)
 
                     Spacer()
@@ -56,7 +56,7 @@ struct ServerManagementView: View {
                     } label: {
                         Label("Export Clients", systemImage: "square.and.arrow.up")
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.bordered)
                     .disabled(!canManage || serverClients.isEmpty)
 
                     Spacer()
@@ -67,7 +67,7 @@ struct ServerManagementView: View {
                     } label: {
                         Label("New Client", systemImage: "plus")
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.bordered)
                     .disabled(!canManage)
                 }
 
