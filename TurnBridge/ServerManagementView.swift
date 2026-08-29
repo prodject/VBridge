@@ -52,6 +52,16 @@ struct ServerManagementView: View {
                     Spacer()
 
                     Button {
+                        exportClients()
+                    } label: {
+                        Label("Export Clients", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canManage || serverClients.isEmpty)
+
+                    Spacer()
+
+                    Button {
                         newClientPorts = defaultPortsValue
                         showCreateClientSheet = true
                     } label: {
@@ -61,14 +71,6 @@ struct ServerManagementView: View {
                     .disabled(!canManage)
                 }
                 .buttonStyle(.borderless)
-
-                Button {
-                    exportClients()
-                } label: {
-                    Label("Export Clients", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.bordered)
-                .disabled(!canManage || serverClients.isEmpty)
 
                 if serverClients.isEmpty {
                     Text(isLoadingClients ? "Loading clients..." : "No clients loaded.")
