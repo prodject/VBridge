@@ -44,20 +44,11 @@ struct ServerManagementView: View {
                     Button {
                         refreshServerClients()
                     } label: {
-                        Label(isLoadingClients ? "Refreshing..." : "Refresh Clients", systemImage: "arrow.clockwise")
+                        Text(isLoadingClients ? "Refreshing..." : "Refresh")
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .disabled(!canManage || isLoadingClients)
-
-                    Spacer()
-
-                    Button {
-                        exportClients()
-                    } label: {
-                        Label("Export Clients", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!canManage || serverClients.isEmpty)
 
                     Spacer()
 
@@ -65,11 +56,13 @@ struct ServerManagementView: View {
                         newClientPorts = defaultPortsValue
                         showCreateClientSheet = true
                     } label: {
-                        Label("New Client", systemImage: "plus")
+                        Text("New")
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .disabled(!canManage)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if serverClients.isEmpty {
                     Text(isLoadingClients ? "Loading clients..." : "No clients loaded.")
@@ -150,7 +143,7 @@ struct ServerManagementView: View {
             }
 
             if canManage && isWDTTManagement {
-                Section(header: Text("Cleanup")) {
+                Section(header: Text("Extended")) {
                     Button("Cleanup Expired") {
                         runGlobalAction(.cleanupExpired)
                     }
@@ -160,6 +153,11 @@ struct ServerManagementView: View {
                         runGlobalAction(.cleanupOrphans)
                     }
                     .disabled(!canManage)
+
+                    Button("Export Clients") {
+                        exportClients()
+                    }
+                    .disabled(!canManage || serverClients.isEmpty)
 
                     Button("Import Client") {
                         showImportPicker = true
