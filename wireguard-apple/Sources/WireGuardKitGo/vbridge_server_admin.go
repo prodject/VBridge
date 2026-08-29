@@ -502,7 +502,7 @@ func runStableServerAdmin(sshClient *ssh.Client, req serverAdminRequest) (server
 		),
 		req.Password,
 	)
-	stdoutText, stderrText, cmdErr = runSSHCommandSeparated(sshClient, command, 70*time.Second)
+	stdoutText, stderrText, cmdErr := runSSHCommandSeparated(sshClient, command, 70*time.Second)
 	text := stdoutText
 	if strings.TrimSpace(stderrText) != "" {
 		if text != "" && !strings.HasSuffix(text, "\n") {
