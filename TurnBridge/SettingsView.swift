@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var showScannerError = false
     @State private var scannerErrorMessage = ""
     @State private var showLinkGeneratedAlert = false
+    @State private var showVKCallCreator = false
     @State private var vkCallCreatorStatus: String?
 
     private let wdttTunnelMTUPresets: [Int?] = [nil, 1280, 1320, 1360, 1380, 1400, 1420, 1440, 1500]
@@ -321,6 +322,19 @@ struct SettingsView: View {
             )
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $showVKCallCreator) {
+            VKCallURLCreatorView(
+                onSuccess: { link in
+                    applyCreatedVKCallLink(link)
+                },
+                onCancel: {
+                    vkCallCreatorStatus = nil
+                },
+                onNeedsLogin: {
+                    vkCallCreatorStatus = "Saved VK session is missing or expired. Run VK Authorization in Settings -> Extended Features."
+                }
+            )
+        }
         .onDisappear {
             guard let draft else { return }
             let changed = originalProfile != draft
@@ -494,27 +508,12 @@ struct SettingsView: View {
     }
 
     private func createVKCallLinkFromSavedSession() {
-        guard let token = VKAuthSessionStore.loadAccessToken() else {
+        guard VKCookieStore.isValid() else {
             vkCallCreatorStatus = "No saved VK sessions. Run VK Authorization in Settings -> Extended Features."
             return
         }
-
-        vkCallCreatorStatus = "Creating VK call..."
-        Task {
-            do {
-                let link = try await VKCallsStartAPI.createCall(accessToken: token)
-                await MainActor.run {
-                    applyCreatedVKCallLink(link)
-                }
-            } catch {
-                await MainActor.run {
-                    if case VKCallURLCreatorError.vkError = error {
-                        VKAuthSessionStore.clear()
-                    }
-                    vkCallCreatorStatus = error.localizedDescription
-                }
-            }
-        }
+        vkCallCreatorStatus = nil
+        showVKCallCreator = true
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<VPNProfile, T>) -> Binding<T> {

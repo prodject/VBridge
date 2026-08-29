@@ -92,57 +92,55 @@ enum VKCallsStartAPI {
     }
 }
 
-enum VKAuthSessionStore {
+enum VKCookieStore {
     private static let service = "app.vbridge.vk-auth"
-    private static let account = "vk-calls-access-token"
+    private static let account = "vk-cookie"
 
-    static func loadAccessToken() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let token = String(data: data, encoding: .utf8),
-              !token.isEmpty else {
-            return nil
-        }
-        return token
+    struct Stored: Codable {
+        let cookieHeader: String
+        let expiry: Date
+        let savedAt: Date
     }
 
-    static func saveAccessToken(_ token: String) {
-        let data = Data(token.utf8)
-        let baseQuery: [String: Any] = [
+    @discardableResult
+    static func save(cookieHeader: String, expiry: Date) -> Bool {
+        let stored = Stored(cookieHeader: cookieHeader, expiry: expiry, savedAt: Date())
+        guard let data = try? JSONEncoder().encode(stored) else { return false }
+
+        SecItemDelete(baseQuery() as CFDictionary)
+        var add = baseQuery()
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func load() -> Stored? {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        guard status == errSecSuccess, let data = out as? Data else { return nil }
+        return try? JSONDecoder().decode(Stored.self, from: data)
+    }
+
+    @discardableResult
+    static func delete() -> Bool {
+        let status = SecItemDelete(baseQuery() as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    static func isValid(now: Date = Date()) -> Bool {
+        guard let stored = load() else { return false }
+        return stored.expiry > now
+    }
+
+    private static func baseQuery() -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-
-        let attributes: [String: Any] = [
-            kSecValueData as String: data
-        ]
-
-        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecItemNotFound {
-            var insertQuery = baseQuery
-            insertQuery[kSecValueData as String] = data
-            SecItemAdd(insertQuery as CFDictionary, nil)
-        }
-    }
-
-    static func clear() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
     }
 }
 
@@ -151,100 +149,351 @@ struct VKAuthorizationView: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var statusText = "Open VK authorization and confirm the account that should be saved."
-    @State private var isCompleting = false
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                VKCallURLOAuthWebView(
-                    onToken: { token in
-                        complete(with: token)
-                    },
-                    onStatus: { status in
-                        statusText = status
-                    }
-                )
-
-                Text(statusText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(12)
-            }
-            .navigationTitle("VK Authorization")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                        onCancel()
-                    }
-                    .disabled(isCompleting)
-                }
-            }
-        }
-    }
-
-    private func complete(with token: String) {
-        guard !isCompleting else { return }
-        isCompleting = true
-        statusText = "Saving VK session..."
-
-        Task {
-            await MainActor.run {
-                VKAuthSessionStore.saveAccessToken(token)
+        VKAuthWebView { result in
+            switch result {
+            case let .harvested(cookieHeader, expiry):
+                _ = VKCookieStore.save(cookieHeader: cookieHeader, expiry: expiry)
                 dismiss()
                 onSuccess()
+            case .cancelled:
+                dismiss()
+                onCancel()
             }
         }
     }
 }
 
-private struct VKCallURLOAuthWebView: UIViewRepresentable {
-    let onToken: (String) -> Void
+enum VKAuthResult {
+    case harvested(cookieHeader: String, expiry: Date)
+    case cancelled
+}
+
+private struct VKAuthWebView: View {
+    let onResult: (VKAuthResult) -> Void
+
+    @State private var harvested = false
+    @State private var statusText = "Sign in to VK. The session will be saved for call creation."
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("VK Authorization")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel") {
+                    onResult(.cancelled)
+                }
+                .font(.headline)
+            }
+            .padding()
+
+            VKAuthWKWebView(
+                onHarvested: { header, expiry in
+                    guard !harvested else { return }
+                    harvested = true
+                    onResult(.harvested(cookieHeader: header, expiry: expiry))
+                },
+                onStatus: { statusText = $0 }
+            )
+
+            Text(statusText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(8)
+        }
+    }
+}
+
+private struct VKAuthWKWebView: UIViewRepresentable {
+    let onHarvested: (_ cookieHeader: String, _ expiry: Date) -> Void
     let onStatus: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onToken: onToken, onStatus: onStatus)
+        Coordinator(onHarvested: onHarvested, onStatus: onStatus)
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
-        if let url = VKCallsStartAPI.authorizeURL {
+        if let url = URL(string: "https://vk.ru/") {
             webView.load(URLRequest(url: url))
-        } else {
-            onStatus("Failed to build VK authorization URL.")
         }
+        context.coordinator.startPolling()
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
 
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopPolling()
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
-        let onToken: (String) -> Void
+        let onHarvested: (_ cookieHeader: String, _ expiry: Date) -> Void
         let onStatus: (String) -> Void
         weak var webView: WKWebView?
-        private var didFinish = false
+        private var timer: Timer?
+        private var done = false
 
-        init(onToken: @escaping (String) -> Void, onStatus: @escaping (String) -> Void) {
-            self.onToken = onToken
+        init(onHarvested: @escaping (_ cookieHeader: String, _ expiry: Date) -> Void,
+             onStatus: @escaping (String) -> Void) {
+            self.onHarvested = onHarvested
             self.onStatus = onStatus
+        }
+
+        func startPolling() {
+            timer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
+                self?.tryHarvest()
+            }
+        }
+
+        func stopPolling() {
+            timer?.invalidate()
+            timer = nil
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            tryHarvest()
+        }
+
+        private func tryHarvest() {
+            guard !done, let store = webView?.configuration.websiteDataStore.httpCookieStore else { return }
+            store.getAllCookies { [weak self] cookies in
+                guard let self, !self.done else { return }
+                var remixsid: HTTPCookie?
+                var p: HTTPCookie?
+                for cookie in cookies {
+                    let domain = cookie.domain.hasPrefix(".") ? cookie.domain : "." + cookie.domain
+                    if cookie.name == "remixsid", (domain.hasSuffix(".vk.com") || domain.hasSuffix(".vk.ru")) {
+                        remixsid = cookie
+                    }
+                    if cookie.name == "p", (domain.hasSuffix(".login.vk.com") || domain.hasSuffix(".login.vk.ru")) {
+                        p = cookie
+                    }
+                }
+                guard let remixsid, let p else {
+                    self.onStatus("Waiting for VK sign-in to finish...")
+                    return
+                }
+                self.done = true
+                self.stopPolling()
+                let header = "remixsid=\(remixsid.value); p=\(p.value)"
+                let fallback = Date().addingTimeInterval(30 * 24 * 3600)
+                let expiry = min(remixsid.expiresDate ?? fallback, p.expiresDate ?? fallback)
+                self.onStatus("VK session captured.")
+                DispatchQueue.main.async {
+                    self.onHarvested(header, expiry)
+                }
+            }
+        }
+    }
+}
+
+enum VKOAuthResult {
+    case token(String)
+    case needsLogin
+    case failed(String)
+    case cancelled
+}
+
+private enum VKOAuth {
+    static func domain(forCookie name: String) -> String? {
+        switch name {
+        case "remixsid":
+            return ".vk.ru"
+        case "p":
+            return ".login.vk.ru"
+        default:
+            return nil
+        }
+    }
+
+    static func cookies(fromHeader header: String, expiry: Date) -> [HTTPCookie] {
+        header.split(separator: ";").compactMap { pair in
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2 else { return nil }
+            let name = kv[0].trimmingCharacters(in: .whitespaces)
+            let value = kv[1].trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty, let domain = domain(forCookie: name) else { return nil }
+            return HTTPCookie(properties: [
+                .name: name,
+                .value: value,
+                .domain: domain,
+                .path: "/",
+                .secure: "TRUE",
+                .expires: expiry
+            ])
+        }
+    }
+}
+
+struct VKCallURLCreatorView: View {
+    let onSuccess: (String) -> Void
+    let onCancel: () -> Void
+    let onNeedsLogin: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var done = false
+    @State private var statusText = "Opening VK ID..."
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Create VK Call")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel") {
+                    finishCancelled()
+                }
+                .font(.headline)
+            }
+            .padding()
+
+            VKOAuthWKWebView(
+                onToken: { token in
+                    Task { await createCall(token: token) }
+                },
+                onNeedsLogin: {
+                    guard !done else { return }
+                    done = true
+                    dismiss()
+                    onNeedsLogin()
+                },
+                onStatus: { statusText = $0 }
+            )
+
+            Text(statusText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(8)
+        }
+    }
+
+    private func finishCancelled() {
+        guard !done else { return }
+        done = true
+        dismiss()
+        onCancel()
+    }
+
+    private func createCall(token: String) async {
+        await MainActor.run {
+            statusText = "Creating the call..."
+        }
+
+        do {
+            let link = try await VKCallsStartAPI.createCall(accessToken: token)
+            await MainActor.run {
+                guard !done else { return }
+                done = true
+                dismiss()
+                onSuccess(link)
+            }
+        } catch {
+            await MainActor.run {
+                guard !done else { return }
+                done = true
+                dismiss()
+                onNeedsLogin()
+            }
+        }
+    }
+}
+
+private struct VKOAuthWKWebView: UIViewRepresentable {
+    let onToken: (String) -> Void
+    let onNeedsLogin: () -> Void
+    let onStatus: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onToken: onToken, onNeedsLogin: onNeedsLogin, onStatus: onStatus)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+
+        let controller = WKUserContentController()
+        controller.add(context.coordinator, name: "vkoauth")
+        controller.addUserScript(WKUserScript(source: """
+        (function() {
+            var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vkoauth;
+            if (!h) return;
+            var of = window.fetch;
+            window.fetch = function(input, init) {
+                var url = typeof input === 'string' ? input : (input && input.url) || '';
+                var p = of.apply(this, arguments);
+                if (url.indexOf('act=connect_internal') >= 0) {
+                    p.then(function(r) { return r.clone().text(); })
+                     .then(function(t) { h.postMessage('gate:' + (t.indexOf('\"error\"') >= 0 ? 'error' : 'ok') + ' len=' + t.length); })
+                     .catch(function() { h.postMessage('gate:unreadable'); });
+                }
+                return p;
+            };
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        config.userContentController = controller
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        context.coordinator.webView = webView
+        context.coordinator.plantCookiesAndLoad()
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        let onToken: (String) -> Void
+        let onNeedsLogin: () -> Void
+        let onStatus: (String) -> Void
+        weak var webView: WKWebView?
+        private var finished = false
+
+        init(onToken: @escaping (String) -> Void,
+             onNeedsLogin: @escaping () -> Void,
+             onStatus: @escaping (String) -> Void) {
+            self.onToken = onToken
+            self.onNeedsLogin = onNeedsLogin
+            self.onStatus = onStatus
+        }
+
+        func plantCookiesAndLoad() {
+            guard let webView, let url = VKCallsStartAPI.authorizeURL else { return }
+            guard let stored = VKCookieStore.load(), stored.expiry > Date() else {
+                onNeedsLogin()
+                return
+            }
+
+            let cookies = VKOAuth.cookies(fromHeader: stored.cookieHeader, expiry: stored.expiry)
+            let store = webView.configuration.websiteDataStore.httpCookieStore
+            let group = DispatchGroup()
+            for cookie in cookies {
+                group.enter()
+                store.setCookie(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) { [weak self] in
+                self?.onStatus("Opening VK ID...")
+                webView.load(URLRequest(url: url))
+            }
         }
 
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if let url = navigationAction.request.url,
-               let token = VKCallsStartAPI.accessToken(from: url),
-               !didFinish {
-                didFinish = true
+               let token = VKCallsStartAPI.accessToken(from: url) {
                 decisionHandler(.cancel)
+                guard !finished else { return }
+                finished = true
+                onStatus("Token acquired.")
                 onToken(token)
                 return
             }
@@ -254,9 +503,7 @@ private struct VKCallURLOAuthWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let url = webView.url else { return }
             if url.host == "id.vk.ru" {
-                onStatus("Confirm the VK account that should create the call.")
-            } else if url.host == VKCallsStartAPI.redirectHost {
-                onStatus("Authorization completed.")
+                onStatus("Confirm the VK account for call creation.")
             }
         }
 
@@ -266,6 +513,14 @@ private struct VKCallURLOAuthWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             onStatus("Navigation failed: \(error.localizedDescription)")
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let body = message.body as? String else { return }
+            if body.hasPrefix("gate:error"), !finished {
+                finished = true
+                onNeedsLogin()
+            }
         }
     }
 }

@@ -1059,7 +1059,7 @@ struct GlobalSettingsView: View {
     @AppStorage("tetherProxyPort") private var tetherProxyPort = 9000
     @State private var trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
     @State private var showVKAuthorization = false
-    @State private var vkAuthorizationStatus = VKAuthSessionStore.loadAccessToken() == nil ? "No saved VK sessions" : "VK session saved"
+    @State private var vkAuthorizationStatus = VKCookieStore.isValid() ? "VK session saved" : "No saved VK sessions"
 
     var body: some View {
         Form {
@@ -1236,7 +1236,7 @@ struct GlobalSettingsView: View {
         }
         .onAppear {
             trustedWiFiSummary = TrustedWiFiStorage.summary(TrustedWiFiStorage.load())
-            vkAuthorizationStatus = VKAuthSessionStore.loadAccessToken() == nil ? "No saved VK sessions" : "VK session saved"
+            vkAuthorizationStatus = VKCookieStore.isValid() ? "VK session saved" : "No saved VK sessions"
         }
     }
 }
