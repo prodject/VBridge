@@ -225,12 +225,15 @@ struct ServerManagementView: View {
                                 TextField("Password", text: $newClientPassword)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
+                                    .font(.caption)
+                                    .controlSize(.small)
                                 Button("Generate") {
                                     newClientPassword = generateClientPassword()
                                 }
                                 .font(.caption)
                                 .buttonStyle(.bordered)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         VStack(alignment: .leading, spacing: 8) {
