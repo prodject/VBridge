@@ -183,6 +183,16 @@ func runDeploy(req deployRequest) deployResponse {
 	if req.Action == "status" {
 		if req.isCSQTT() {
 			checks, text := checkCSQTTStatus(client)
+			detectedKind := "csqtt"
+			if !checks.WDTTInstalled {
+				wdttChecks, wdttText := checkDeployStatus(client)
+				if wdttChecks.WDTTInstalled && wdttChecks.DetectedDeployKind != "" {
+					detectedKind = wdttChecks.DetectedDeployKind
+					if strings.TrimSpace(wdttText) != "" {
+						text += "\n" + wdttText
+					}
+				}
+			}
 			appendOutput(req.Action, text)
 			return deployResponse{
 				OK:              true,
@@ -192,7 +202,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: checks.ServerConnected,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
-				DetectedDeployKind: "csqtt",
+				DetectedDeployKind: detectedKind,
 				ServerVersion:   checks.ServerVersion,
 				DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
