@@ -325,7 +325,7 @@ struct DeployView: View {
             }
 
             Section {
-                if supportsWDTTPlusManagement || selectedDeployKind == .csqtt {
+                if isWDTTFamily || selectedDeployKind == .csqtt {
                     NavigationLink {
                         ServerManagementView(
                             target: serverManagementTarget,
@@ -666,31 +666,31 @@ struct DeployView: View {
     }
 
     private var supportsWDTTPlusManagement: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var supportsBackupRestore: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var supportsCleanupDevices: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var supportsUpdatePreserve: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var supportsReinstall: Bool {
-        isWDTTPlus || selectedDeployKind == .csqtt
+        isWDTTFamily || selectedDeployKind == .csqtt
     }
 
     private var supportsOutboundManagement: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var supportsExportServer: Bool {
-        isWDTTPlus
+        isWDTTFamily
     }
 
     private var serverArchitectures: [String] {

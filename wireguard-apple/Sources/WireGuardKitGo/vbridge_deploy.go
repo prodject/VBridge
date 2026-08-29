@@ -654,12 +654,6 @@ func (r deployRequest) validate() error {
 	if r.isWDTTFamily() && (r.Action == "install" || r.Action == "update_preserve") && r.MainPassword == "" {
 		return errors.New("WDTT main password is empty")
 	}
-	if r.isWDTTStable() {
-		switch r.Action {
-		case "update_preserve", "cleanup_devices", "export_state", "import_state", "reinstall":
-			return fmt.Errorf("deploy action %q is not supported for WDTT", r.Action)
-		}
-	}
 	if r.DeployKind == "csqtt" && (r.Action == "install" || r.Action == "update_preserve") && strings.TrimSpace(r.CSQTTTunnelPassword) == "" {
 		return errors.New("CSQTT tunnel password is empty")
 	}
