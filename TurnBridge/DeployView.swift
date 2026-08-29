@@ -54,6 +54,7 @@ private struct DeployResponse: Decodable, Sendable {
     var serverConnected: Bool?
     var wdttInstalled: Bool?
     var readyToConnect: Bool?
+    var detectedDeployKind: String?
     var serverVersion: String?
     var dtlsPort: Int?
     var wgPort: Int?
@@ -164,6 +165,7 @@ struct DeployView: View {
     @State private var serverConnected: Bool?
     @State private var wdttInstalled: Bool?
     @State private var readyToConnect: Bool?
+    @State private var detectedDeployKind: String?
     @State private var currentInstallFlavor: WDTTInstallFlavor?
     private let wdttServerArchitectures = ["amd64", "arm64"]
     private let maxPasswordsOptions = [10, 25, 50, 75, 100, 150, 200, 300, 500]
@@ -210,6 +212,19 @@ struct DeployView: View {
                     DeployStatusRow(title: "Server connected", value: serverConnected, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: installedStatusTitle, value: wdttInstalled, isChecking: isCheckingServerStatus)
                     DeployStatusRow(title: "Ready to connect", value: readyToConnect, isChecking: isCheckingServerStatus)
+                    if let detectedServerKindTitle {
+                        HStack {
+                            Text("Detected on server")
+                            Spacer()
+                            Text(detectedServerKindTitle)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    if let detectedServerKindMismatchMessage {
+                        Text(detectedServerKindMismatchMessage)
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
                 }
             }
 
@@ -702,6 +717,29 @@ struct DeployView: View {
         isWDTTFamily ? "\(selectedDeployKind.title) installed" : "CSQTT installed"
     }
 
+    private var detectedServerKindTitle: String? {
+        guard let detectedDeployKind else { return nil }
+        switch detectedDeployKind {
+        case DeployServerKind.wdtt.rawValue:
+            return DeployServerKind.wdtt.title
+        case DeployServerKind.wdttPlus.rawValue:
+            return DeployServerKind.wdttPlus.title
+        case DeployServerKind.csqtt.rawValue:
+            return DeployServerKind.csqtt.title
+        default:
+            return "Unknown"
+        }
+    }
+
+    private var detectedServerKindMismatchMessage: String? {
+        guard let detectedDeployKind,
+              !detectedDeployKind.isEmpty,
+              detectedDeployKind != selectedDeployKind.rawValue else {
+            return nil
+        }
+        return "Selected Deploy type is \(selectedDeployKind.title), but the server looks like \(detectedServerKindTitle ?? "another type")."
+    }
+
     private var canConnect: Bool {
         !isRunning && !isCheckingServerStatus && !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty && isSSHPortValid
     }
@@ -1107,6 +1145,7 @@ struct DeployView: View {
         serverConnected = response.serverConnected
         wdttInstalled = response.wdttInstalled
         readyToConnect = response.readyToConnect
+        detectedDeployKind = nonEmpty(response.detectedDeployKind)
     }
 
     private func applyDiscoveredServerSettings(_ response: DeployResponse) {
@@ -1161,6 +1200,7 @@ struct DeployView: View {
         serverConnected = nil
         wdttInstalled = nil
         readyToConnect = nil
+        detectedDeployKind = nil
     }
 
     private func syncVisiblePorts(for kind: DeployServerKind) {

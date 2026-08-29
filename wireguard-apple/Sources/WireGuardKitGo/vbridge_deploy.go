@@ -58,6 +58,7 @@ type deployResponse struct {
 	ServerConnected bool   `json:"serverConnected"`
 	WDTTInstalled  bool   `json:"wdttInstalled"`
 	ReadyToConnect bool   `json:"readyToConnect"`
+	DetectedDeployKind string `json:"detectedDeployKind,omitempty"`
 	ServerVersion  string `json:"serverVersion,omitempty"`
 	DTLSPort       int    `json:"dtlsPort,omitempty"`
 	WGPort         int    `json:"wgPort,omitempty"`
@@ -75,6 +76,7 @@ type deployStatusChecks struct {
 	ServerConnected bool
 	WDTTInstalled  bool
 	ReadyToConnect bool
+	DetectedDeployKind string
 	ServerVersion  string
 	DTLSPort       int
 	WGPort         int
@@ -190,6 +192,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: checks.ServerConnected,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
+				DetectedDeployKind: "csqtt",
 				ServerVersion:   checks.ServerVersion,
 				DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
@@ -205,6 +208,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DetectedDeployKind: checks.DetectedDeployKind,
 			ServerVersion:  checks.ServerVersion,
 			DTLSPort:       checks.DTLSPort,
 			WGPort:         checks.WGPort,
@@ -260,6 +264,7 @@ func runDeploy(req deployRequest) deployResponse {
 					ServerConnected: true,
 					WDTTInstalled:   checks.WDTTInstalled,
 					ReadyToConnect:  checks.ReadyToConnect,
+					DetectedDeployKind: checks.DetectedDeployKind,
 					DTLSPort:        checks.DTLSPort,
 					WGPort:          checks.WGPort,
 				}
@@ -272,6 +277,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: true,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
+				DetectedDeployKind: checks.DetectedDeployKind,
 				DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
 			}
@@ -330,15 +336,16 @@ func runDeploy(req deployRequest) deployResponse {
 
 		state, commandErr := exportDeployState(client, req.Password)
 		if commandErr != nil {
-			return deployResponse{
-				OK:              false,
-				Status:          "error",
-				Message:         "server state export failed: " + commandErr.Error(),
-				Output:          output.String(),
-				ServerConnected: true,
-				WDTTInstalled:   checks.WDTTInstalled,
-				ReadyToConnect:  checks.ReadyToConnect,
-				DTLSPort:        checks.DTLSPort,
+				return deployResponse{
+					OK:              false,
+					Status:          "error",
+					Message:         "server state export failed: " + commandErr.Error(),
+					Output:          output.String(),
+					ServerConnected: true,
+					WDTTInstalled:   checks.WDTTInstalled,
+					ReadyToConnect:  checks.ReadyToConnect,
+					DetectedDeployKind: checks.DetectedDeployKind,
+					DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
 				DNS1:            checks.DNS1,
 				DNS2:            checks.DNS2,
@@ -358,6 +365,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: true,
 			WDTTInstalled:   checks.WDTTInstalled,
 			ReadyToConnect:  checks.ReadyToConnect,
+			DetectedDeployKind: checks.DetectedDeployKind,
 			DTLSPort:        checks.DTLSPort,
 			WGPort:          checks.WGPort,
 			DNS1:            checks.DNS1,
@@ -385,6 +393,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: true,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
+				DetectedDeployKind: checks.DetectedDeployKind,
 			}
 		}
 
@@ -401,6 +410,7 @@ func runDeploy(req deployRequest) deployResponse {
 				ServerConnected: true,
 				WDTTInstalled:   checks.WDTTInstalled,
 				ReadyToConnect:  checks.ReadyToConnect,
+				DetectedDeployKind: checks.DetectedDeployKind,
 				DTLSPort:        checks.DTLSPort,
 				WGPort:          checks.WGPort,
 				DNS1:            checks.DNS1,
@@ -419,6 +429,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: true,
 			WDTTInstalled:   checks.WDTTInstalled,
 			ReadyToConnect:  checks.ReadyToConnect,
+			DetectedDeployKind: checks.DetectedDeployKind,
 			DTLSPort:        checks.DTLSPort,
 			WGPort:          checks.WGPort,
 			DNS1:            checks.DNS1,
@@ -446,13 +457,13 @@ func runDeploy(req deployRequest) deployResponse {
 				OK: false, Status: "error",
 				Message: "device cleanup failed: " + commandErr.Error(),
 				Output: output.String(), ServerConnected: true,
-				WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect,
+				WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect, DetectedDeployKind: checks.DetectedDeployKind,
 			}
 		}
 		return deployResponse{
 			OK: true, Status: "success", Message: "Orphan WDTT devices cleaned",
 			Output: output.String(), ServerConnected: true,
-			WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect,
+			WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect, DetectedDeployKind: checks.DetectedDeployKind,
 		}
 	}
 
@@ -506,6 +517,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DetectedDeployKind: checks.DetectedDeployKind,
 			DTLSPort:       checks.DTLSPort,
 			WGPort:         checks.WGPort,
 			DNS1:           checks.DNS1,
@@ -525,6 +537,7 @@ func runDeploy(req deployRequest) deployResponse {
 			ServerConnected: checks.ServerConnected,
 			WDTTInstalled:  checks.WDTTInstalled,
 			ReadyToConnect: checks.ReadyToConnect,
+			DetectedDeployKind: checks.DetectedDeployKind,
 			DTLSPort:       checks.DTLSPort,
 			WGPort:         checks.WGPort,
 			DNS1:           checks.DNS1,
@@ -543,6 +556,7 @@ func runDeploy(req deployRequest) deployResponse {
 		ServerConnected: checks.ServerConnected,
 		WDTTInstalled:  checks.WDTTInstalled,
 		ReadyToConnect: checks.ReadyToConnect,
+		DetectedDeployKind: checks.DetectedDeployKind,
 		DTLSPort:       checks.DTLSPort,
 		WGPort:         checks.WGPort,
 		DNS1:           checks.DNS1,
@@ -945,6 +959,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		"printf 'WDTT_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
 		"if [ \"$binary_installed\" = \"1\" ]; then /usr/local/bin/wdtt-server --version 2>/dev/null | head -n 1 | sed 's/^/WDTT_VERSION|/'; fi",
 		"if [ -f /etc/systemd/system/wdtt.service ]; then sed -n 's/^ExecStart=//p' /etc/systemd/system/wdtt.service | tail -n 1 | sed 's/^/WDTT_EXECSTART|/'; fi",
+		"if [ -S /run/wdtt/admin.sock ]; then printf 'WDTT_ADMINSOCK|1\\n'; else printf 'WDTT_ADMINSOCK|0\\n'; fi",
 	}, "; ")
 
 	text, err := runSSHCommand(client, command, 20*time.Second)
@@ -960,6 +975,13 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		}
 		if strings.HasPrefix(line, "WDTT_EXECSTART|") {
 			mergeDeployStatusConfig(&checks, parseWDTTExecStart(strings.TrimPrefix(line, "WDTT_EXECSTART|")))
+			checks.DetectedDeployKind = detectWDTTDeployKind(strings.TrimPrefix(line, "WDTT_EXECSTART|"), checks.DetectedDeployKind)
+			continue
+		}
+		if strings.HasPrefix(line, "WDTT_ADMINSOCK|") {
+			if strings.TrimSpace(strings.TrimPrefix(line, "WDTT_ADMINSOCK|")) == "1" && checks.DetectedDeployKind == "" {
+				checks.DetectedDeployKind = "wdtt-plus"
+			}
 			continue
 		}
 		if !strings.HasPrefix(line, "WDTT_STATUS|") {
@@ -975,8 +997,34 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		checks.WDTTInstalled = values["binary_installed"] && values["service_file"]
 		checks.ReadyToConnect = checks.WDTTInstalled && values["service_active"] && values["iface_active"]
 	}
+	if checks.WDTTInstalled && checks.DetectedDeployKind == "" {
+		checks.DetectedDeployKind = "wdtt"
+	}
 
 	return checks, text
+}
+
+func detectWDTTDeployKind(execStart, current string) string {
+	if current == "wdtt-plus" {
+		return current
+	}
+	plusFlags := []string{
+		"-max-passwords",
+		"-max-workers-per-access",
+		"-max-handshakes",
+		"-handshake-rate",
+		"-max-client-mbps",
+		"-wg-backend",
+	}
+	for _, flag := range plusFlags {
+		if strings.Contains(execStart, flag) {
+			return "wdtt-plus"
+		}
+	}
+	if current != "" {
+		return current
+	}
+	return ""
 }
 
 func mergeDeployStatusConfig(dst *deployStatusChecks, src deployStatusChecks) {
