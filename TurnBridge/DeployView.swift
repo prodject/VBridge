@@ -1143,9 +1143,23 @@ struct DeployView: View {
 
     private func updateStatusIndicators(_ response: DeployResponse) {
         serverConnected = response.serverConnected
-        wdttInstalled = response.wdttInstalled
-        readyToConnect = response.readyToConnect
         detectedDeployKind = nonEmpty(response.detectedDeployKind)
+
+        if selectedDeployKind == .csqtt {
+            let matchesSelectedKind = detectedDeployKind == DeployServerKind.csqtt.rawValue || detectedDeployKind == nil
+            wdttInstalled = matchesSelectedKind ? response.wdttInstalled : false
+            readyToConnect = matchesSelectedKind ? response.readyToConnect : false
+            return
+        }
+
+        if let detectedDeployKind {
+            let matchesSelectedKind = detectedDeployKind == selectedDeployKind.rawValue
+            wdttInstalled = matchesSelectedKind ? response.wdttInstalled : false
+            readyToConnect = matchesSelectedKind ? response.readyToConnect : false
+        } else {
+            wdttInstalled = response.wdttInstalled
+            readyToConnect = response.readyToConnect
+        }
     }
 
     private func applyDiscoveredServerSettings(_ response: DeployResponse) {
