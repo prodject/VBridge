@@ -1,5 +1,9 @@
 package main
 
+// CSQTT protocol compatibility portions:
+// SPDX-FileCopyrightText: 2026 amurcanov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 // #include <stdint.h>
 import "C"
 
@@ -35,26 +39,29 @@ import (
 )
 
 const (
-	csqttKeepaliveInterval = 15 * time.Second
-	csqttPathProbeInterval = time.Second
-	csqttHandshakeTimeout  = 20 * time.Second
-	csqttProvisionTimeout  = 15 * time.Second
-	csqttDisconnectTimeout = 5 * time.Second
-	csqttWriteTimeout      = time.Second
-	csqttSocketBufSize     = 625 * 1024
-	csqttTunOffset         = 4
-	csqttDefaultMTU        = 1280
-	csqttDefaultLocalPort  = 9000
-	csqttPaddingMax        = 24
-	csqttPayloadTypeAudio  = 111
-	csqttWrapKeyLen        = 32
-	csqttHeaderLen         = 24
-	csqttTagLen            = 16
-	csqttMaxPacketSize     = 4096
-	csqttKeepaliveByte     = 0xff
-	csqttKeepaliveSize     = 16
-	csqttPathProbeSize     = 45
-	csqttPathProbeMissLimit = 3
+	csqttKeepaliveInterval    = 15 * time.Second
+	csqttHandshakeTimeout     = 20 * time.Second
+	csqttProvisionTimeout     = 15 * time.Second
+	csqttDisconnectTimeout    = 5 * time.Second
+	csqttWriteTimeout         = time.Second
+	csqttSocketBufSize        = 625 * 1024
+	csqttTunOffset            = 4
+	csqttDefaultMTU           = 1280
+	csqttDefaultLocalPort     = 9000
+	csqttPaddingMax           = 24
+	csqttPayloadTypeAudio     = 111
+	csqttWrapKeyLen           = 32
+	csqttHeaderLen            = 24
+	csqttTagLen               = 16
+	csqttMaxPacketSize        = 4096
+	csqttKeepaliveByte        = 0xff
+	csqttKeepaliveSize        = 16
+	csqttWireProtocolRevision = "CSQTT-WIRE-3"
+	csqttFlowFrameLen         = 24
+	csqttMaxTrackedFlows      = 4096
+	csqttMaxPendingPerFlow    = 96
+	csqttMaxPendingTotal      = 4096
+	csqttGapReleaseAfter      = 12 * time.Millisecond
 )
 
 var csqttProvisionAttempts = []time.Duration{
@@ -65,9 +72,33 @@ var csqttProvisionAttempts = []time.Duration{
 }
 
 var (
-	csqttPathReceiptAck = []byte{0xff, 'C', 'S', 'Q', 'T', 'T', '_', 'R', 'X', '_', 'A', 'C', 'K'}
-	csqttPathProbeMagic = []byte{'C', 'S', 'Q', '2'}
+	csqttFlowFrameMagic     = []byte{'C', 'Q', 'F', '1'}
+	csqttPanelRestart       = []byte{0xff, 'C', 'S', 'Q', 'T', 'T', '_', 'P', 'A', 'N', 'E', 'L', '_', 'R', 'E', 'S', 'T', 'A', 'R', 'T', '_', 'V', '1', 0x00, 0x91, 0x7d, 0x03, 0xa8}
+	csqttStreamRepairPrefix = []byte{0xff, 'C', 'S', 'Q', 'T', 'T', '_', 'S', 'T', 'R', 'E', 'A', 'M', '_', 'R', 'E', 'P', 'A', 'I', 'R', '_', 'V', '1'}
+	csqttStreamAlivePrefix  = []byte{0xff, 'C', 'S', 'Q', 'T', 'T', '_', 'S', 'T', 'R', 'E', 'A', 'M', '_', 'A', 'L', 'I', 'V', 'E', '_', 'V', '1'}
 )
+
+type csqttFlowFrameHeader struct {
+	senderID uint64
+	flowID   uint64
+	sequence uint32
+}
+
+type csqttFlowReassemblyKey struct {
+	senderID uint64
+	flowID   uint64
+}
+
+type csqttPendingFlowPacket struct {
+	sequence uint32
+	packet   []byte
+}
+
+type csqttFlowReassemblyState struct {
+	expected   uint32
+	gapStarted time.Time
+	pending    []csqttPendingFlowPacket
+}
 
 type csqttProvision struct {
 	Address   string `json:"address"`
@@ -107,7 +138,6 @@ type csqttRuntime struct {
 	provisionCh chan struct{}
 	provMu      sync.Mutex
 	provision   *csqttProvision
-	provisionRequested atomic.Bool
 	errMu       sync.Mutex
 	fatalErr    error
 
@@ -115,6 +145,9 @@ type csqttRuntime struct {
 	activeWorkers  atomic.Int32
 	totalBytesUp   atomic.Int64
 	totalBytesDown atomic.Int64
+	downlinkMu      sync.Mutex
+	downlinkFlows   map[csqttFlowReassemblyKey]*csqttFlowReassemblyState
+	pendingDownlink int
 
 	workersMu sync.Mutex
 	workers   []*csqttWorker
@@ -128,8 +161,6 @@ type csqttWorker struct {
 	sendCh  chan []byte
 	writeMu sync.Mutex
 
-	unansweredProbes atomic.Uint32
-	outstandingProbe atomic.Uint64
 }
 
 func (w *csqttWorker) wireID() int {
@@ -137,10 +168,12 @@ func (w *csqttWorker) wireID() int {
 }
 
 type csqttDispatcher struct {
-	runtime *csqttRuntime
-	mu      sync.Mutex
-	workers []*csqttWorker
-	next    int
+	runtime   *csqttRuntime
+	mu        sync.Mutex
+	workers   []*csqttWorker
+	next      int
+	senderID  uint64
+	sequences map[uint64]uint32
 }
 
 type csqttConnectedUDPConn struct{ *net.UDPConn }
@@ -200,6 +233,9 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		workerCount = 1
 	}
 	workerCount += max(config.CSQTTExtraThreads, 0)
+	if workerCount > 126 {
+		return nil, fmt.Errorf("csqtt: worker count %d exceeds protocol maximum 126", workerCount)
+	}
 	identityPoolSize := ceilDiv(workerCount, 12)
 	if identityPoolSize < 1 {
 		identityPoolSize = 1
@@ -239,7 +275,12 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 	runtime.getCreds, runtime.resetCreds = poolCreds(func(ctx context.Context, hash string) (*turnCred, error) {
 		return getVKTurnCredWithFallback(ctx, hash)
 	}, identityPoolSize)
-	runtime.dispatcher = &csqttDispatcher{runtime: runtime}
+	runtime.downlinkFlows = make(map[csqttFlowReassemblyKey]*csqttFlowReassemblyState)
+	runtime.dispatcher = &csqttDispatcher{
+		runtime:   runtime,
+		senderID:  csqttRandomSenderID(),
+		sequences: make(map[uint64]uint32),
+	}
 	log.Printf("csqtt: TURN identity strategy: %d workers, %d cached identities", workerCount, identityPoolSize)
 	return runtime, nil
 }
@@ -382,7 +423,6 @@ func (r *csqttRuntime) signalReady() {
 func (r *csqttRuntime) setProvision(provision *csqttProvision) {
 	r.provMu.Lock()
 	defer r.provMu.Unlock()
-	defer r.provisionRequested.Store(false)
 	if r.provision != nil {
 		return
 	}
@@ -391,23 +431,6 @@ func (r *csqttRuntime) setProvision(provision *csqttProvision) {
 	}
 	r.provision = provision
 	close(r.provisionCh)
-}
-
-func (r *csqttRuntime) provisionReady() bool {
-	r.provMu.Lock()
-	defer r.provMu.Unlock()
-	return r.provision != nil
-}
-
-func (r *csqttRuntime) beginProvisionRequest() bool {
-	if r.provisionReady() {
-		return false
-	}
-	return r.provisionRequested.CompareAndSwap(false, true)
-}
-
-func (r *csqttRuntime) finishProvisionRequest() {
-	r.provisionRequested.Store(false)
 }
 
 func (r *csqttRuntime) setFatalError(err error) {
@@ -467,6 +490,7 @@ func (d *csqttDispatcher) unregister(worker *csqttWorker) {
 
 func (d *csqttDispatcher) dispatch(packet []byte) {
 	d.mu.Lock()
+	packet = d.framePacket(packet)
 	workers := append([]*csqttWorker(nil), d.workers...)
 	start := d.next
 	if len(workers) > 0 {
@@ -486,6 +510,31 @@ func (d *csqttDispatcher) dispatch(packet []byte) {
 	}
 }
 
+func (d *csqttDispatcher) framePacket(packet []byte) []byte {
+	flowID, ok := csqttTCPFlowID(packet)
+	if !ok {
+		return packet
+	}
+	if len(d.sequences) == csqttMaxTrackedFlows {
+		if _, exists := d.sequences[flowID]; !exists {
+			d.sequences = make(map[uint64]uint32)
+			d.senderID = csqttMix64(d.senderID + 0x9e3779b97f4a7c15)
+			if d.senderID == 0 {
+				d.senderID = 1
+			}
+		}
+	}
+	sequence := d.sequences[flowID]
+	d.sequences[flowID] = sequence + 1
+	framed := make([]byte, csqttFlowFrameLen+len(packet))
+	copy(framed[:4], csqttFlowFrameMagic)
+	binary.BigEndian.PutUint64(framed[4:12], d.senderID)
+	binary.BigEndian.PutUint64(framed[12:20], flowID)
+	binary.BigEndian.PutUint32(framed[20:24], sequence)
+	copy(framed[csqttFlowFrameLen:], packet)
+	return framed
+}
+
 func (w *csqttWorker) run() {
 	defer w.runtime.dispatcher.unregister(w)
 	hash := w.runtime.hashes[w.id%len(w.runtime.hashes)]
@@ -495,6 +544,8 @@ func (w *csqttWorker) run() {
 			log.Printf("csqtt: worker %d ended: %v", w.id, err)
 			lowered := strings.ToLower(err.Error())
 			if strings.Contains(lowered, "fatal_auth") ||
+				strings.Contains(lowered, "fatal_protocol") ||
+				strings.Contains(lowered, "fatal_config") ||
 				strings.Contains(lowered, "wrong password") ||
 				strings.Contains(lowered, "device mismatch") {
 				w.runtime.setFatalError(err)
@@ -604,12 +655,12 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 	defer w.runtime.activeWorkers.Add(-1)
 	w.runtime.signalReady()
 
-	if w.runtime.beginProvisionRequest() {
-		if provision, err := w.requestProvision(dtlsConn); err == nil && provision != nil {
-			w.runtime.setProvision(provision)
-		} else {
-			w.runtime.finishProvisionRequest()
-		}
+	provision, err := w.requestProvision(dtlsConn)
+	if err != nil {
+		return err
+	}
+	if provision != nil {
+		w.runtime.setProvision(provision)
 	}
 
 	go w.keepaliveLoop(ctx, dtlsConn)
@@ -655,13 +706,15 @@ func (w *csqttWorker) bindingLoop(ctx context.Context, client *turn.Client) {
 }
 
 func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
-	request := fmt.Sprintf("GETCONF:%s|%s|%s|%d|%s|%d",
+	request := fmt.Sprintf("GETCONF:%s|%s|%s|%d|%s|%d|%d|%s",
 		w.runtime.localPort,
 		w.runtime.deviceID,
 		w.runtime.password,
 		w.runtime.generation,
 		w.runtime.salt,
 		w.wireID(),
+		w.runtime.workerCount,
+		csqttWireProtocolRevision,
 	)
 	buffer := make([]byte, csqttMaxPacketSize)
 	defer conn.SetReadDeadline(time.Time{})
@@ -688,10 +741,10 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 				return parseCSQTTProvision(payload)
 			}
 			if strings.HasPrefix(text, "DENIED:") {
-				return nil, fmt.Errorf("fatal_auth: %s", text)
+				return nil, csqttDeniedError(text)
 			}
 			if text == "NOCONF" {
-				return nil, errors.New("csqtt: server returned NOCONF")
+				return nil, errors.New("fatal_config: CSQTT server has no tunnel address available")
 			}
 		}
 		if attempt == len(csqttProvisionAttempts)-1 {
@@ -735,29 +788,12 @@ func (w *csqttWorker) writePacketWithTimeout(conn net.Conn, payload []byte, time
 
 func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
 	ticker := time.NewTicker(csqttKeepaliveInterval)
-	probeTicker := time.NewTicker(csqttPathProbeInterval)
 	defer ticker.Stop()
-	defer probeTicker.Stop()
 	ping := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttKeepaliveSize)
-	probe := buildCSQTTPathProbe(w.runtime.deviceID, w.runtime.generation, w.wireID())
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-probeTicker.C:
-			if len(probe) == csqttPathProbeSize {
-				nextMisses := w.unansweredProbes.Add(1)
-				if nextMisses > csqttPathProbeMissLimit {
-					_ = conn.Close()
-					return
-				}
-				probeSequence := w.outstandingProbe.Add(1)
-				copy(probe[31:39], encodeCSQTTPathProbeSequence(probeSequence))
-				if err := w.writePacket(conn, probe); err != nil {
-					_ = conn.Close()
-					return
-				}
-			}
 		case <-ticker.C:
 			if err := w.writePacket(conn, ping); err != nil {
 				_ = conn.Close()
@@ -793,40 +829,31 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 			return fmt.Errorf("dtls read: %w", err)
 		}
 		payload := append([]byte(nil), readBuffer[:count]...)
+		if bytes.Equal(payload, csqttPanelRestart) {
+			return errors.New("csqtt: server requested reconnect after panel restart")
+		}
 		if isCSQTTControlPacket(payload) {
 			if strings.HasPrefix(string(payload), "TUNCONF:") {
 				if provision, parseErr := parseCSQTTProvision(payload); parseErr == nil {
 					w.runtime.setProvision(provision)
 				}
 			}
-			w.resetPathValidation()
 			continue
 		}
 		if isCSQTTKeepalivePacket(payload) {
-			w.resetPathValidation()
 			continue
 		}
-		if w.isCurrentPathAck(payload) {
-			w.unansweredProbes.Store(0)
-			continue
+		for _, packet := range w.runtime.acceptDownlinkPacket(payload) {
+			w.runtime.writeTUNPacket(packet)
 		}
-		if isCSQTTPathAckPacket(payload) {
-			continue
-		}
-		w.resetPathValidation()
-		w.runtime.writeTUNPacket(payload)
 	}
-}
-
-func (w *csqttWorker) resetPathValidation() {
-	w.unansweredProbes.Store(0)
 }
 
 func parseCSQTTProvision(payload []byte) (*csqttProvision, error) {
 	text := strings.TrimSpace(string(payload))
 	value := strings.TrimPrefix(text, "TUNCONF:")
-	parts := strings.SplitN(value, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.Split(value, ":")
+	if len(parts) < 3 {
 		return nil, fmt.Errorf("invalid TUNCONF payload: %q", text)
 	}
 	localPort, _ := strconv.Atoi(parts[2])
@@ -838,10 +865,238 @@ func parseCSQTTProvision(payload []byte) (*csqttProvision, error) {
 	}, nil
 }
 
+func csqttDeniedError(response string) error {
+	reason := strings.TrimSpace(strings.TrimPrefix(response, "DENIED:"))
+	switch reason {
+	case "wrong_password":
+		return errors.New("fatal_auth: CSQTT password is incorrect")
+	case "expired":
+		return errors.New("fatal_auth: CSQTT password has expired")
+	case "device_mismatch":
+		return errors.New("fatal_auth: CSQTT password is bound to another device")
+	case "protocol_mismatch", "invalid_worker_count":
+		return fmt.Errorf("fatal_protocol: CSQTT client/server protocol mismatch (%s)", reason)
+	default:
+		return fmt.Errorf("fatal_auth: CSQTT access denied (%s)", reason)
+	}
+}
+
+func decodeCSQTTFlowFrame(packet []byte) (csqttFlowFrameHeader, []byte, bool) {
+	if len(packet) < csqttFlowFrameLen || !bytes.Equal(packet[:4], csqttFlowFrameMagic) {
+		return csqttFlowFrameHeader{}, packet, false
+	}
+	header := csqttFlowFrameHeader{
+		senderID: binary.BigEndian.Uint64(packet[4:12]),
+		flowID:   binary.BigEndian.Uint64(packet[12:20]),
+		sequence: binary.BigEndian.Uint32(packet[20:24]),
+	}
+	return header, packet[csqttFlowFrameLen:], true
+}
+
+func (r *csqttRuntime) acceptDownlinkPacket(packet []byte) [][]byte {
+	header, payload, framed := decodeCSQTTFlowFrame(packet)
+	if !framed {
+		return [][]byte{packet}
+	}
+
+	r.downlinkMu.Lock()
+	defer r.downlinkMu.Unlock()
+	key := csqttFlowReassemblyKey{senderID: header.senderID, flowID: header.flowID}
+	if len(r.downlinkFlows) == csqttMaxTrackedFlows {
+		if _, exists := r.downlinkFlows[key]; !exists {
+			r.downlinkFlows = make(map[csqttFlowReassemblyKey]*csqttFlowReassemblyState)
+			r.pendingDownlink = 0
+		}
+	}
+	state := r.downlinkFlows[key]
+	if state == nil {
+		state = &csqttFlowReassemblyState{}
+		r.downlinkFlows[key] = state
+	}
+	ready := make([][]byte, 0, 2)
+	r.releaseExpiredDownlink(state, time.Now(), &ready)
+	if header.sequence == state.expected {
+		ready = append(ready, append([]byte(nil), payload...))
+		state.expected++
+		state.gapStarted = time.Time{}
+		r.drainContiguousDownlink(state, &ready)
+		return ready
+	}
+	if !csqttSequenceForward(header.sequence, state.expected) {
+		return ready
+	}
+	for _, pending := range state.pending {
+		if pending.sequence == header.sequence {
+			return ready
+		}
+	}
+	if len(state.pending) == csqttMaxPendingPerFlow {
+		r.releaseLowestDownlink(state, time.Now(), &ready)
+	}
+	if r.pendingDownlink == csqttMaxPendingTotal {
+		if len(state.pending) == 0 {
+			ready = append(ready, append([]byte(nil), payload...))
+			state.expected = header.sequence + 1
+			state.gapStarted = time.Time{}
+			return ready
+		}
+		r.releaseLowestDownlink(state, time.Now(), &ready)
+	}
+	state.pending = append(state.pending, csqttPendingFlowPacket{
+		sequence: header.sequence,
+		packet:   append([]byte(nil), payload...),
+	})
+	r.pendingDownlink++
+	if state.gapStarted.IsZero() {
+		state.gapStarted = time.Now()
+	}
+	r.releaseExpiredDownlink(state, time.Now(), &ready)
+	return ready
+}
+
+func (r *csqttRuntime) releaseExpiredDownlink(state *csqttFlowReassemblyState, now time.Time, ready *[][]byte) {
+	if !state.gapStarted.IsZero() && now.Sub(state.gapStarted) >= csqttGapReleaseAfter {
+		r.releaseLowestDownlink(state, now, ready)
+	}
+}
+
+func (r *csqttRuntime) releaseLowestDownlink(state *csqttFlowReassemblyState, now time.Time, ready *[][]byte) {
+	lowestIndex := -1
+	var lowestDistance uint32
+	for index, pending := range state.pending {
+		if !csqttSequenceForward(pending.sequence, state.expected) {
+			continue
+		}
+		distance := pending.sequence - state.expected
+		if lowestIndex == -1 || distance < lowestDistance {
+			lowestIndex = index
+			lowestDistance = distance
+		}
+	}
+	if lowestIndex == -1 {
+		state.gapStarted = time.Time{}
+		return
+	}
+	pending := state.pending[lowestIndex]
+	state.pending[lowestIndex] = state.pending[len(state.pending)-1]
+	state.pending = state.pending[:len(state.pending)-1]
+	r.pendingDownlink--
+	state.expected = pending.sequence + 1
+	*ready = append(*ready, pending.packet)
+	state.gapStarted = time.Time{}
+	r.drainContiguousDownlink(state, ready)
+	if len(state.pending) > 0 {
+		state.gapStarted = now
+	}
+}
+
+func (r *csqttRuntime) drainContiguousDownlink(state *csqttFlowReassemblyState, ready *[][]byte) {
+	for {
+		index := -1
+		for candidate, pending := range state.pending {
+			if pending.sequence == state.expected {
+				index = candidate
+				break
+			}
+		}
+		if index == -1 {
+			return
+		}
+		pending := state.pending[index]
+		state.pending[index] = state.pending[len(state.pending)-1]
+		state.pending = state.pending[:len(state.pending)-1]
+		r.pendingDownlink--
+		state.expected++
+		*ready = append(*ready, pending.packet)
+	}
+}
+
+func csqttSequenceForward(sequence, expected uint32) bool {
+	return sequence != expected && sequence-expected < 1<<31
+}
+
+func csqttTCPFlowID(packet []byte) (uint64, bool) {
+	if len(packet) == 0 {
+		return 0, false
+	}
+	var headerLen int
+	var protocol byte
+	var source, destination []byte
+	switch packet[0] >> 4 {
+	case 4:
+		if len(packet) < 20 {
+			return 0, false
+		}
+		headerLen = int(packet[0]&0x0f) * 4
+		if headerLen < 20 || len(packet) < headerLen+20 {
+			return 0, false
+		}
+		protocol = packet[9]
+		source, destination = packet[12:16], packet[16:20]
+	case 6:
+		if len(packet) < 60 {
+			return 0, false
+		}
+		headerLen = 40
+		protocol = packet[6]
+		source, destination = packet[8:24], packet[24:40]
+	default:
+		return 0, false
+	}
+	if protocol != 6 {
+		return 0, false
+	}
+	tcp := packet[headerLen:]
+	dataOffset := int(tcp[12]>>4) * 4
+	if dataOffset < 20 || len(tcp) < dataOffset {
+		return 0, false
+	}
+	if len(tcp) == dataOffset && tcp[13]&0x03 == 0 {
+		return 0, false
+	}
+	hash := uint64(0xcbf29ce484222325)
+	csqttHashBytes(&hash, []byte{protocol})
+	csqttHashBytes(&hash, source)
+	csqttHashBytes(&hash, destination)
+	csqttHashBytes(&hash, tcp[:4])
+	return csqttMix64(hash), true
+}
+
+func csqttHashBytes(hash *uint64, value []byte) {
+	for _, current := range value {
+		*hash ^= uint64(current)
+		*hash *= 0x100000001b3
+	}
+}
+
+func csqttMix64(value uint64) uint64 {
+	value ^= value >> 30
+	value *= 0xbf58476d1ce4e5b9
+	value ^= value >> 27
+	value *= 0x94d049bb133111eb
+	return value ^ (value >> 31)
+}
+
+func csqttRandomSenderID() uint64 {
+	var seed [8]byte
+	if _, err := rand.Read(seed[:]); err == nil {
+		if value := binary.BigEndian.Uint64(seed[:]); value != 0 {
+			return value
+		}
+	}
+	value := csqttMix64(uint64(time.Now().UnixNano()))
+	if value == 0 {
+		return 1
+	}
+	return value
+}
+
 func isCSQTTControlPacket(payload []byte) bool {
 	text := string(payload)
 	return strings.HasPrefix(text, "TUNCONF:") ||
 		strings.HasPrefix(text, "DENIED:") ||
+		bytes.HasPrefix(payload, csqttStreamRepairPrefix) ||
+		bytes.HasPrefix(payload, csqttStreamAlivePrefix) ||
 		text == "NOCONF" ||
 		text == "READY_OK" ||
 		text == "OK:disconnected"
@@ -857,53 +1112,6 @@ func isCSQTTKeepalivePacket(payload []byte) bool {
 		}
 	}
 	return true
-}
-
-func isCSQTTPathAckPacket(payload []byte) bool {
-	return len(payload) == len(csqttPathReceiptAck)+10 && bytes.HasPrefix(payload, csqttPathReceiptAck)
-}
-
-func (w *csqttWorker) isCurrentPathAck(payload []byte) bool {
-	workerID, sequence, ok := parseCSQTTPathAck(payload)
-	if !ok {
-		return false
-	}
-	return workerID == uint16(w.wireID()) && sequence != 0 && sequence == w.outstandingProbe.Load()
-}
-
-func buildCSQTTPathProbe(deviceID string, generation uint64, workerID int) []byte {
-	device := []byte(strings.TrimSpace(deviceID))
-	if len(device) == 0 || len(device) > 16 || workerID <= 0 || workerID > 162 {
-		return nil
-	}
-	payload := bytes.Repeat([]byte{csqttKeepaliveByte}, csqttPathProbeSize)
-	for index := 1; index < 17; index++ {
-		payload[index] = 0
-	}
-	copy(payload[1:1+len(device)], device)
-	binary.BigEndian.PutUint64(payload[17:25], generation)
-	copy(payload[25:29], csqttPathProbeMagic)
-	binary.BigEndian.PutUint16(payload[29:31], uint16(workerID))
-	for index := 31; index < 39; index++ {
-		payload[index] = 0
-	}
-	return payload
-}
-
-func encodeCSQTTPathProbeSequence(sequence uint64) []byte {
-	value := make([]byte, 8)
-	binary.BigEndian.PutUint64(value, sequence)
-	return value
-}
-
-func parseCSQTTPathAck(payload []byte) (uint16, uint64, bool) {
-	if !isCSQTTPathAckPacket(payload) {
-		return 0, 0, false
-	}
-	offset := len(csqttPathReceiptAck)
-	workerID := binary.BigEndian.Uint16(payload[offset : offset+2])
-	sequence := binary.BigEndian.Uint64(payload[offset+2 : offset+10])
-	return workerID, sequence, true
 }
 
 func deriveCSQTTWrapKey(password string) ([]byte, error) {
