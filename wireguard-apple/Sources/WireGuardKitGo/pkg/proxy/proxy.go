@@ -783,6 +783,19 @@ func (p *Proxy) growCredPool(ctx context.Context) {
 	}
 }
 
+const connStartStagger = time.Second
+
+// connStartDelay spreads every non-bootstrap connection over a short window.
+// TURN quota pacing belongs to the credential pool, which assigns at most ten
+// active connections to an identity; delaying already available identities by
+// five seconds each only makes a warm start unnecessarily slow.
+func connStartDelay(connIdx int) time.Duration {
+	if connIdx <= 0 {
+		return 0
+	}
+	return time.Duration(mathrand.Int63n(int64(connStartStagger)))
+}
+
 // startConnections launches all connection goroutines using the current session context.
 func (p *Proxy) startConnections() error {
 	p.sessMu.Lock()
@@ -980,42 +993,16 @@ func (p *Proxy) startConnections() error {
 		return fmt.Errorf("first connection failed: %w", err)
 	}
 
-	// Bi-modal stagger: first burstSize conns launch 200ms apart to use
-	// VK's initial allocation token bucket (~10 tokens immediately
-	// available); the rest wait slowStagger between each to fit the
-	// observed refill rate (~1 token / 20-30s).
-	//
-	// Empirically (vpn.wifi.18.log starting 20:16:55, NumConns=16): the
-	// first 10 allocations succeeded in 2 seconds (200ms*9 stagger);
-	// then conns 10-15 spent ~38s burning 15s DTLS handshake timeouts
-	// against an empty bucket before any of them succeeded — pure waste
-	// because they were retrying immediately on 486 instead of waiting
-	// for a refill. With slowStagger=5s, conn 10 starts at ~7s (after
-	// the burst window), which is close to when the next bucket token
-	// becomes available; subsequent conns continue at 5s intervals.
-	//
-	// For NumConns ≤ burstSize, the slow branch is never taken and
-	// behaviour matches the previous linear stagger (200ms × i).
-	const burstSize = 10
-	const burstStagger = 200 * time.Millisecond
-	const slowStagger = 5 * time.Second
+	// Connection 0 is the bootstrap. Every remaining connection starts in a
+	// random point of the same short window; credential acquisition parks at
+	// the pool when no identity is ready yet.
 	for i := 1; i < p.config.NumConns; i++ {
 		p.wg.Add(1)
 		connIdx := i
 		go func() {
 			defer p.wg.Done()
-			var delay time.Duration
-			if connIdx < burstSize {
-				delay = time.Duration(connIdx) * burstStagger
-			} else {
-				// Burst phase ends at (burstSize-1)*burstStagger after t=0.
-				// Then each subsequent conn launches slowStagger after
-				// the previous one.
-				delay = time.Duration(burstSize-1)*burstStagger +
-					time.Duration(connIdx-burstSize+1)*slowStagger
-			}
 			select {
-			case <-time.After(delay):
+			case <-time.After(connStartDelay(connIdx)):
 			case <-sessCtx.Done():
 				return
 			}

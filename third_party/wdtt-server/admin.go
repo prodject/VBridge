@@ -22,14 +22,18 @@ import (
 )
 
 type adminResponse struct {
-	OK              bool                `json:"ok"`
-	Code            string              `json:"code,omitempty"`
-	Message         string              `json:"message,omitempty"`
-	RestartRequired bool                `json:"restart_required,omitempty"`
-	Server          *adminServerInfo    `json:"server,omitempty"`
-	Password        *adminPasswordInfo  `json:"password,omitempty"`
-	Passwords       []adminPasswordInfo `json:"passwords,omitempty"`
-	ClientState     *adminClientState   `json:"client_state,omitempty"`
+	OK              bool                  `json:"ok"`
+	Code            string                `json:"code,omitempty"`
+	Message         string                `json:"message,omitempty"`
+	RestartRequired bool                  `json:"restart_required,omitempty"`
+	Server          *adminServerInfo      `json:"server,omitempty"`
+	Password        *adminPasswordInfo    `json:"password,omitempty"`
+	Passwords       []adminPasswordInfo   `json:"passwords,omitempty"`
+	ClientState     *adminClientState     `json:"client_state,omitempty"`
+	BackupStatus    *serverBackupStatus   `json:"backup_status,omitempty"`
+	Backup          *serverBackupSummary  `json:"backup,omitempty"`
+	BackupDocument  *serverBackupDocument `json:"backup_document,omitempty"`
+	SafeOutput      string                `json:"safe_output,omitempty"`
 }
 
 type adminClientState struct {
@@ -203,10 +207,45 @@ func runAdminCLI(args []string) int {
 	fs.SetOutput(io.Discard)
 	configDir := fs.String("config-dir", "/etc/wdtt", "директория конфигурации WDTT")
 	mainPassword := fs.String("main-password", "", "главный пароль администратора для проверки")
+	mainPasswordStdin := fs.Bool("main-password-stdin", false, "прочитать главный пароль из стандартного ввода")
+	requestStdin := fs.Bool("request-stdin", false, "прочитать закрытый admin-запрос JSON из стандартного ввода")
 	offline := fs.Bool("offline", false, "изменить остановленный сервер напрямую (потребуется запуск сервиса)")
 	if err := fs.Parse(args); err != nil {
 		writeAdminError(err)
 		return 2
+	}
+	if *requestStdin {
+		if *offline || *mainPasswordStdin || strings.TrimSpace(*mainPassword) != "" || len(fs.Args()) != 0 {
+			writeAdminError(errors.New("--request-stdin нельзя объединять с паролем, --offline или отдельной admin-командой"))
+			return 2
+		}
+		request, err := readAdminRequest(os.Stdin)
+		if err != nil {
+			writeAdminError(err)
+			return 2
+		}
+		response, err := callAdminSocket(*configDir, request)
+		if err != nil {
+			writeAdminError(fmt.Errorf("admin_socket_unavailable: %w; проверьте wdtt.service", err))
+			return 1
+		}
+		writeAdminJSON(response)
+		if !response.OK {
+			return 1
+		}
+		return 0
+	}
+	if *mainPasswordStdin {
+		if strings.TrimSpace(*mainPassword) != "" {
+			writeAdminError(errors.New("укажите только один способ передачи главного пароля"))
+			return 2
+		}
+		value, err := readAdminPasswordLine(os.Stdin)
+		if err != nil {
+			writeAdminError(err)
+			return 2
+		}
+		*mainPassword = value
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -246,6 +285,40 @@ func runAdminCLI(args []string) int {
 	}
 	writeAdminJSON(response)
 	return 0
+}
+
+func readAdminRequest(reader io.Reader) (adminRequest, error) {
+	var request adminRequest
+	decoder := json.NewDecoder(io.LimitReader(reader, 64<<10))
+	if err := decoder.Decode(&request); err != nil {
+		return adminRequest{}, fmt.Errorf("некорректный закрытый admin-запрос: %w", err)
+	}
+	if strings.TrimSpace(request.MainPassword) == "" {
+		return adminRequest{}, errors.New("в закрытом admin-запросе не указан главный пароль")
+	}
+	if len(request.Args) == 0 {
+		return adminRequest{}, errors.New("в закрытом admin-запросе не указана команда")
+	}
+	return request, nil
+}
+
+func readAdminPasswordLine(reader io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, 258))
+	if err != nil {
+		return "", fmt.Errorf("не удалось прочитать главный пароль: %w", err)
+	}
+	if len(data) == 258 {
+		return "", errors.New("главный пароль из стандартного ввода слишком длинный")
+	}
+	value := strings.TrimSuffix(string(data), "\n")
+	value = strings.TrimSuffix(value, "\r")
+	if value == "" {
+		return "", errors.New("главный пароль из стандартного ввода пуст")
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "", errors.New("стандартный ввод должен содержать только одну строку главного пароля")
+	}
+	return value, nil
 }
 
 func executeAdminCommand(configDir string, loaded *Database, rest []string, wgDev wgDevice, live bool) (adminResponse, error) {
@@ -314,6 +387,24 @@ func executeAdminCommand(configDir string, loaded *Database, rest []string, wgDe
 		response, err = adminResetTraffic(configDir, loaded)
 	case "merge-client-traffic":
 		response, err = adminMergeClientTraffic(configDir, loaded, rest[1:])
+	case "backup-status", "backup-list":
+		var status *serverBackupStatus
+		status, err = serverBackupStatusFor(configDir)
+		if err == nil {
+			response = adminResponse{OK: true, BackupStatus: status}
+		}
+	case "backup-configure":
+		response, err = adminBackupConfigure(configDir, loaded, rest[1:])
+	case "backup-create":
+		response, err = adminBackupCreate(configDir, loaded, rest[1:])
+	case "backup-verify":
+		response, err = adminBackupVerify(configDir, rest[1:])
+	case "backup-export":
+		response, err = adminBackupExport(configDir, rest[1:])
+	case "backup-delete":
+		response, err = adminBackupDelete(configDir, rest[1:])
+	case "safe-inspect":
+		response, err = adminSafeInspect(configDir, rest[1:])
 	case "restart":
 		response = adminResponse{OK: true, Message: "Перезапуск сервиса", RestartRequired: true}
 	default:
@@ -385,7 +476,9 @@ func applyLiveAdminEffects(configDir string, loaded *Database, args []string, re
 		password := response.Password.Password
 		if err := serverWrapKeys.AddPassword(password); err != nil {
 			delete(loaded.Passwords, password)
-			_ = saveAdminDB(configDir, loaded)
+			if rollbackErr := saveAdminDB(configDir, loaded); rollbackErr != nil {
+				return fmt.Errorf("не удалось добавить WRAP-ключ: %v; откат базы также не сохранён: %w", err, rollbackErr)
+			}
 			return fmt.Errorf("не удалось добавить WRAP-ключ: %w", err)
 		}
 	case "delete":
@@ -406,7 +499,9 @@ func applyLiveAdminEffects(configDir string, loaded *Database, args []string, re
 		if err := serverWrapKeys.AddPassword(snapshot.password); err != nil {
 			if entry := loaded.Passwords[snapshot.password]; entry != nil {
 				entry.IsDeactivated = true
-				_ = saveAdminDB(configDir, loaded)
+				if rollbackErr := saveAdminDB(configDir, loaded); rollbackErr != nil {
+					return fmt.Errorf("не удалось вернуть WRAP-ключ: %v; откат базы также не сохранён: %w", err, rollbackErr)
+				}
 			}
 			return fmt.Errorf("не удалось вернуть WRAP-ключ: %w", err)
 		}
@@ -422,7 +517,9 @@ func applyLiveAdminEffects(configDir string, loaded *Database, args []string, re
 				if entry != nil {
 					delete(loaded.Passwords, newPassword)
 					loaded.Passwords[snapshot.password] = entry
-					_ = saveAdminDB(configDir, loaded)
+					if rollbackErr := saveAdminDB(configDir, loaded); rollbackErr != nil {
+						return fmt.Errorf("не удалось заменить WRAP-ключ: %v; откат базы также не сохранён: %w", err, rollbackErr)
+					}
 				}
 				return fmt.Errorf("не удалось заменить WRAP-ключ: %w", err)
 			}
@@ -492,12 +589,12 @@ func callAdminSocket(configDir string, request adminRequest) (adminResponse, err
 		return adminResponse{}, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(90 * time.Second))
 	if err := json.NewEncoder(conn).Encode(request); err != nil {
 		return adminResponse{}, err
 	}
 	var response adminResponse
-	if err := json.NewDecoder(io.LimitReader(conn, 2<<20)).Decode(&response); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, serverBackupMaxDocumentSize+(2<<20))).Decode(&response); err != nil {
 		return adminResponse{}, err
 	}
 	return response, nil
@@ -543,7 +640,7 @@ func startAdminSocket(ctx context.Context, configDir string, wgDev wgDevice) err
 
 func handleAdminSocketConn(conn net.Conn, configDir string, wgDev wgDevice) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(90 * time.Second))
 	var request adminRequest
 	if err := json.NewDecoder(io.LimitReader(conn, 2<<20)).Decode(&request); err != nil {
 		_ = json.NewEncoder(conn).Encode(adminResponse{OK: false, Message: "некорректный admin-запрос"})
@@ -553,34 +650,77 @@ func handleAdminSocketConn(conn net.Conn, configDir string, wgDev wgDevice) {
 		_ = json.NewEncoder(conn).Encode(adminResponse{OK: false, Message: "не указана admin-команда"})
 		return
 	}
-	dbMutex.Lock()
-	defer dbMutex.Unlock()
-	if strings.TrimSpace(request.MainPassword) == "" || db.MainPassword != request.MainPassword {
-		_ = json.NewEncoder(conn).Encode(adminResponse{OK: false, Message: "главный пароль администратора не совпадает"})
-		return
-	}
-	response, err := executeAdminCommand(configDir, db, request.Args, wgDev, true)
+	response, err := executeLiveAdminRequest(configDir, request, wgDev)
 	if err != nil {
 		response = adminErrorResponse(err)
 	}
 	_ = json.NewEncoder(conn).Encode(response)
 }
 
+func executeLiveAdminRequest(configDir string, request adminRequest, wgDev wgDevice) (adminResponse, error) {
+	dbMutex.Lock()
+	if strings.TrimSpace(request.MainPassword) == "" || db == nil || db.MainPassword != request.MainPassword {
+		dbMutex.Unlock()
+		return adminResponse{}, errors.New("главный пароль администратора не совпадает")
+	}
+	if isServerBackupAdminCommand(request.Args) {
+		// Backup files can be large and live on a slow VPS disk. Keep their I/O
+		// outside dbMutex so client management and the data plane are not held
+		// behind a backup status, export, verification, or snapshot write.
+		var databaseSnapshot *Database
+		var err error
+		if serverBackupCommandNeedsDatabaseSnapshot(request.Args) {
+			databaseSnapshot, err = cloneDatabaseForBackup(db)
+		}
+		dbMutex.Unlock()
+		if err != nil {
+			return adminResponse{}, fmt.Errorf("не удалось зафиксировать базу для резервного копирования: %w", err)
+		}
+		serverBackupRequestMu.Lock()
+		defer serverBackupRequestMu.Unlock()
+		return executeAdminCommand(configDir, databaseSnapshot, request.Args, wgDev, false)
+	}
+	if len(request.Args) > 0 && request.Args[0] == "safe-inspect" {
+		dbMutex.Unlock()
+		return adminSafeInspect(configDir, request.Args[1:])
+	}
+	defer dbMutex.Unlock()
+	return executeAdminCommand(configDir, db, request.Args, wgDev, true)
+}
+
+func isServerBackupAdminCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "backup-status", "backup-list", "backup-configure", "backup-create", "backup-verify", "backup-export", "backup-delete":
+		return true
+	default:
+		return false
+	}
+}
+
+func serverBackupCommandNeedsDatabaseSnapshot(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	return args[0] == "backup-configure" || args[0] == "backup-create"
+}
+
 func readAdminDB(configDir string) (*Database, error) {
 	path := filepath.Join(configDir, "passwords.json")
-	data, err := os.ReadFile(path)
+	loaded, err := loadDatabaseFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no_passwords_json: %s", path)
 		}
-		return nil, err
-	}
-	var loaded Database
-	if err := json.Unmarshal(data, &loaded); err != nil {
 		return nil, fmt.Errorf("bad_passwords_json: %w", err)
 	}
-	ensureAdminDBDefaults(&loaded)
-	return &loaded, nil
+	if strings.TrimSpace(loaded.MainPassword) == "" {
+		return nil, errors.New("bad_passwords_json: main_password пуст")
+	}
+	ensureAdminDBDefaults(loaded)
+	return loaded, nil
 }
 
 func ensureAdminDBDefaults(loaded *Database) {
@@ -778,19 +918,33 @@ func adminProfileDefaultListenPort(ports string) int {
 
 func saveAdminDB(configDir string, loaded *Database) error {
 	ensureAdminDBDefaults(loaded)
-	data, err := json.MarshalIndent(loaded, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return err
-	}
 	path := filepath.Join(configDir, "passwords.json")
-	tmp := path + ".admin.tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
+	return persistDatabaseFile(path, loaded)
+}
+
+func clientDeviceIDSet(loaded *Database) map[string]struct{} {
+	result := make(map[string]struct{})
+	if loaded == nil {
+		return result
 	}
-	return os.Rename(tmp, path)
+	for _, entry := range loaded.Passwords {
+		if entry == nil {
+			continue
+		}
+		if deviceID := strings.TrimSpace(entry.DeviceID); deviceID != "" {
+			result[deviceID] = struct{}{}
+		}
+		for _, event := range entry.BindHistory {
+			deviceID := strings.TrimSpace(event.DeviceID)
+			if deviceID == "" || event.Status == "denied_mismatch" {
+				continue
+			}
+			if event.BoundAt > 0 || event.Status == "active" || event.Status == "unbound" {
+				result[deviceID] = struct{}{}
+			}
+		}
+	}
+	return result
 }
 
 func buildAdminServerInfo(configDir string, loaded *Database) *adminServerInfo {
@@ -800,7 +954,7 @@ func buildAdminServerInfo(configDir string, loaded *Database) *adminServerInfo {
 	occupied := 0
 	nowUnix := time.Now().Unix()
 	usedDevices := make(map[string]struct{})
-	clientDevices := make(map[string]struct{})
+	clientDevices := clientDeviceIDSet(loaded)
 	for _, entry := range loaded.Passwords {
 		if entry == nil {
 			continue
@@ -818,16 +972,6 @@ func buildAdminServerInfo(configDir string, loaded *Database) *adminServerInfo {
 		}
 		if entry.DeviceID != "" {
 			usedDevices[entry.DeviceID] = struct{}{}
-			clientDevices[entry.DeviceID] = struct{}{}
-		}
-		for _, event := range entry.BindHistory {
-			deviceID := strings.TrimSpace(event.DeviceID)
-			if deviceID == "" || event.Status == "denied_mismatch" {
-				continue
-			}
-			if event.BoundAt > 0 || event.Status == "active" || event.Status == "unbound" {
-				clientDevices[deviceID] = struct{}{}
-			}
 		}
 	}
 	ownerDevices := adminDeviceIDSet(loaded)
@@ -1266,6 +1410,7 @@ func adminCreatePassword(configDir string, loaded *Database, args []string) (adm
 	entry.PurgeAfter = *purgeAfter
 	loaded.Passwords[password] = entry
 	if err := saveAdminDB(configDir, loaded); err != nil {
+		delete(loaded.Passwords, password)
 		return adminResponse{}, err
 	}
 	return adminResponse{

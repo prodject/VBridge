@@ -4,7 +4,7 @@ This directory contains the Linux WDTT server sources imported from:
 
 - Repository: https://github.com/Ivan4537/WDTT-Plus
 - Branch: `main`
-- Commit: `3038b8ddc0306feb21d3c3624e2bc1c3c14639ad`
+- Commit: `68bc4af91597102aef5194a2cbd40c916b4fb175`
 - License: GNU GPL v3.0
 
 VBridge builds these sources in GitHub Actions into deploy assets:

@@ -10,7 +10,7 @@
 set -uo pipefail
 
 readonly SCRIPT_VERSION="3.5"
-readonly WDTT_SERVER_VERSION="15"
+readonly WDTT_SERVER_VERSION="20"
 readonly WDTT_SERVER_BINARY_PATH="/usr/local/bin/wdtt-server"
 readonly WDTT_SYSTEMD_UNIT_PATH="/etc/systemd/system/wdtt.service"
 readonly LOG_FILE="/var/log/wdtt-install.log"
