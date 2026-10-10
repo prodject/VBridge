@@ -812,7 +812,7 @@ func (r deployRequest) remoteCommand() string {
 			deployExistingTunFlag(r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
 		}, " "))
 		return fmt.Sprintf(
-			"env WDTT_PRESERVE_DATA=1 WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
+			"env WDTT_INSTALL_MODE=preserve WDTT_PRESERVE_DATA=1 WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
 			r.MaxPasswords,
 			r.MaxWorkersPerAccess,
 			r.MaxHandshakes,

@@ -10,6 +10,9 @@
 set -uo pipefail
 
 readonly SCRIPT_VERSION="3.5"
+readonly WDTT_SERVER_VERSION="15"
+readonly WDTT_SERVER_BINARY_PATH="/usr/local/bin/wdtt-server"
+readonly WDTT_SYSTEMD_UNIT_PATH="/etc/systemd/system/wdtt.service"
 readonly LOG_FILE="/var/log/wdtt-install.log"
 readonly WG_PORT="${WDTT_WG_PORT:-56001}"
 readonly DTLS_PORT="${WDTT_DTLS_PORT:-56000}"
@@ -22,6 +25,7 @@ readonly MAX_CLIENT_MBPS="${WDTT_MAX_CLIENT_MBPS:-0}"
 readonly WG_BACKEND="${WDTT_WG_BACKEND:-auto}"
 readonly WDTT_ARGS="${WDTT_ARGS:-}"
 readonly WDTT_PRESERVE_DATA="${WDTT_PRESERVE_DATA:-0}"
+readonly WDTT_INSTALL_MODE="${WDTT_INSTALL_MODE:-}"
 readonly WDTT_IFACE="wdtt0"
 readonly WDTT_CONFIG_DIR="/etc/wdtt"
 readonly WDTT_ACCESS_DB="passwords.json"
@@ -374,6 +378,34 @@ cleanup_config_dir_keep_access_db() {
     [ -f "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" 2>/dev/null || true
 }
 
+secure_preserved_config() {
+    [ -d "$WDTT_CONFIG_DIR" ] || die "Каталог данных WDTT не найден"
+    [ ! -L "$WDTT_CONFIG_DIR" ] || die "$WDTT_CONFIG_DIR не должен быть символической ссылкой"
+    local name path
+    for name in "$WDTT_ACCESS_DB" "$WDTT_WG_KEYS" "outbound-profile.env"; do
+        path="$WDTT_CONFIG_DIR/$name"
+        [ -e "$path" ] || continue
+        [ -f "$path" ] && [ ! -L "$path" ] || die "Небезопасный объект конфигурации: $path"
+        chmod 600 "$path" || die "Не удалось защитить $path"
+    done
+}
+
+validate_deploy_data_mode() {
+    if [ "$WDTT_INSTALL_MODE" != "preserve" ]; then
+        return 0
+    fi
+    [ "$WDTT_PRESERVE_DATA" = "1" ] || die "Обновление с сохранением запущено без защиты данных"
+    [ -f "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] &&
+        [ ! -L "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] &&
+        [ -s "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] ||
+        die "Режим сохранения требует обычный непустой passwords.json"
+    [ -x "$WDTT_SERVER_BINARY_PATH" ] && [ ! -L "$WDTT_SERVER_BINARY_PATH" ] ||
+        die "Обновление остановлено: установленный wdtt-server отсутствует или небезопасен"
+    [ -f "$WDTT_SYSTEMD_UNIT_PATH" ] && [ ! -L "$WDTT_SYSTEMD_UNIT_PATH" ] ||
+        die "Обновление остановлено: wdtt.service отсутствует или небезопасен"
+    secure_preserved_config
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  WDTT PLUS SERVER DEPLOYMENT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -385,9 +417,6 @@ wdtt_cleanup() {
 
     systemctl unmask wdtt 2>/dev/null || true
     systemctl stop wdtt 2>/dev/null || true
-    systemctl disable wdtt 2>/dev/null || true
-    rm -f /etc/systemd/system/wdtt.service 2>/dev/null || true
-    systemctl daemon-reload 2>/dev/null || true
     pkill -x wdtt-server 2>/dev/null || killall wdtt-server 2>/dev/null || true
 
     # Удаляем только собственный интерфейс WDTT.
@@ -397,10 +426,12 @@ wdtt_cleanup() {
     fw_cleanup_wdtt_rules "$(detect_wan_interface)"
 
     if [ "$WDTT_PRESERVE_DATA" = "1" ]; then
-        [ -f "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_ACCESS_DB" 2>/dev/null || true
-        [ -f "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" ] && chmod 600 "$WDTT_CONFIG_DIR/$WDTT_WG_KEYS" 2>/dev/null || true
-        echo "✓ Режим обновления: конфигурация и данные сохранены"
+        secure_preserved_config
+        echo "✓ Режим обновления: всё содержимое $WDTT_CONFIG_DIR сохранено"
     else
+        systemctl disable wdtt 2>/dev/null || true
+        rm -f "$WDTT_SYSTEMD_UNIT_PATH" 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
         rm -f /usr/local/bin/wdtt-server 2>/dev/null || true
         cleanup_config_dir_keep_access_db
     fi
@@ -483,7 +514,12 @@ setup_wdtt_binary() {
     echo "📦 Установка wdtt-server..."
 
     if [ -f /tmp/wdtt-server ]; then
+        [ ! -L /tmp/wdtt-server ] && [ -s /tmp/wdtt-server ] || die "Загруженный wdtt-server отсутствует или небезопасен"
         chmod +x /tmp/wdtt-server
+        local staged_version
+        staged_version="$(/tmp/wdtt-server --version 2>/dev/null | head -n 1 || true)"
+        [ "$staged_version" = "$WDTT_SERVER_VERSION" ] ||
+            die "Загружен wdtt-server несовместимой версии: ожидается $WDTT_SERVER_VERSION, получено ${staged_version:-не определено}"
         rm -f /usr/local/bin/.wdtt-server.new
         install -m 0755 /tmp/wdtt-server /usr/local/bin/.wdtt-server.new || die "Не удалось подготовить новый wdtt-server"
         mv -f /usr/local/bin/.wdtt-server.new /usr/local/bin/wdtt-server || die "Не удалось атомарно заменить wdtt-server"
@@ -497,6 +533,7 @@ setup_wdtt_binary() {
     fi
 
     mkdir -p "$WDTT_CONFIG_DIR"
+    chmod 700 "$WDTT_CONFIG_DIR"
     printf '%s\n' "wdtt-plus" > "$WDTT_DEPLOY_KIND_FILE"
     chmod 600 "$WDTT_DEPLOY_KIND_FILE"
 }
@@ -506,7 +543,9 @@ setup_wdtt_service() {
     prog 0.75 "Сервис..."
     echo "🔧 Создание systemd-сервиса WDTT Plus..."
 
-    cat > /etc/systemd/system/wdtt.service << WDTTSVC
+    local unit_tmp="/etc/systemd/system/.wdtt.service.new"
+    rm -f "$unit_tmp"
+    cat > "$unit_tmp" << WDTTSVC
 [Unit]
 Description=WDTT Plus Server
 After=network.target network-online.target
@@ -524,6 +563,9 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 WDTTSVC
+
+    chmod 644 "$unit_tmp" || die "Не удалось установить права wdtt.service"
+    mv -f "$unit_tmp" "$WDTT_SYSTEMD_UNIT_PATH" || die "Не удалось атомарно заменить wdtt.service"
 
     systemctl daemon-reload
     systemctl unmask wdtt >/dev/null 2>&1 || true
@@ -632,6 +674,8 @@ main() {
 
     mkdir -p "$(dirname "$LOG_FILE")"
     echo "=== WDTT Plus Installer v${SCRIPT_VERSION} — $(date) ===" >> "$LOG_FILE"
+
+    validate_deploy_data_mode
 
     detect_os
     install_prerequisites
