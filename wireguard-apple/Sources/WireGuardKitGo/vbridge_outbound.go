@@ -267,6 +267,8 @@ func friendlyOutboundError(output string, err error) string {
 		return "Cloudflare did not confirm warp=on/plus for this server."
 	case strings.Contains(lower, "wdtt_error=warp_route_check_failed"):
 		return "The WARP interface is active, but the WDTT routing rules are incomplete."
+	case strings.Contains(lower, "wdtt_error=warp_handshake_check_failed"):
+		return "The WARP interface is active, but its WireGuard peer has not completed a handshake."
 	case strings.Contains(lower, "wdtt_error=direct_cleanup_failed"):
 		return "The server could not fully stop the previous WireGuard or proxy outbound."
 	case strings.Contains(lower, "wdtt_error=local_proxy_service_inactive"):
@@ -295,11 +297,17 @@ wdtt_test_source() {
   ip -4 -o addr show dev "$WDTT_IFACE" scope global 2>/dev/null | awk '{split($4, value, "/"); print value[1]; exit}'
 }
 wdtt_warp_routing_ready() {
+  TEST_SOURCE="$(wdtt_test_source)"
+  [ -n "$TEST_SOURCE" ] || return 1
   command -v wg >/dev/null 2>&1 && wg show "$WDTT_WG_IFACE" >/dev/null 2>&1 || return 1
   ip rule show 2>/dev/null | grep -Eq "from $WDTT_SUBNET lookup $WDTT_TABLE([[:space:]]|$)" || return 1
   ip route show table "$WDTT_TABLE" 2>/dev/null | grep -Eq "^default([[:space:]].*)? dev $WDTT_WG_IFACE([[:space:]]|$)" || return 1
+  ip -4 route get 1.1.1.1 from "$TEST_SOURCE" 2>/dev/null | grep -Eq "(^|[[:space:]])dev $WDTT_WG_IFACE([[:space:]]|$)" || return 1
   command -v iptables >/dev/null 2>&1 || return 1
   iptables -t nat -C POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE >/dev/null 2>&1
+}
+wdtt_warp_handshake_ready() {
+  wg show "$WDTT_WG_IFACE" latest-handshakes 2>/dev/null | awk '$2 > 0 { found=1 } END { exit !found }'
 }
 wdtt_install_pkg() {
   if command -v apt-get >/dev/null 2>&1; then
@@ -322,25 +330,39 @@ wdtt_install_pkg() {
 wdtt_install_redsocks_tools() {
   wdtt_install_pkg redsocks curl iptables psmisc iproute2 || wdtt_install_pkg redsocks curl iptables psmisc iproute || true
 }
-wdtt_clear_external_out() {
+wdtt_warp_cleanup_ready() {
+  ! ip rule show 2>/dev/null | grep -Eq "from $WDTT_SUBNET lookup $WDTT_TABLE([[:space:]]|$)" || return 1
+  ! ip route show table "$WDTT_TABLE" 2>/dev/null | grep -Eq "^default([[:space:]].*)? dev $WDTT_WG_IFACE([[:space:]]|$)" || return 1
+  if command -v iptables >/dev/null 2>&1; then
+    ! iptables -t nat -C POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE >/dev/null 2>&1 || return 1
+  fi
+  ! ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1 || return 1
+  ! systemctl is-active --quiet wdtt-wg-exit.service 2>/dev/null || return 1
+}
+wdtt_clear_warp_out() {
   systemctl disable --now wdtt-warp-watchdog.timer 2>/dev/null || true
   systemctl disable --now wdtt-wg-exit.service 2>/dev/null || true
   if command -v iptables >/dev/null 2>&1; then
-    while iptables -t nat -D PREROUTING -i "$WDTT_IFACE" -p tcp -j WDTT_PROXY_OUT 2>/dev/null; do :; done
-    iptables -t nat -F WDTT_PROXY_OUT 2>/dev/null || true
-    iptables -t nat -X WDTT_PROXY_OUT 2>/dev/null || true
     while iptables -t nat -D POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE 2>/dev/null; do :; done
   fi
   while ip rule del from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100 2>/dev/null; do :; done
   ip route flush table "$WDTT_TABLE" 2>/dev/null || true
-  systemctl disable --now wdtt-redsocks 2>/dev/null || systemctl stop wdtt-redsocks 2>/dev/null || true
-  rm -f /run/wdtt-redsocks.pid 2>/dev/null || true
   if ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1; then
     if ! wg-quick down "$WDTT_WG_IFACE" 2>/dev/null; then
       ip link delete "$WDTT_WG_IFACE" 2>/dev/null || true
     fi
-    ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1 && { echo WDTT_ERROR=direct_cleanup_failed; return 1; }
   fi
+  wdtt_warp_cleanup_ready || { echo WDTT_ERROR=direct_cleanup_failed; return 1; }
+}
+wdtt_clear_external_out() {
+  wdtt_clear_warp_out
+  if command -v iptables >/dev/null 2>&1; then
+    while iptables -t nat -D PREROUTING -i "$WDTT_IFACE" -p tcp -j WDTT_PROXY_OUT 2>/dev/null; do :; done
+    iptables -t nat -F WDTT_PROXY_OUT 2>/dev/null || true
+    iptables -t nat -X WDTT_PROXY_OUT 2>/dev/null || true
+  fi
+  systemctl disable --now wdtt-redsocks 2>/dev/null || systemctl stop wdtt-redsocks 2>/dev/null || true
+  rm -f /run/wdtt-redsocks.pid 2>/dev/null || true
 }
 wdtt_write_mode() {
   mode="$1"
@@ -537,6 +559,7 @@ TEST_SOURCE="$(wdtt_test_source)"
 [ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
 TRACE="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 25 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
 printf '%s\n' "$TRACE" | grep -Eq '^warp=(on|plus)$' || { echo WDTT_ERROR=warp_trace_check_failed; exit 3; }
+wdtt_warp_handshake_ready || { echo WDTT_ERROR=warp_handshake_check_failed; exit 3; }
 echo "WARP check passed."
 printf '%s\n' "$TRACE" | sed -n 's/^warp=/Cloudflare warp: /p' | head -n 1
 `
@@ -546,15 +569,17 @@ func deleteFreeWarpScript() string {
 	return outboundPrelude() + `
 MODE="$(sed -n 's/.*"outboundMode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/wdtt/outbound.json 2>/dev/null | head -n 1)"
 systemctl disable --now wdtt-warp-watchdog.timer wdtt-warp-watchdog.service 2>/dev/null || true
+wdtt_clear_warp_out
+rm -f /etc/wireguard/wg-wdtt-exit.conf /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
 if [ "$MODE" = "warp_free" ]; then
-  wdtt_clear_external_out
-  rm -f /etc/wireguard/wg-wdtt-exit.conf /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
   wdtt_write_mode "direct" "direct outbound"
 fi
 rm -rf /etc/wdtt-plus/warp
 rm -f /usr/local/bin/wgcf /usr/local/bin/wgcf.previous /usr/local/lib/wdtt/warp-watchdog
-rm -f /etc/systemd/system/wdtt-warp-watchdog.service /etc/systemd/system/wdtt-warp-watchdog.timer
+rm -f /etc/systemd/system/wdtt-warp-watchdog.service /etc/systemd/system/wdtt-warp-watchdog.timer \
+  /etc/systemd/system/wdtt-wg-exit.service
 systemctl daemon-reload 2>/dev/null || true
+systemctl reset-failed wdtt-warp-watchdog.service wdtt-warp-watchdog.timer wdtt-wg-exit.service 2>/dev/null || true
 echo "Free WARP removed."
 `
 }
@@ -564,8 +589,8 @@ func resetFreeWarpScript() string {
 WARP_DIR=/etc/wdtt-plus/warp
 MODE="$(sed -n 's/.*"outboundMode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/wdtt/outbound.json 2>/dev/null | head -n 1)"
 systemctl disable --now wdtt-warp-watchdog.timer wdtt-warp-watchdog.service 2>/dev/null || true
+wdtt_clear_warp_out
 if [ "$MODE" = "warp_free" ]; then
-  wdtt_clear_external_out
   wdtt_write_mode "direct" "WARP registration reset"
 fi
 rm -f "$WARP_DIR"/wgcf-account.toml "$WARP_DIR"/wgcf-account.toml.invalid-* \
@@ -663,6 +688,7 @@ TEST_SOURCE="$(wdtt_test_source)"
 [ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
 TRACE="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 25 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
 printf '%s\n' "$TRACE" | grep -Eq '^warp=(on|plus)$' || { echo WDTT_ERROR=warp_trace_check_failed; exit 3; }
+wdtt_warp_handshake_ready || { echo WDTT_ERROR=warp_handshake_check_failed; exit 3; }
 mkdir -p "$WARP_DIR"
 printf 'WARP_MTU=%s\n' "$WARP_MTU" >"$WARP_DIR/selected.env"
 chmod 600 "$WARP_DIR/selected.env"
