@@ -134,6 +134,69 @@ func TestCSQTTProtocolMismatchIsFatal(t *testing.T) {
 	}
 }
 
+func TestCSQTTStreamRepairParsingAndDeduplication(t *testing.T) {
+	payload := append([]byte(nil), csqttStreamRepairPrefix...)
+	payload = binary.BigEndian.AppendUint64(payload, 7)
+	payload = binary.BigEndian.AppendUint16(payload, 2)
+	payload = append(payload, 2)
+	payload = binary.BigEndian.AppendUint16(payload, 1)
+	payload = binary.BigEndian.AppendUint16(payload, 2)
+	command, ok := parseCSQTTStreamCommand(payload, csqttStreamRepairPrefix)
+	if !ok || command.sequence != 7 || command.desiredCount != 2 || len(command.workerIDs) != 2 {
+		t.Fatalf("invalid repair command: %+v, parsed=%v", command, ok)
+	}
+
+	resetCount := 0
+	workers := []*csqttWorker{{id: 0}, {id: 1}}
+	runtime := &csqttRuntime{
+		workerCount: 2,
+		workers:     workers,
+		resetCreds: func() {
+			resetCount++
+		},
+	}
+	runtime.applyStreamRepair(command)
+	if workers[0].lastRepairSequence.Load() != 7 || workers[1].lastRepairSequence.Load() != 7 {
+		t.Fatal("repair sequence was not applied to all requested workers")
+	}
+	runtime.applyStreamRepair(command)
+	if resetCount != 0 {
+		t.Fatalf("duplicate repair reset credentials %d times", resetCount)
+	}
+
+	payload = append([]byte(nil), csqttStreamRepairPrefix...)
+	payload = binary.BigEndian.AppendUint64(payload, 8)
+	payload = binary.BigEndian.AppendUint16(payload, 2)
+	payload = append(payload, 1)
+	payload = binary.BigEndian.AppendUint16(payload, 1)
+	command, ok = parseCSQTTStreamCommand(payload, csqttStreamRepairPrefix)
+	if !ok {
+		t.Fatal("second repair command was rejected")
+	}
+	runtime.applyStreamRepair(command)
+	if resetCount != 1 {
+		t.Fatalf("unresolved repair reset credentials %d times, want 1", resetCount)
+	}
+}
+
+func TestCSQTTStreamAlivePreventsCredentialReset(t *testing.T) {
+	worker := &csqttWorker{id: 0}
+	resetCount := 0
+	runtime := &csqttRuntime{
+		workerCount: 1,
+		workers:     []*csqttWorker{worker},
+		resetCreds: func() {
+			resetCount++
+		},
+	}
+	runtime.applyStreamRepair(csqttStreamCommand{sequence: 1, desiredCount: 1, workerIDs: []uint16{1}})
+	runtime.applyStreamAlive(csqttStreamCommand{sequence: 1, desiredCount: 1, workerIDs: []uint16{1}})
+	runtime.applyStreamRepair(csqttStreamCommand{sequence: 2, desiredCount: 1, workerIDs: []uint16{1}})
+	if resetCount != 0 {
+		t.Fatalf("alive worker reset credentials %d times", resetCount)
+	}
+}
+
 type csqttProvisionTestConn struct {
 	written  []byte
 	response []byte

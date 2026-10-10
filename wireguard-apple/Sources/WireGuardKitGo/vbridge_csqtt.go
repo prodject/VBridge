@@ -100,6 +100,12 @@ type csqttFlowReassemblyState struct {
 	pending    []csqttPendingFlowPacket
 }
 
+type csqttStreamCommand struct {
+	sequence     uint64
+	desiredCount uint16
+	workerIDs    []uint16
+}
+
 type csqttProvision struct {
 	Address   string `json:"address"`
 	DNS       string `json:"dns"`
@@ -160,11 +166,42 @@ type csqttWorker struct {
 	runtime *csqttRuntime
 	sendCh  chan []byte
 	writeMu sync.Mutex
+	connMu  sync.Mutex
+	conn    net.Conn
 
+	lastRepairSequence  atomic.Uint64
+	readyRepairSequence atomic.Uint64
 }
 
 func (w *csqttWorker) wireID() int {
 	return w.id + 1
+}
+
+func (w *csqttWorker) setSessionConn(conn net.Conn) {
+	w.connMu.Lock()
+	w.conn = conn
+	w.connMu.Unlock()
+}
+
+func (w *csqttWorker) clearSessionConn(conn net.Conn) {
+	w.connMu.Lock()
+	if w.conn == conn {
+		w.conn = nil
+	}
+	w.connMu.Unlock()
+}
+
+func (w *csqttWorker) restartSession() {
+	w.connMu.Lock()
+	conn := w.conn
+	w.connMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+func (w *csqttWorker) markRepairReady() {
+	w.readyRepairSequence.Store(w.lastRepairSequence.Load())
 }
 
 type csqttDispatcher struct {
@@ -401,17 +438,35 @@ func (r *csqttRuntime) runTUNReader(device tun.Device) {
 	}
 }
 
-func (r *csqttRuntime) writeTUNPacket(packet []byte) {
-	if r.tunDevice == nil || len(packet) == 0 {
+func (r *csqttRuntime) writeTUNPackets(packets [][]byte) {
+	if r.tunDevice == nil || len(packets) == 0 {
 		return
 	}
-	buffer := make([]byte, csqttTunOffset+len(packet))
-	copy(buffer[csqttTunOffset:], packet)
-	if _, err := r.tunDevice.Write([][]byte{buffer}, csqttTunOffset); err != nil {
+	buffers := make([][]byte, 0, len(packets))
+	packetSizes := make([]int, 0, len(packets))
+	for _, packet := range packets {
+		if len(packet) == 0 {
+			continue
+		}
+		buffer := make([]byte, csqttTunOffset+len(packet))
+		copy(buffer[csqttTunOffset:], packet)
+		buffers = append(buffers, buffer)
+		packetSizes = append(packetSizes, len(packet))
+	}
+	if len(buffers) == 0 {
+		return
+	}
+	written, err := r.tunDevice.Write(buffers, csqttTunOffset)
+	if err != nil {
 		log.Printf("csqtt: tun write failed: %v", err)
 		return
 	}
-	r.totalBytesDown.Add(int64(len(packet)))
+	if written > len(packetSizes) {
+		written = len(packetSizes)
+	}
+	for index := 0; index < written; index++ {
+		r.totalBytesDown.Add(int64(packetSizes[index]))
+	}
 }
 
 func (r *csqttRuntime) signalReady() {
@@ -642,6 +697,8 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 	if err != nil {
 		return fmt.Errorf("dtls client: %w", err)
 	}
+	w.setSessionConn(dtlsConn)
+	defer w.clearSessionConn(dtlsConn)
 	defer dtlsConn.Close()
 	defer w.sendDisconnect(dtlsConn)
 
@@ -662,6 +719,7 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 	if provision != nil {
 		w.runtime.setProvision(provision)
 	}
+	w.markRepairReady()
 
 	go w.keepaliveLoop(ctx, dtlsConn)
 	return w.proxyPackets(ctx, dtlsConn)
@@ -830,7 +888,16 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 		}
 		payload := append([]byte(nil), readBuffer[:count]...)
 		if bytes.Equal(payload, csqttPanelRestart) {
+			w.runtime.restartAllWorkers()
 			return errors.New("csqtt: server requested reconnect after panel restart")
+		}
+		if command, ok := parseCSQTTStreamCommand(payload, csqttStreamRepairPrefix); ok {
+			w.runtime.applyStreamRepair(command)
+			continue
+		}
+		if command, ok := parseCSQTTStreamCommand(payload, csqttStreamAlivePrefix); ok {
+			w.runtime.applyStreamAlive(command)
+			continue
 		}
 		if isCSQTTControlPacket(payload) {
 			if strings.HasPrefix(string(payload), "TUNCONF:") {
@@ -843,9 +910,7 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 		if isCSQTTKeepalivePacket(payload) {
 			continue
 		}
-		for _, packet := range w.runtime.acceptDownlinkPacket(payload) {
-			w.runtime.writeTUNPacket(packet)
-		}
+		w.runtime.writeTUNPackets(w.runtime.acceptDownlinkPacket(payload))
 	}
 }
 
@@ -878,6 +943,103 @@ func csqttDeniedError(response string) error {
 		return fmt.Errorf("fatal_protocol: CSQTT client/server protocol mismatch (%s)", reason)
 	default:
 		return fmt.Errorf("fatal_auth: CSQTT access denied (%s)", reason)
+	}
+}
+
+func parseCSQTTStreamCommand(payload, prefix []byte) (csqttStreamCommand, bool) {
+	rest := bytes.TrimPrefix(payload, prefix)
+	if len(rest) < 11 || len(rest) == len(payload) {
+		return csqttStreamCommand{}, false
+	}
+	sequence := binary.BigEndian.Uint64(rest[:8])
+	desiredCount := binary.BigEndian.Uint16(rest[8:10])
+	count := int(rest[10])
+	workerBytes := rest[11:]
+	if sequence == 0 || desiredCount == 0 || desiredCount > 126 || len(workerBytes) != count*2 || count == 0 {
+		return csqttStreamCommand{}, false
+	}
+	workerIDs := make([]uint16, 0, count)
+	for offset := 0; offset < len(workerBytes); offset += 2 {
+		workerID := binary.BigEndian.Uint16(workerBytes[offset : offset+2])
+		if workerID == 0 || workerID > desiredCount {
+			return csqttStreamCommand{}, false
+		}
+		workerIDs = append(workerIDs, workerID)
+	}
+	return csqttStreamCommand{
+		sequence:     sequence,
+		desiredCount: desiredCount,
+		workerIDs:    workerIDs,
+	}, true
+}
+
+func (r *csqttRuntime) applyStreamRepair(command csqttStreamCommand) {
+	if int(command.desiredCount) != r.workerCount {
+		log.Printf("csqtt: ignoring repair for worker count %d (local %d)", command.desiredCount, r.workerCount)
+		return
+	}
+	r.workersMu.Lock()
+	workers := append([]*csqttWorker(nil), r.workers...)
+	r.workersMu.Unlock()
+	resetCredentials := false
+	restarts := 0
+	for _, workerID := range command.workerIDs {
+		index := int(workerID) - 1
+		if index < 0 || index >= len(workers) {
+			continue
+		}
+		worker := workers[index]
+		for {
+			current := worker.lastRepairSequence.Load()
+			if command.sequence <= current {
+				break
+			}
+			if worker.lastRepairSequence.CompareAndSwap(current, command.sequence) {
+				if current != 0 && worker.readyRepairSequence.Load() < current {
+					if !resetCredentials && r.resetCreds != nil {
+						r.resetCreds()
+					}
+					resetCredentials = true
+				}
+				worker.restartSession()
+				restarts++
+				break
+			}
+		}
+	}
+	if restarts > 0 {
+		log.Printf("csqtt: server repair sequence %d restarting %d workers", command.sequence, restarts)
+	}
+}
+
+func (r *csqttRuntime) applyStreamAlive(command csqttStreamCommand) {
+	if int(command.desiredCount) != r.workerCount {
+		return
+	}
+	r.workersMu.Lock()
+	workers := append([]*csqttWorker(nil), r.workers...)
+	r.workersMu.Unlock()
+	for _, workerID := range command.workerIDs {
+		index := int(workerID) - 1
+		if index < 0 || index >= len(workers) {
+			continue
+		}
+		worker := workers[index]
+		for {
+			current := worker.readyRepairSequence.Load()
+			if command.sequence <= current || worker.readyRepairSequence.CompareAndSwap(current, command.sequence) {
+				break
+			}
+		}
+	}
+}
+
+func (r *csqttRuntime) restartAllWorkers() {
+	r.workersMu.Lock()
+	workers := append([]*csqttWorker(nil), r.workers...)
+	r.workersMu.Unlock()
+	for _, worker := range workers {
+		worker.restartSession()
 	}
 }
 
