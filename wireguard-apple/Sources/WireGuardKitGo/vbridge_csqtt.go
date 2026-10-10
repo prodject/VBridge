@@ -13,7 +13,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -29,8 +28,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pion/dtls/v3"
-	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 	"github.com/pion/logging"
 	"github.com/pion/turn/v5"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -40,7 +37,6 @@ import (
 
 const (
 	csqttKeepaliveInterval    = 15 * time.Second
-	csqttHandshakeTimeout     = 20 * time.Second
 	csqttProvisionTimeout     = 15 * time.Second
 	csqttDisconnectTimeout    = 5 * time.Second
 	csqttWriteTimeout         = time.Second
@@ -229,6 +225,27 @@ func (c *csqttRelayPacketConn) LocalAddr() net.Addr                       { retu
 func (c *csqttRelayPacketConn) SetDeadline(t time.Time) error             { return c.relay.SetDeadline(t) }
 func (c *csqttRelayPacketConn) SetReadDeadline(t time.Time) error         { return c.relay.SetReadDeadline(t) }
 func (c *csqttRelayPacketConn) SetWriteDeadline(t time.Time) error        { return c.relay.SetWriteDeadline(t) }
+
+type csqttSessionConn struct {
+	packetConn net.PacketConn
+	peer       net.Addr
+}
+
+func (c *csqttSessionConn) Read(p []byte) (int, error) {
+	n, _, err := c.packetConn.ReadFrom(p)
+	return n, err
+}
+
+func (c *csqttSessionConn) Write(p []byte) (int, error) {
+	return c.packetConn.WriteTo(p, c.peer)
+}
+
+func (c *csqttSessionConn) Close() error                       { return c.packetConn.Close() }
+func (c *csqttSessionConn) LocalAddr() net.Addr                { return c.packetConn.LocalAddr() }
+func (c *csqttSessionConn) RemoteAddr() net.Addr               { return c.peer }
+func (c *csqttSessionConn) SetDeadline(t time.Time) error      { return c.packetConn.SetDeadline(t) }
+func (c *csqttSessionConn) SetReadDeadline(t time.Time) error  { return c.packetConn.SetReadDeadline(t) }
+func (c *csqttSessionConn) SetWriteDeadline(t time.Time) error { return c.packetConn.SetWriteDeadline(t) }
 
 type csqttObfsPacketConn struct {
 	base net.PacketConn
@@ -683,36 +700,16 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 		packetConn = obfsConn
 	}
 
-	cert, err := selfsign.GenerateSelfSigned()
-	if err != nil {
-		return fmt.Errorf("generate dtls cert: %w", err)
-	}
-	dtlsConn, err := dtls.Client(packetConn, w.runtime.peerAddr, &dtls.Config{
-		Certificates:          []tls.Certificate{cert},
-		InsecureSkipVerify:    true,
-		ExtendedMasterSecret:  dtls.RequireExtendedMasterSecret,
-		CipherSuites:          []dtls.CipherSuiteID{dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
-		ConnectionIDGenerator: dtls.OnlySendCIDGenerator(),
-	})
-	if err != nil {
-		return fmt.Errorf("dtls client: %w", err)
-	}
-	w.setSessionConn(dtlsConn)
-	defer w.clearSessionConn(dtlsConn)
-	defer dtlsConn.Close()
-	defer w.sendDisconnect(dtlsConn)
-
-	handshakeCtx, handshakeCancel := context.WithTimeout(ctx, csqttHandshakeTimeout)
-	defer handshakeCancel()
-	if err := dtlsConn.HandshakeContext(handshakeCtx); err != nil {
-		return fmt.Errorf("dtls handshake: %w", err)
-	}
+	sessionConn := &csqttSessionConn{packetConn: packetConn, peer: w.runtime.peerAddr}
+	w.setSessionConn(sessionConn)
+	defer w.clearSessionConn(sessionConn)
+	defer w.sendDisconnect(sessionConn)
 
 	w.runtime.activeWorkers.Add(1)
 	defer w.runtime.activeWorkers.Add(-1)
 	w.runtime.signalReady()
 
-	provision, err := w.requestProvision(dtlsConn)
+	provision, err := w.requestProvision(sessionConn)
 	if err != nil {
 		return err
 	}
@@ -721,8 +718,8 @@ func (w *csqttWorker) runSingleSession(hash string) error {
 	}
 	w.markRepairReady()
 
-	go w.keepaliveLoop(ctx, dtlsConn)
-	return w.proxyPackets(ctx, dtlsConn)
+	go w.keepaliveLoop(ctx, sessionConn)
+	return w.proxyPackets(ctx, sessionConn)
 }
 
 func (w *csqttWorker) selectTURNAddress(cred *turnCred) (string, string, error) {
@@ -873,7 +870,7 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 		case packet, ok := <-w.sendCh:
 			if ok {
 				if err := w.writePacket(conn, packet); err != nil {
-					return fmt.Errorf("dtls write: %w", err)
+					return fmt.Errorf("session write: %w", err)
 				}
 			}
 		default:
@@ -884,7 +881,7 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
-			return fmt.Errorf("dtls read: %w", err)
+			return fmt.Errorf("session read: %w", err)
 		}
 		payload := append([]byte(nil), readBuffer[:count]...)
 		if bytes.Equal(payload, csqttPanelRestart) {
