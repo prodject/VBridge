@@ -1232,7 +1232,7 @@ func fetchAppTracerSession(ctx context.Context, client tls_client.HttpClient) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
-	log.Printf("pow: apptracer session tracked (status=%d, deviceID=%s)", resp.StatusCode, deviceID)
+	log.Printf("pow: apptracer session tracked (status=%d, deviceID=%d chars)", resp.StatusCode, len(deviceID))
 }
 
 // randomUUIDish produces a UUID-shaped string (8-4-4-4-12 hex) from 16

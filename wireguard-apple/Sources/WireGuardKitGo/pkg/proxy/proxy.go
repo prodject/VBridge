@@ -54,6 +54,9 @@ type Config struct {
 	// (user toggling VPN, iOS killing the extension and respawning) but
 	// expires naturally on its own clock without active cleanup.
 	CredCachePath string
+	// CredCacheMode isolates persisted credentials created by different
+	// authentication flows. Empty means the legacy anonymous flow.
+	CredCacheMode string
 
 	// UseWrap enables the WRAP obfuscation layer between DTLS and TURN
 	// ChannelData (see pkg/proxy/wrap.go). When true, every packet on
@@ -421,7 +424,7 @@ func NewProxy(cfg Config) *Proxy {
 			wrapAKey = key
 			if cfg.DeviceID == "" {
 				cfg.DeviceID = uuid.New().String()
-				log.Printf("proxy: WRAP-A generated session deviceID %s (bridge should persist a stable one)", cfg.DeviceID)
+				log.Printf("proxy: WRAP-A generated session deviceID (%d chars; bridge should persist a stable one)", len(cfg.DeviceID))
 			}
 			log.Printf("proxy: WRAP-A (amurcanov-compatible) mode enabled — server provisions WireGuard via GETCONF")
 		}
@@ -473,7 +476,7 @@ func NewProxy(cfg Config) *Proxy {
 	// if <= 0. Per-entry freshness is now derived from each cred's
 	// VK-supplied expiry timestamp (see parseCredExpiry / credExpiryBuffer
 	// in creds.go) — no separate TTL setting needed.
-	p.credPool = newCredPool(ctx, poolSizeForNumConns(cfg.NumConns), cfg.CredPoolCooldown, cfg.CredCachePath, p.fetchFreshCreds)
+	p.credPool = newCredPool(ctx, poolSizeForNumConns(cfg.NumConns), cfg.CredPoolCooldown, cfg.CredCachePath, cfg.CredCacheMode, p.fetchFreshCreds)
 
 	// Seed slot 0 with pre-fetched TURN creds (from main app's pre-bootstrap
 	// captcha flow). The first conn's get() returns these without an API

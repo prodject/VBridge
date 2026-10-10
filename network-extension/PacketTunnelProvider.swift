@@ -1088,6 +1088,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "device_id": resolvedDeviceID(mode: mode, csqttDeviceID: csqttDeviceID),
             "num_conns": max(nValue, 1),
             "cred_pool_cooldown_seconds": 120,
+            "credential_cache_mode": "anon",
             "browser_fingerprint": wdttFingerprint,
             "client_id_only": wdttClientIDMode,
             "force_legacy_captcha": !wdttUseVKCallsPreflight

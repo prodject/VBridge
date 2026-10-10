@@ -512,7 +512,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 
 	// Gate on the success token: Smart Captcha v2 no longer guarantees a SID.
 	if solvedCaptchaKey != "" {
-		log.Printf("vk: retrying step2 with success_token (%d chars), captcha_sid=%q", len(solvedCaptchaKey), solvedCaptchaSID)
+		log.Printf("vk: retrying step2 with success_token (%d chars), captcha_sid=%d chars", len(solvedCaptchaKey), len(solvedCaptchaSID))
 		step2Data = buildCaptchaRetry(solvedCaptchaSID, solvedCaptchaKey, solvedCaptchaTs, solvedCaptchaAttempt)
 	}
 
@@ -874,6 +874,8 @@ type credPoolEntry struct {
 // skipping the genuinely saturated ones.
 const credCacheVersion = 2
 
+const credCacheModeAnon = "anon"
+
 // credSaturationCooldown is the minimum gap from a slot's last release
 // before we trust it on load. VK allows 10 concurrent TURN allocations
 // per cred set with ~600s server-side lifetime. When a session ends,
@@ -1034,8 +1036,16 @@ const cascadePauseDuration = 30 * time.Second
 // across launches.
 type credCacheFile struct {
 	Version int              `json:"version"`
+	Mode    string           `json:"mode,omitempty"`
 	SavedAt int64            `json:"saved_at"`
 	Creds   []credCacheEntry `json:"creds"`
+}
+
+func effectiveCredCacheMode(mode string) string {
+	if mode == "" {
+		return credCacheModeAnon
+	}
+	return mode
 }
 
 type credCacheEntry struct {
@@ -1144,6 +1154,7 @@ type credPool struct {
 	// by the group entitlement. Contents (TURN session tokens, ~8h
 	// validity) are not Keychain-grade sensitive.
 	cachePath string
+	cacheMode string
 
 	// saveMu serializes disk writes. saveToDisk snapshots pool state under
 	// cp.mu (briefly), then releases cp.mu and writes under saveMu — this
@@ -1406,7 +1417,7 @@ func (cp *credPool) authErrorCount(slot int) int64 {
 	return cp.authErrors[slot].Load()
 }
 
-func newCredPool(ctx context.Context, size int, cooldown time.Duration, cachePath string, fetch func(bool) (string, *TURNCreds, error)) *credPool {
+func newCredPool(ctx context.Context, size int, cooldown time.Duration, cachePath, cacheMode string, fetch func(bool) (string, *TURNCreds, error)) *credPool {
 	if size < 1 {
 		size = 1
 	}
@@ -1417,6 +1428,7 @@ func newCredPool(ctx context.Context, size int, cooldown time.Duration, cachePat
 		size:      size,
 		cooldown:  cooldown,
 		cachePath: cachePath,
+		cacheMode: effectiveCredCacheMode(cacheMode),
 		fetch:     fetch,
 		// Pre-size to `size` so later code (loadFromDisk, seedSlot,
 		// the relocation loop in seedSlot, etc.) always sees the full
@@ -1499,6 +1511,11 @@ func (cp *credPool) loadFromDisk() {
 	}
 	if f.Version != credCacheVersion {
 		log.Printf("credpool: load: version %d != expected %d — ignoring file", f.Version, credCacheVersion)
+		return
+	}
+	fileMode := effectiveCredCacheMode(f.Mode)
+	if fileMode != cp.cacheMode {
+		log.Printf("credpool: load: auth mode %q != current %q — ignoring file", fileMode, cp.cacheMode)
 		return
 	}
 
@@ -1597,6 +1614,7 @@ func (cp *credPool) saveToDisk() {
 	cp.mu.Lock()
 	f := credCacheFile{
 		Version: credCacheVersion,
+		Mode:    cp.cacheMode,
 		SavedAt: now.Unix(),
 	}
 	for slot, entry := range cp.pool {

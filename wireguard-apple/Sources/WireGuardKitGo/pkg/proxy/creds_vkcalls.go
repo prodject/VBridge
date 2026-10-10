@@ -102,7 +102,7 @@ func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
 	linkURL := neturl.QueryEscape("https://vk.com/call/join/" + linkID)
 	nameEnc := neturl.QueryEscape(name)
 
-	log.Printf("vkcalls: identity — name: %s, device_id: %s, UA: %s", name, deviceID, ua)
+	log.Printf("vkcalls: generated request identity (name=%d chars, device_id=%d chars, UA=%d chars)", len(name), len(deviceID), len(ua))
 
 	// doRequest issues a POST to the given URL with no body (all params in URL
 	// per VK API convention). Returns parsed JSON response or error.
@@ -200,7 +200,7 @@ func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
 		return nil, fmt.Errorf("vkcalls step3 (messages.getAnonymCallToken): %w", err)
 	}
 	if captchaSID, captchaImg, captchaTs, captchaAttempt := extractCaptcha(resp3); captchaSID != "" {
-		log.Printf("vkcalls: step3 captcha gate APPEARED (sid=%s) — VK closed messages.getAnonymCallToken path", captchaSID)
+		log.Printf("vkcalls: step3 captcha gate APPEARED (sid=%d chars) — VK closed messages.getAnonymCallToken path", len(captchaSID))
 		return nil, &CaptchaRequiredError{
 			ImageURL: captchaImg, SID: captchaSID,
 			CaptchaTs: captchaTs, CaptchaAttempt: captchaAttempt,
@@ -275,7 +275,7 @@ func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
 		return nil, fmt.Errorf("vkcalls step5: turn_server.urls empty")
 	}
 
-	log.Printf("vkcalls: SUCCESS — username=%s, addresses=%v", user, addresses)
+	log.Printf("vkcalls: SUCCESS — username=%d chars, addresses=%d", len(user), len(addresses))
 	return &TURNCreds{
 		Username:  user,
 		Password:  pass,

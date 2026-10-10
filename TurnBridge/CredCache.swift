@@ -10,6 +10,7 @@ private struct CredCacheEntry: Codable {
 
 private struct CredCacheFile: Codable {
     let version: Int
+    let mode: String?
     let saved_at: Int64
     let creds: [CredCacheEntry]
 }
@@ -30,7 +31,8 @@ enum CredCache {
         guard let url = cacheURL,
               let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(CredCacheFile.self, from: data),
-              file.version == supportedVersion else {
+              file.version == supportedVersion,
+              (file.mode ?? "anon") == "anon" else {
             return nil
         }
 

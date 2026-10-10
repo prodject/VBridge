@@ -203,6 +203,9 @@ type ProxyConfig struct {
 	// ClientIDOnly limits legacy VK credential minting to a single app_id when
 	// set. Empty/default preserves the normal rotation.
 	ClientIDOnly string `json:"client_id_only,omitempty"`
+	// CredentialCacheMode prevents credentials minted by different auth
+	// flows from being reused together. Empty remains legacy anonymous mode.
+	CredentialCacheMode string `json:"credential_cache_mode,omitempty"`
 
 	// UseWrapA enables the "SRTP-WRAP-A" 4th transport mode — wire-compatible
 	// with amurcanov's proxy-turn-vk-android server (see proxy.Config.UseWrapA
@@ -435,6 +438,7 @@ func VBridgeWGStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 		CredPoolCooldown: time.Duration(pcfg.CredPoolCooldownSeconds) * time.Second,
 		SeededTURN:       seededTURN,
 		CredCachePath:    credCachePath,
+		CredCacheMode:    pcfg.CredentialCacheMode,
 	})
 
 	// Proxy.Start blocks until the first conn is ready or a fatal error
