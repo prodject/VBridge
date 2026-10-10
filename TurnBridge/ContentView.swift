@@ -1101,6 +1101,11 @@ struct ContentView: View {
                 relayIP: latestRelayIPFromLogs()
             )
             app.turnOffTunnel()
+            // Do not leave the system Live Activity waiting for a delayed
+            // NEVPNStatus callback after the app has moved to the background.
+            // The user has explicitly requested a stop, so end it immediately;
+            // the status observer still performs the normal tunnel cleanup.
+            endLiveActivity(immediate: true)
 #if targetEnvironment(macCatalyst)
             applyVPNStatus(.disconnected)
 #else
