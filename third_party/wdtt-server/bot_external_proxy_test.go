@@ -33,11 +33,37 @@ func TestOutboundBotScriptsHaveValidBashSyntax(t *testing.T) {
 		"external proxy":      externalProxyEnableScript("socks5", "proxy.example.com", 1080, "user", "password"),
 		"direct exit":         outboundDisableScript(),
 		"status":              outboundStatusScript(),
+		"WARP check":          freeWarpCheckScript(false),
 	}
 	for name, script := range scripts {
 		t.Run(name, func(t *testing.T) {
 			assertBashSyntax(t, script)
 		})
+	}
+}
+
+func TestWarpBotCheckValidatesManagedRouting(t *testing.T) {
+	script := freeWarpCheckScript(false)
+	for _, expected := range []string{
+		"wdtt_warp_routing_ready",
+		"WDTT_ERROR=warp_route_check_failed",
+		`iptables -t nat -C POSTROUTING`,
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("WARP check script does not contain %q", expected)
+		}
+	}
+}
+
+func TestOutboundBotCleanupVerifiesWireGuardStopped(t *testing.T) {
+	script := outboundDisableScript()
+	for _, expected := range []string{
+		`ip link show dev "$WDTT_WG_IFACE"`,
+		"WDTT_ERROR=direct_cleanup_failed",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("outbound cleanup script does not contain %q", expected)
+		}
 	}
 }
 

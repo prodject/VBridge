@@ -498,6 +498,8 @@ func botScriptErrorText(err error, output string) string {
 		return "WireGuard-профиль WARP не найден. Выполните восстановление из Android-приложения."
 	case "warp_trace_check_failed":
 		return "Cloudflare не подтвердил warp=on/plus. Возможны временный сбой endpoint или региональное ограничение WARP. Попробуйте перезапуск, затем восстановление из приложения."
+	case "warp_route_check_failed":
+		return "Интерфейс WARP запущен, но правила маршрутизации WDTT применены не полностью. Выполните перезапуск и проверку."
 	default:
 		if strings.TrimSpace(output) != "" {
 			return strings.TrimSpace(output)
@@ -549,7 +551,8 @@ func isFriendlyBotScriptError(err error) bool {
 		"warp_mode_not_active",
 		"warp_account_missing",
 		"warp_profile_missing",
-		"warp_trace_check_failed":
+		"warp_trace_check_failed",
+		"warp_route_check_failed":
 		return true
 	default:
 		return false
@@ -580,6 +583,13 @@ wdtt_ext_iface() {
 }
 wdtt_test_source() {
   ip -4 -o addr show dev "$WDTT_IFACE" scope global 2>/dev/null | awk '{split($4, value, "/"); print value[1]; exit}'
+}
+wdtt_warp_routing_ready() {
+  command -v wg >/dev/null 2>&1 && wg show "$WDTT_WG_IFACE" >/dev/null 2>&1 || return 1
+  ip rule show 2>/dev/null | grep -Eq "from $WDTT_SUBNET lookup $WDTT_TABLE([[:space:]]|$)" || return 1
+  ip route show table "$WDTT_TABLE" 2>/dev/null | grep -Eq "^default([[:space:]].*)? dev $WDTT_WG_IFACE([[:space:]]|$)" || return 1
+  command -v iptables >/dev/null 2>&1 || return 1
+  iptables -t nat -C POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE >/dev/null 2>&1
 }
 wdtt_install_pkg() {
   if command -v apt-get >/dev/null 2>&1; then
@@ -646,8 +656,11 @@ wdtt_clear_external_out() {
   ip route flush table "$WDTT_TABLE" 2>/dev/null || true
   systemctl disable --now wdtt-redsocks 2>/dev/null || systemctl stop wdtt-redsocks 2>/dev/null || true
   wdtt_kill_redsocks_listener
-  if ! wg-quick down "$WDTT_WG_IFACE" 2>/dev/null; then
-    ip link delete "$WDTT_WG_IFACE" 2>/dev/null || true
+  if ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1; then
+    if ! wg-quick down "$WDTT_WG_IFACE" 2>/dev/null; then
+      ip link delete "$WDTT_WG_IFACE" 2>/dev/null || true
+    fi
+    ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1 && { echo WDTT_ERROR=direct_cleanup_failed; return 1; }
   fi
   rm -f /etc/wdtt-plus/wg-exit/owner
 }
@@ -1395,6 +1408,7 @@ if [ %s = 1 ]; then
   sleep 4
 fi
 wg show "$WDTT_WG_IFACE" >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
+wdtt_warp_routing_ready || { echo WDTT_ERROR=warp_route_check_failed; exit 3; }
 TEST_SOURCE="$(wdtt_test_source)"
 [ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
 TRACE="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 25 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"

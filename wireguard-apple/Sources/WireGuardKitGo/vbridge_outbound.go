@@ -265,6 +265,10 @@ func friendlyOutboundError(output string, err error) string {
 		return "The WARP WireGuard profile is missing on the server."
 	case strings.Contains(lower, "wdtt_error=warp_trace_check_failed"):
 		return "Cloudflare did not confirm warp=on/plus for this server."
+	case strings.Contains(lower, "wdtt_error=warp_route_check_failed"):
+		return "The WARP interface is active, but the WDTT routing rules are incomplete."
+	case strings.Contains(lower, "wdtt_error=direct_cleanup_failed"):
+		return "The server could not fully stop the previous WireGuard or proxy outbound."
 	case strings.Contains(lower, "wdtt_error=local_proxy_service_inactive"):
 		return "The local proxy service failed to start on the server."
 	case strings.Contains(lower, "wdtt_error=local_proxy_check_failed"):
@@ -289,6 +293,13 @@ WDTT_WG_IFACE="wg-wdtt-exit"
 mkdir -p /etc/wdtt /etc/wdtt/outbound /etc/wdtt-plus/wg-exit
 wdtt_test_source() {
   ip -4 -o addr show dev "$WDTT_IFACE" scope global 2>/dev/null | awk '{split($4, value, "/"); print value[1]; exit}'
+}
+wdtt_warp_routing_ready() {
+  command -v wg >/dev/null 2>&1 && wg show "$WDTT_WG_IFACE" >/dev/null 2>&1 || return 1
+  ip rule show 2>/dev/null | grep -Eq "from $WDTT_SUBNET lookup $WDTT_TABLE([[:space:]]|$)" || return 1
+  ip route show table "$WDTT_TABLE" 2>/dev/null | grep -Eq "^default([[:space:]].*)? dev $WDTT_WG_IFACE([[:space:]]|$)" || return 1
+  command -v iptables >/dev/null 2>&1 || return 1
+  iptables -t nat -C POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE >/dev/null 2>&1
 }
 wdtt_install_pkg() {
   if command -v apt-get >/dev/null 2>&1; then
@@ -324,8 +335,11 @@ wdtt_clear_external_out() {
   ip route flush table "$WDTT_TABLE" 2>/dev/null || true
   systemctl disable --now wdtt-redsocks 2>/dev/null || systemctl stop wdtt-redsocks 2>/dev/null || true
   rm -f /run/wdtt-redsocks.pid 2>/dev/null || true
-  if ! wg-quick down "$WDTT_WG_IFACE" 2>/dev/null; then
-    ip link delete "$WDTT_WG_IFACE" 2>/dev/null || true
+  if ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1; then
+    if ! wg-quick down "$WDTT_WG_IFACE" 2>/dev/null; then
+      ip link delete "$WDTT_WG_IFACE" 2>/dev/null || true
+    fi
+    ip link show dev "$WDTT_WG_IFACE" >/dev/null 2>&1 && { echo WDTT_ERROR=direct_cleanup_failed; return 1; }
   fi
 }
 wdtt_write_mode() {
@@ -518,6 +532,7 @@ if [ ` + restartFlag + ` = 1 ]; then
   systemctl restart wdtt-wg-exit.service >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
   sleep 4
 fi
+wdtt_warp_routing_ready || { echo WDTT_ERROR=warp_route_check_failed; exit 3; }
 TEST_SOURCE="$(wdtt_test_source)"
 [ -n "$TEST_SOURCE" ] || { echo WDTT_ERROR=wdtt_test_source_missing; exit 3; }
 TRACE="$(curl -4fsS --interface "$TEST_SOURCE" --connect-timeout 8 --max-time 25 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
@@ -571,7 +586,7 @@ BACKUP_DIR="/tmp/vbridge-warp-backup-$(date +%s)"
 mkdir -p "$BACKUP_DIR" /etc/wdtt-plus/warp /etc/wdtt-plus/wg-exit /etc/wireguard
 [ -f /etc/wireguard/wg-wdtt-exit.conf ] && cp -f /etc/wireguard/wg-wdtt-exit.conf "$BACKUP_DIR/wg.conf"
 [ -f /etc/wdtt/outbound.json ] && cp -f /etc/wdtt/outbound.json "$BACKUP_DIR/outbound.json"
-trap 'status=$?; if [ $status -ne 0 ]; then wdtt_clear_external_out; [ -f "$BACKUP_DIR/wg.conf" ] && cp -f "$BACKUP_DIR/wg.conf" /etc/wireguard/wg-wdtt-exit.conf || rm -f /etc/wireguard/wg-wdtt-exit.conf; [ -f "$BACKUP_DIR/outbound.json" ] && cp -f "$BACKUP_DIR/outbound.json" /etc/wdtt/outbound.json || rm -f /etc/wdtt/outbound.json; fi; rm -rf "$BACKUP_DIR"' EXIT
+trap 'status=$?; if [ $status -ne 0 ]; then wdtt_clear_external_out || true; [ -f "$BACKUP_DIR/wg.conf" ] && cp -f "$BACKUP_DIR/wg.conf" /etc/wireguard/wg-wdtt-exit.conf || rm -f /etc/wireguard/wg-wdtt-exit.conf; [ -f "$BACKUP_DIR/outbound.json" ] && cp -f "$BACKUP_DIR/outbound.json" /etc/wdtt/outbound.json || rm -f /etc/wdtt/outbound.json; fi; rm -rf "$BACKUP_DIR"' EXIT
 wdtt_install_pkg wireguard-tools curl ca-certificates iptables iproute2 || true
 command -v wg-quick >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_tools_required; exit 2; }
 command -v curl >/dev/null 2>&1 || { echo WDTT_ERROR=warp_download_tools_missing; exit 2; }
@@ -614,8 +629,7 @@ BEGIN { in_interface=0 }
 ' "$RAW_PROFILE" >"$SAFE_PROFILE"
 install -m 600 "$SAFE_PROFILE" /etc/wireguard/wg-wdtt-exit.conf
 install -m 600 "$SAFE_PROFILE" /etc/wdtt-plus/wg-exit/wg-wdtt-exit.conf
-systemctl disable --now wdtt-redsocks 2>/dev/null || true
-wg-quick down wg-wdtt-exit 2>/dev/null || true
+wdtt_clear_external_out
 wg-quick up wg-wdtt-exit >/dev/null 2>&1 || { echo WDTT_ERROR=wireguard_not_active; exit 3; }
 while ip rule del from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100 2>/dev/null; do :; done
 ip route flush table "$WDTT_TABLE" 2>/dev/null || true
@@ -623,6 +637,7 @@ ip rule add from "$WDTT_SUBNET" table "$WDTT_TABLE" priority 100
 ip route add default dev "$WDTT_WG_IFACE" table "$WDTT_TABLE"
 iptables -t nat -D POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE 2>/dev/null || true
 iptables -t nat -A POSTROUTING -s "$WDTT_SUBNET" -o "$WDTT_WG_IFACE" -m comment --comment WDTT_EXIT -j MASQUERADE
+wdtt_warp_routing_ready || { echo WDTT_ERROR=warp_route_check_failed; exit 3; }
 cat >/etc/systemd/system/wdtt-wg-exit.service <<EOF
 [Unit]
 Description=VBridge outbound WireGuard exit
