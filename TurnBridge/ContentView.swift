@@ -476,6 +476,7 @@ struct ContentView: View {
     // the provider's own bounded startup sequence instead of terminating a
     // legitimate .connecting session early.
     private let connectWatchdogTimeout: UInt64 = 160
+    private let tunnelStartStatusGraceInterval: TimeInterval = 3
     private static let amneziaConfType = UTType(filenameExtension: "conf", conformingTo: .data)
     private static let vbridgeType = UTType(filenameExtension: "vbridge", conformingTo: .data)
     private static let importFileTypes: [UTType] = [
@@ -1629,6 +1630,22 @@ struct ContentView: View {
     private func applyVPNStatus(_ newStatus: NEVPNStatus) {
         let previousStatus = vpnStatus
         guard previousStatus != newStatus else { return }
+
+        if newStatus == .disconnected,
+           previousStatus == .connecting,
+           !isUserInitiatedDisconnect,
+           let connectionStartedAt {
+            let elapsed = Date().timeIntervalSince(connectionStartedAt)
+            if elapsed < tunnelStartStatusGraceInterval {
+                let retryDelay = tunnelStartStatusGraceInterval - elapsed + 0.1
+                SharedLogger.debug("Ignoring stale disconnected status during tunnel startup")
+                DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                    guard self.vpnStatus == .connecting else { return }
+                    self.refreshVBridgeStatus()
+                }
+                return
+            }
+        }
 
         let statusName: String = {
             switch newStatus {
