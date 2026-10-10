@@ -85,19 +85,25 @@ func (wp *WrapAProvision) UAPIConfig() string {
 // this as its FIRST message (the server sniffs the first datagram) before
 // any WireGuard traffic flows; the response is idempotent per deviceID, so
 // all conns receive the same crypto.
-func doGetconf(conn net.Conn, deviceID, password string) (*WrapAProvision, error) {
+func doGetconf(conn net.Conn, deviceID, password, transportSession string, workerSlot int, workerAttempt uint64) (*WrapAProvision, bool, error) {
 	if deviceID == "" {
-		return nil, errors.New("getconf: empty deviceID")
+		return nil, false, errors.New("getconf: empty deviceID")
 	}
 	if password == "" {
-		return nil, errors.New("getconf: empty password")
+		return nil, false, errors.New("getconf: empty password")
 	}
 
 	req := fmt.Sprintf("GETCONF:%s|%s|%s", wrapAGetconfPort, deviceID, password)
+	// WDTT v19+ binds every replaceable path to one authenticated transport
+	// generation. Empty device-info is intentional: fields four through six
+	// are device-info, generation and worker reference respectively.
+	if transportSession != "" && workerSlot > 0 && workerAttempt > 0 {
+		req += fmt.Sprintf("||%s|W1:%d:%d", transportSession, workerSlot, workerAttempt)
+	}
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if _, err := conn.Write([]byte(req)); err != nil {
 		_ = conn.SetWriteDeadline(time.Time{})
-		return nil, fmt.Errorf("getconf: write: %w", err)
+		return nil, false, fmt.Errorf("getconf: write: %w", err)
 	}
 	_ = conn.SetWriteDeadline(time.Time{})
 
@@ -106,23 +112,39 @@ func doGetconf(conn net.Conn, deviceID, password string) (*WrapAProvision, error
 	n, err := conn.Read(buf)
 	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
-		return nil, fmt.Errorf("getconf: read: %w", err)
+		return nil, false, fmt.Errorf("getconf: read: %w", err)
 	}
 	resp := strings.TrimSpace(string(buf[:n]))
 
 	switch {
 	case resp == "NOCONF":
-		return nil, errors.New("getconf: server returned NOCONF (no config for this device)")
+		return nil, false, errors.New("getconf: server returned NOCONF (no config for this device)")
 	case strings.HasPrefix(resp, "DENIED:"):
 		// DENIED:wrong_password / DENIED:expired / DENIED:device_mismatch
-		return nil, fmt.Errorf("getconf: denied: %s", strings.TrimPrefix(resp, "DENIED:"))
+		return nil, false, fmt.Errorf("getconf: denied: %s", strings.TrimPrefix(resp, "DENIED:"))
 	}
 
+	adaptive := supportsWDTTUplink(resp)
 	prov, err := parseWGINIToProvision(resp)
 	if err != nil {
-		return nil, fmt.Errorf("getconf: %w (resp %q)", err, truncate(resp, 120))
+		return nil, false, fmt.Errorf("getconf: %w (resp %q)", err, truncate(resp, 120))
 	}
-	return prov, nil
+	return prov, adaptive, nil
+}
+
+func supportsWDTTUplink(config string) bool {
+	for _, line := range strings.Split(config, "\n") {
+		values, ok := strings.CutPrefix(strings.TrimSpace(line), "# WDTT_TRANSPORTS=")
+		if !ok {
+			continue
+		}
+		for _, value := range strings.Split(values, ",") {
+			if strings.TrimSpace(value) == "uplink2" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // parseWGINIToProvision parses the server's WireGuard INI into a

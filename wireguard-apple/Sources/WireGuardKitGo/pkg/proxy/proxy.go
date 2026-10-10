@@ -168,10 +168,13 @@ type Proxy struct {
 	// the first runWrapASession (wrapAProvOnce) and broadcast to waiters
 	// (bridge → Swift) by closing wrapAProvCh. wrapAProvCh is nil unless
 	// UseWrapA.
-	wrapAKey      []byte
-	wrapAProvOnce sync.Once
-	wrapAProv     atomic.Pointer[WrapAProvision]
-	wrapAProvCh   chan struct{}
+	wrapAKey              []byte
+	wrapAProvOnce         sync.Once
+	wrapAProv             atomic.Pointer[WrapAProvision]
+	wrapAProvCh           chan struct{}
+	wrapATransportSession string
+	wrapAWorkerAttempt    atomic.Uint64
+	wrapADispatcher       *wdttUplinkDispatcher
 
 	wg sync.WaitGroup
 
@@ -462,6 +465,8 @@ func NewProxy(cfg Config) *Proxy {
 	if cfg.UseWrapA {
 		p.wrapAKey = wrapAKey
 		p.wrapAProvCh = make(chan struct{})
+		p.wrapATransportSession = uuid.New().String()
+		p.wrapADispatcher = newWDTTUplinkDispatcher(ctx, p.sendCh)
 	}
 	// If no external solver provided, use the built-in channel-based solver
 	// that waits for SolveCaptcha() to be called (e.g. from iOS UI).
@@ -548,6 +553,13 @@ func (p *Proxy) Start() error {
 	// With 10 connections and ~50 goroutines, unrestricted GOMAXPROCS
 	// causes ~1500 wakes/sec. Limiting to 2 threads keeps us well under.
 	runtime.GOMAXPROCS(2)
+	if p.wrapADispatcher != nil {
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			p.wrapADispatcher.run()
+		}()
+	}
 
 	// Parse VK link ID
 	linkID := p.config.VKLink
@@ -2941,9 +2953,21 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 	// first datagram). Idempotent per deviceID; the first to finish provisions
 	// the WG device. Done synchronously BEFORE the recv pump so the response
 	// isn't eaten by the WireGuard read goroutine.
-	prov, err := doGetconf(dtlsConn, p.config.DeviceID, p.config.WrapAPassword)
+	prov, adaptive, err := doGetconf(
+		dtlsConn,
+		p.config.DeviceID,
+		p.config.WrapAPassword,
+		p.wrapATransportSession,
+		connIdx+1,
+		p.wrapAWorkerAttempt.Add(1),
+	)
 	if err != nil {
 		return fmt.Errorf("WRAP-A getconf: %w", err)
+	}
+	if adaptive {
+		if err := negotiateWDTTUplink(connCtx, dtlsConn); err != nil {
+			return fmt.Errorf("WRAP-A transport: %w", err)
+		}
 	}
 	p.storeWrapAProvision(prov)
 
@@ -2967,8 +2991,17 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 		p.lastPongTimes[connIdx].Store(time.Now().Unix())
 	}
 
+	path := &wdttUplinkPath{id: connIdx, adaptive: adaptive, send: make(chan []byte, 256), done: connCtx.Done()}
+	p.wrapADispatcher.register(path)
+	defer p.wrapADispatcher.unregister(path)
+	if adaptive {
+		go path.runRecovery(connCtx)
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
+
+	var writeMu sync.Mutex
 
 	// Transport keepalive: a 1-byte packet every 20s keeps amurcanov's
 	// per-conn DTLS session from idling out. With NumConns conns sharing ONE
@@ -2986,16 +3019,19 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 			case <-connCtx.Done():
 				return
 			case <-ticker.C:
+				writeMu.Lock()
 				dtlsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if _, werr := dtlsConn.Write(ka); werr != nil {
+				_, werr := dtlsConn.Write(ka)
+				writeMu.Unlock()
+				if werr != nil {
 					return
 				}
 			}
 		}
 	}()
 
-	// Send: sendCh → dtlsConn (shared across all conns; WG packets land on
-	// whichever conn's goroutine grabs them).
+	// Send: the shared dispatcher selects a healthy path. Adaptive paths add
+	// v19 sequence framing; legacy paths keep the old wire format.
 	go func() {
 		defer wg.Done()
 		defer connCancel()
@@ -3003,9 +3039,16 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 			select {
 			case <-connCtx.Done():
 				return
-			case pkt := <-p.sendCh:
+			case pkt := <-path.send:
+				outgoing := pkt
+				if adaptive && !(len(pkt) >= 4 && string(pkt[:4]) == "WDU2") {
+					outgoing = path.frame(pkt, wdttData)
+				}
+				writeMu.Lock()
 				dtlsConn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-				if _, werr := dtlsConn.Write(pkt); werr != nil {
+				_, werr := dtlsConn.Write(outgoing)
+				writeMu.Unlock()
+				if werr != nil {
 					log.Printf("proxy: [conn %d] WRAP-A send: write error: %v", connIdx, werr)
 					return
 				}
@@ -3045,6 +3088,9 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 				}
 				log.Printf("proxy: [conn %d] WRAP-A read error: %v", connIdx, rerr)
 				return
+			}
+			if adaptive && path.noteAck(buf[:n]) {
+				continue
 			}
 			// The server's 1-byte transport keepalive must NOT reach
 			// WireGuard, but it still proves the WRAP-A data path is alive.
