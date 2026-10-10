@@ -668,11 +668,11 @@ func solveCaptchaPoW(ctx context.Context, client tls_client.HttpClient, redirect
 	// This GETs the redirect_uri (typically id.vk.ru/not_robot_captcha?session_token=...)
 	// and accumulates session cookies (remixlang/remixstid/remixstlid) in the jar.
 	// These cookies are required for subsequent captchaNotRobot.* calls.
-	powInput, difficulty, scriptURL, htmlSettings, err := fetchPoW(ctx, client, redirectURI)
+	powParams, scriptURL, htmlSettings, err := fetchPoW(ctx, client, redirectURI)
 	if err != nil {
 		return "", "", fmt.Errorf("fetch PoW: %w", err)
 	}
-	log.Printf("pow: input=%s difficulty=%d htmlSettings=%v scriptURL=%s", powInput, difficulty, htmlSettings != nil, scriptURL)
+	log.Printf("pow: input=%s difficulty=%d htmlSettings=%v scriptURL=%s", powParams.Input, powParams.Difficulty, htmlSettings != nil, scriptURL)
 
 	// Phase 6: Pull the version-specific debug_info constant from the
 	// captcha JS bundle. Falls back to hardcoded value if the bundle URL
@@ -680,6 +680,9 @@ func solveCaptchaPoW(ctx context.Context, client tls_client.HttpClient, redirect
 	// is keyed on full scriptURL (versioned path) so VK rotating the
 	// constant via a JS bump auto-invalidates.
 	debugInfo := fetchAndCacheDebugInfo(ctx, client, scriptURL)
+	if powParams.DebugInfo != "" {
+		debugInfo = powParams.DebugInfo
+	}
 
 	// Log cookies received from page load (for debugging) — bogdanfinn API
 	if parsedURL, e := url.Parse("https://id.vk.ru"); e == nil {
@@ -711,17 +714,23 @@ func solveCaptchaPoW(ctx context.Context, client tls_client.HttpClient, redirect
 	fetchAppTracerSession(ctx, client)
 
 	// Step 2: Solve PoW (brute-force SHA-256)
-	hash := solvePoW(powInput, difficulty)
-	if hash == "" {
+	powStart := time.Now()
+	hexHash, nonce := solvePoW(powParams.Input, powParams.Difficulty)
+	if hexHash == "" {
 		return "", "", fmt.Errorf("PoW: no solution found within 10M iterations")
 	}
-	log.Printf("pow: solved hash=%s...%s", hash[:8], hash[len(hash)-8:])
+	hash := buildPowResult(powParams, hexHash, nonce, time.Since(powStart).Milliseconds())
+	log.Printf("pow: solved hash=%s...%s nonce=%d", hexHash[:8], hexHash[len(hexHash)-8:], nonce)
 
 	// Brief pause after PoW (simulate browser JS execution time)
 	time.Sleep(time.Duration(200+mathrand.Intn(300)) * time.Millisecond)
 
 	// Step 3: Call captchaNotRobot API sequence (using same client = same cookies)
-	successToken, showType, err := callCaptchaNotRobotAPI(ctx, client, sessionToken, hash, adFp, debugInfo, htmlSettings)
+	captchaDomain := parsed.Query().Get("domain")
+	if captchaDomain == "" {
+		captchaDomain = "vk.com"
+	}
+	successToken, showType, err := callCaptchaNotRobotAPI(ctx, client, sessionToken, captchaDomain, hash, adFp, debugInfo, powParams.Lang, htmlSettings)
 	if err != nil {
 		return "", showType, fmt.Errorf("captchaNotRobot API: %w", err)
 	}
@@ -816,10 +825,10 @@ func fetchAndCacheDebugInfo(ctx context.Context, client tls_client.HttpClient, s
 // 1.1.1331/not_robot_captcha.js), used by fetchAndCacheDebugInfo to
 // extract the version-specific debug_info constant. Empty if extraction
 // fails (caller falls back to hardcodedDebugInfo).
-func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI string) (powInput string, difficulty int, scriptURL string, htmlSettings map[string]interface{}, err error) {
+func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI string) (params powPageParams, scriptURL string, htmlSettings map[string]interface{}, err error) {
 	req, err := fhttp.NewRequestWithContext(ctx, "GET", redirectURI, nil)
 	if err != nil {
-		return "", 0, "", nil, err
+		return powPageParams{}, "", nil, err
 	}
 	// Headers calibrated for Safari iOS 17 mobile (see vkReq for full
 	// rationale). For the document GET we keep navigate-mode Sec-Fetch
@@ -843,7 +852,7 @@ func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI str
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", 0, "", nil, fmt.Errorf("HTTP GET failed: %w", err)
+		return powPageParams{}, "", nil, fmt.Errorf("HTTP GET failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -851,7 +860,7 @@ func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI str
 
 	body, err := io.ReadAll(resp.Body) // bogdanfinn auto-decompresses gzip
 	if err != nil {
-		return "", 0, "", nil, fmt.Errorf("read body (Content-Encoding=%q): %w",
+		return powPageParams{}, "", nil, fmt.Errorf("read body (Content-Encoding=%q): %w",
 			resp.Header.Get("Content-Encoding"), err)
 	}
 	// Phase 3 diagnostic: log cookies the jar received from the page GET.
@@ -863,26 +872,16 @@ func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI str
 	logCookiesForURL(client, "https://id.vk.ru", "fetchPoW post-GET (id.vk.ru)")
 	html := string(body)
 
-	powRe := regexp.MustCompile(`const\s+powInput\s*=\s*"([^"]+)"`)
-	m := powRe.FindStringSubmatch(html)
-	if len(m) < 2 {
+	parsed, parseErr := parsePowPage(html)
+	if parseErr != nil {
 		preview := html
 		if len(preview) > 500 {
 			preview = preview[:500]
 		}
 		log.Printf("pow: HTML preview: %s", preview)
-		return "", 0, "", nil, fmt.Errorf("powInput not found in HTML (%d bytes)", len(html))
+		return powPageParams{}, "", nil, fmt.Errorf("%w (%d bytes)", parseErr, len(html))
 	}
-	powInput = m[1]
-
-	diffRe := regexp.MustCompile(`startsWith\('0'\.repeat\((\d+)\)\)`)
-	dm := diffRe.FindStringSubmatch(html)
-	difficulty = 2
-	if len(dm) >= 2 {
-		if d, e := strconv.Atoi(dm[1]); e == nil {
-			difficulty = d
-		}
-	}
+	params = parsed
 
 	// Also extract captcha_settings from window.init (for slider solver)
 	initRe := regexp.MustCompile(`(?s)window\.init\s*=\s*(\{.*?\})\s*;\s*window\.lang`)
@@ -908,23 +907,23 @@ func fetchPoW(ctx context.Context, client tls_client.HttpClient, redirectURI str
 		log.Printf("pow: captcha script URL not found in HTML — debug_info will use hardcoded fallback")
 	}
 
-	return powInput, difficulty, scriptURL, htmlSettings, nil
+	return params, scriptURL, htmlSettings, nil
 }
 
 
 // solvePoW brute-forces SHA-256(powInput + nonce) until the hash
 // starts with `difficulty` leading zeros.
-func solvePoW(powInput string, difficulty int) string {
+func solvePoW(powInput string, difficulty int) (string, int) {
 	target := strings.Repeat("0", difficulty)
 	for nonce := 1; nonce <= 10_000_000; nonce++ {
 		data := powInput + strconv.Itoa(nonce)
 		h := sha256.Sum256([]byte(data))
 		hexH := hex.EncodeToString(h[:])
 		if strings.HasPrefix(hexH, target) {
-			return hexH
+			return hexH, nonce
 		}
 	}
-	return ""
+	return "", 0
 }
 
 // readDecompressedBody decodes an HTTP response body based on the given
@@ -1254,7 +1253,7 @@ func randomUUIDish() string {
 //
 // Returns (successToken, lastShowCaptchaType, err). See solveCaptchaPoW for
 // the meaning of lastShowCaptchaType.
-func callCaptchaNotRobotAPI(ctx context.Context, client tls_client.HttpClient, sessionToken, hash, adFp, debugInfo string, htmlSettings map[string]interface{}) (string, string, error) {
+func callCaptchaNotRobotAPI(ctx context.Context, client tls_client.HttpClient, sessionToken, domain, hash, adFp, debugInfo, lang string, htmlSettings map[string]interface{}) (string, string, error) {
 	vkReq := func(method, postData string) (map[string]interface{}, error) {
 		reqURL := "https://" + vkAPIHost() + "/method/" + method + "?v=5.131"
 		req, err := fhttp.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(postData))
@@ -1343,7 +1342,6 @@ func callCaptchaNotRobotAPI(ctx context.Context, client tls_client.HttpClient, s
 		return resp, nil
 	}
 
-	domain := "vk.com"
 	// Phase 11 (build 106): adFp LIFECYCLE matches captured WebView 2026-05-17.
 	// Real WebView sends adFp=EMPTY on captchaNotRobot.settings (because
 	// sync-loader.js hasn't generated it yet at that point in the page
@@ -1381,6 +1379,21 @@ func callCaptchaNotRobotAPI(ctx context.Context, client tls_client.HttpClient, s
 	// show_captcha_type signal. Seeded from the HTML hint; overwritten by the
 	// API check response if we make one.
 	lastShowType := htmlShowType
+
+	// VK's BFF captcha flow opens the session before requesting settings.
+	// Its response carries the current challenge type and slider settings key.
+	log.Printf("pow: 0/4 captchaNotRobot.initSession (lang=%q)", lang)
+	initResp, err := vkReq("captchaNotRobot.initSession", initSessionBody(sessionToken, domain, lang))
+	if err != nil {
+		return "", lastShowType, fmt.Errorf("initSession: %w", err)
+	}
+	if settings, showType := initSessionSettings(initResp); settings != nil {
+		htmlSettings = settings
+		if showType != "" {
+			lastShowType = showType
+		}
+	}
+	time.Sleep(time.Duration(100+mathrand.Intn(100)) * time.Millisecond)
 
 	// 1/4: settings
 	//
