@@ -1353,6 +1353,8 @@ struct DeployView: View {
         case .csqtt:
             guard let target = csqttAdminTarget else { return nil }
             return .csqtt(target)
+        case .srtp:
+            return nil
         }
     }
 
