@@ -37,10 +37,10 @@ import (
 const (
 	csqttKeepaliveInterval = 15 * time.Second
 	csqttPathProbeInterval = time.Second
-	csqttReadTimeout       = 30 * time.Minute
 	csqttHandshakeTimeout  = 20 * time.Second
 	csqttProvisionTimeout  = 15 * time.Second
 	csqttDisconnectTimeout = 5 * time.Second
+	csqttWriteTimeout      = time.Second
 	csqttSocketBufSize     = 625 * 1024
 	csqttTunOffset         = 4
 	csqttDefaultMTU        = 1280
@@ -126,6 +126,7 @@ type csqttWorker struct {
 	id      int
 	runtime *csqttRuntime
 	sendCh  chan []byte
+	writeMu sync.Mutex
 
 	unansweredProbes atomic.Uint32
 	outstandingProbe atomic.Uint64
@@ -665,12 +666,9 @@ func (w *csqttWorker) requestProvision(conn net.Conn) (*csqttProvision, error) {
 	buffer := make([]byte, csqttMaxPacketSize)
 	defer conn.SetReadDeadline(time.Time{})
 	for attempt, timeout := range csqttProvisionAttempts {
-		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if _, err := conn.Write([]byte(request)); err != nil {
-			_ = conn.SetWriteDeadline(time.Time{})
+		if err := w.writePacket(conn, []byte(request)); err != nil {
 			return nil, fmt.Errorf("send getconf: %w", err)
 		}
-		_ = conn.SetWriteDeadline(time.Time{})
 		deadline := time.Now().Add(timeout)
 		for {
 			_ = conn.SetReadDeadline(deadline)
@@ -709,9 +707,30 @@ func (w *csqttWorker) sendDisconnect(conn net.Conn) {
 		return
 	}
 	request := fmt.Sprintf("DISCONNECT:%s|%s", w.runtime.deviceID, w.runtime.salt)
-	_ = conn.SetWriteDeadline(time.Now().Add(csqttDisconnectTimeout))
-	_, _ = conn.Write([]byte(request))
-	_ = conn.SetWriteDeadline(time.Time{})
+	_ = w.writePacketWithTimeout(conn, []byte(request), csqttDisconnectTimeout)
+}
+
+func (w *csqttWorker) writePacket(conn net.Conn, payload []byte) error {
+	return w.writePacketWithTimeout(conn, payload, csqttWriteTimeout)
+}
+
+func (w *csqttWorker) writePacketWithTimeout(conn net.Conn, payload []byte, timeout time.Duration) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
+	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+	defer conn.SetWriteDeadline(time.Time{})
+
+	written, err := conn.Write(payload)
+	if err != nil {
+		return err
+	}
+	if written != len(payload) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
@@ -734,17 +753,16 @@ func (w *csqttWorker) keepaliveLoop(ctx context.Context, conn net.Conn) {
 				}
 				probeSequence := w.outstandingProbe.Add(1)
 				copy(probe[31:39], encodeCSQTTPathProbeSequence(probeSequence))
-				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				if _, err := conn.Write(probe); err != nil {
+				if err := w.writePacket(conn, probe); err != nil {
+					_ = conn.Close()
 					return
 				}
 			}
 		case <-ticker.C:
-			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if _, err := conn.Write(ping); err != nil {
+			if err := w.writePacket(conn, ping); err != nil {
+				_ = conn.Close()
 				return
 			}
-			_ = conn.SetWriteDeadline(time.Time{})
 		}
 	}
 }
@@ -760,8 +778,7 @@ func (w *csqttWorker) proxyPackets(ctx context.Context, conn net.Conn) error {
 		select {
 		case packet, ok := <-w.sendCh:
 			if ok {
-				_ = conn.SetWriteDeadline(time.Now().Add(csqttReadTimeout))
-				if _, err := conn.Write(packet); err != nil {
+				if err := w.writePacket(conn, packet); err != nil {
 					return fmt.Errorf("dtls write: %w", err)
 				}
 			}
