@@ -1357,7 +1357,7 @@ struct DeployView: View {
         guard selectedDeployKind == .csqtt else { return nil }
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty, isValidPort(effectiveWGPort) else { return nil }
-        return URL(string: "http://\(trimmedHost):\(effectiveWGPort)")
+        return URL(string: "https://\(trimmedHost):\(effectiveWGPort)")
     }
 
     private func openCSQTTWebPanel() {
