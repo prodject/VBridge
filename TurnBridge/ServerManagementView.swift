@@ -30,6 +30,12 @@ struct ServerManagementView: View {
     @State private var showImportPicker = false
     @State private var shareItems: [Any] = []
     @State private var copiedCurrentPassword = false
+    @State private var backupStatus: ServerBackupStatus?
+    @State private var isLoadingBackups = false
+    @State private var backupEnabled = false
+    @State private var backupIntervalHours = 24
+    @State private var backupRetentionCount = 14
+    @State private var pendingBackupDelete: ServerBackupSummary?
     private let clientDurationOptions: [(title: String, value: Int)] = [
         ("30", 30),
         ("180", 180),
@@ -143,6 +149,84 @@ struct ServerManagementView: View {
             }
 
             if canManage && isWDTTManagement {
+                Section(header: Text("Server Backups")) {
+                    HStack {
+                        Button(isLoadingBackups ? "Refreshing..." : "Refresh") {
+                            refreshBackups()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isLoadingBackups)
+
+                        Spacer()
+
+                        Button("Create Now") {
+                            createBackup()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(isLoadingBackups)
+                    }
+
+                    Toggle("Automatic backups", isOn: $backupEnabled)
+                    Stepper("Interval: \(backupIntervalHours) hours", value: $backupIntervalHours, in: 6...168, step: 6)
+                    Stepper("Keep: \(backupRetentionCount)", value: $backupRetentionCount, in: 2...90)
+
+                    Button("Save Backup Settings") {
+                        saveBackupSettings()
+                    }
+                    .disabled(isLoadingBackups)
+
+                    if let status = backupStatus {
+                        Text("Valid: \(status.validCount) · Broken: \(status.brokenCount) · \(formatBytes(status.totalBytes))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if status.backups.isEmpty {
+                            Text("No server backups yet.")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(status.backups) { backup in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text(backupDateText(backup.createdAt))
+                                            .font(.headline)
+                                        Spacer()
+                                        Text(backup.valid ? "Valid" : "Broken")
+                                            .font(.caption)
+                                            .foregroundColor(backup.valid ? .green : .red)
+                                    }
+                                    Text("v\(backup.serverVersion) · \(backup.passwordCount) clients · \(formatBytes(backup.sizeBytes))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    if let error = backup.error, !error.isEmpty {
+                                        Text(error)
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                    }
+                                    HStack {
+                                        Button("Verify") { verifyBackup(backup) }
+                                            .buttonStyle(.bordered)
+                                            .disabled(!backup.valid || isLoadingBackups)
+                                        Button("Export") { exportBackup(backup) }
+                                            .buttonStyle(.bordered)
+                                            .disabled(!backup.valid || isLoadingBackups)
+                                        Button("Delete", role: .destructive) { pendingBackupDelete = backup }
+                                            .buttonStyle(.bordered)
+                                            .disabled(isLoadingBackups)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    } else {
+                        Text(isLoadingBackups ? "Loading backups..." : "Backup status has not been loaded.")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if canManage && isWDTTManagement {
                 Section(header: Text("Extended")) {
                     Button("Cleanup Expired") {
                         runGlobalAction(.cleanupExpired)
@@ -177,11 +261,32 @@ struct ServerManagementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             refreshServerClients()
+            if isWDTTManagement {
+                refreshBackups()
+            }
         }
         .alert(resultTitle, isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(resultMessage)
+        }
+        .confirmationDialog(
+            "Delete this server backup?",
+            isPresented: Binding(
+                get: { pendingBackupDelete != nil },
+                set: { if !$0 { pendingBackupDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Backup", role: .destructive) {
+                if let backup = pendingBackupDelete {
+                    pendingBackupDelete = nil
+                    deleteBackup(backup)
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingBackupDelete = nil }
+        } message: {
+            Text("The backup will be permanently removed from the server.")
         }
         .sheet(isPresented: Binding(
             get: { !shareItems.isEmpty },
@@ -426,6 +531,143 @@ struct ServerManagementView: View {
                 }
             }
         }
+    }
+
+    private func refreshBackups() {
+        guard case .some(.wdtt(let target)) = self.target, !isLoadingBackups else { return }
+        isLoadingBackups = true
+        Task {
+            do {
+                let status = try await ServerAdminBridge.backupStatus(target)
+                await MainActor.run { applyBackupStatus(status) }
+            } catch {
+                await MainActor.run {
+                    isLoadingBackups = false
+                    resultTitle = "Backup Refresh Failed"
+                    resultMessage = error.localizedDescription
+                    showAlert = true
+                }
+            }
+        }
+    }
+
+    private func saveBackupSettings() {
+        guard case .some(.wdtt(let target)) = self.target else { return }
+        isLoadingBackups = true
+        Task {
+            do {
+                let status = try await ServerAdminBridge.configureBackups(
+                    target,
+                    enabled: backupEnabled,
+                    intervalHours: backupIntervalHours,
+                    retentionCount: backupRetentionCount
+                )
+                await MainActor.run {
+                    applyBackupStatus(status)
+                    resultTitle = "Backup Settings Saved"
+                    resultMessage = "Server backup settings were updated."
+                    showAlert = true
+                }
+            } catch {
+                await MainActor.run { showBackupError("Backup Settings Failed", error) }
+            }
+        }
+    }
+
+    private func createBackup() {
+        guard case .some(.wdtt(let target)) = self.target else { return }
+        isLoadingBackups = true
+        Task {
+            do {
+                let response = try await ServerAdminBridge.createBackup(target)
+                await MainActor.run {
+                    if let status = response.state?.backupStatus {
+                        applyBackupStatus(status)
+                    } else {
+                        isLoadingBackups = false
+                    }
+                    resultTitle = "Backup Created"
+                    resultMessage = response.message
+                    showAlert = true
+                }
+            } catch {
+                await MainActor.run { showBackupError("Backup Failed", error) }
+            }
+        }
+    }
+
+    private func verifyBackup(_ backup: ServerBackupSummary) {
+        guard case .some(.wdtt(let target)) = self.target else { return }
+        Task {
+            do {
+                let response = try await ServerAdminBridge.verifyBackup(target, id: backup.id)
+                await MainActor.run {
+                    resultTitle = "Backup Verified"
+                    resultMessage = response.message
+                    showAlert = true
+                }
+            } catch {
+                await MainActor.run { showBackupError("Verification Failed", error) }
+            }
+        }
+    }
+
+    private func exportBackup(_ backup: ServerBackupSummary) {
+        guard case .some(.wdtt(let target)) = self.target else { return }
+        Task {
+            do {
+                let text = try await ServerAdminBridge.exportBackup(target, id: backup.id)
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("wdtt-backup-\(backup.id).json")
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                await MainActor.run { shareItems = [url] }
+            } catch {
+                await MainActor.run { showBackupError("Export Failed", error) }
+            }
+        }
+    }
+
+    private func deleteBackup(_ backup: ServerBackupSummary) {
+        guard case .some(.wdtt(let target)) = self.target else { return }
+        isLoadingBackups = true
+        Task {
+            do {
+                let response = try await ServerAdminBridge.deleteBackup(target, id: backup.id)
+                await MainActor.run {
+                    if let status = response.state?.backupStatus {
+                        applyBackupStatus(status)
+                    } else {
+                        isLoadingBackups = false
+                    }
+                    resultTitle = "Backup Deleted"
+                    resultMessage = response.message
+                    showAlert = true
+                }
+            } catch {
+                await MainActor.run { showBackupError("Delete Failed", error) }
+            }
+        }
+    }
+
+    private func applyBackupStatus(_ status: ServerBackupStatus) {
+        backupStatus = status
+        backupEnabled = status.policy.enabled
+        backupIntervalHours = status.policy.intervalHours
+        backupRetentionCount = status.policy.retentionCount
+        isLoadingBackups = false
+    }
+
+    private func showBackupError(_ title: String, _ error: Error) {
+        isLoadingBackups = false
+        resultTitle = title
+        resultMessage = error.localizedDescription
+        showAlert = true
+    }
+
+    private func backupDateText(_ timestamp: Int64) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
     }
 
     private func beginEditing(_ client: ServerAdminClientInfo) {

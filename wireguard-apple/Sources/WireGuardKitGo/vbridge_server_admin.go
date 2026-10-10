@@ -335,20 +335,27 @@ type serverAdminRequest struct {
 	Days           int    `json:"days,omitempty"`
 	ExpiresAt      *int64 `json:"expiresAt,omitempty"`
 	NewPassword    string `json:"newPassword,omitempty"`
+	BackupID       string `json:"backupID,omitempty"`
+	BackupEnabled  *bool  `json:"backupEnabled,omitempty"`
+	BackupInterval int    `json:"backupInterval,omitempty"`
+	BackupKeep     int    `json:"backupKeep,omitempty"`
 }
 
 type serverAdminResponse struct {
-	OK      bool   `json:"ok"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	Output  string `json:"output,omitempty"`
+	OK      bool              `json:"ok"`
+	Status  string            `json:"status"`
+	Message string            `json:"message"`
+	Output  string            `json:"output,omitempty"`
 	State   *serverAdminState `json:"state,omitempty"`
 }
 
 type serverAdminState struct {
-	OK        bool                      `json:"ok"`
-	Message   string                    `json:"message,omitempty"`
-	Passwords []serverAdminPasswordInfo `json:"passwords,omitempty"`
+	OK             bool                      `json:"ok"`
+	Message        string                    `json:"message,omitempty"`
+	Passwords      []serverAdminPasswordInfo `json:"passwords,omitempty"`
+	BackupStatus   json.RawMessage           `json:"backup_status,omitempty"`
+	Backup         json.RawMessage           `json:"backup,omitempty"`
+	BackupDocument json.RawMessage           `json:"backup_document,omitempty"`
 }
 
 type serverAdminPasswordInfo struct {
@@ -394,6 +401,7 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 	req.VKHash = strings.TrimSpace(req.VKHash)
 	req.Ports = strings.TrimSpace(req.Ports)
 	req.NewPassword = strings.TrimSpace(req.NewPassword)
+	req.BackupID = strings.TrimSpace(req.BackupID)
 	if req.User == "" {
 		req.User = "root"
 	}
@@ -489,6 +497,9 @@ func runStableServerAdmin(sshClient *ssh.Client, req serverAdminRequest) (server
 	stdoutText, _, cmdErr := runSSHCommandSeparated(sshClient, probeCommand, 10*time.Second)
 	if cmdErr == nil && strings.TrimSpace(stdoutText) == "present" {
 		return serverAdminResponse{}, false
+	}
+	if strings.HasPrefix(req.Action, "backup-") {
+		return serverAdminResponse{OK: false, Status: "error", Message: "server backup management requires the current WDTT server"}, true
 	}
 	payloadData, err := json.Marshal(req)
 	if err != nil {
@@ -610,6 +621,27 @@ func (r serverAdminRequest) adminArgs() ([]string, error) {
 		return []string{"cleanup-expired"}, nil
 	case "cleanup-orphans":
 		return []string{"cleanup-orphans"}, nil
+	case "backup-status":
+		return []string{"backup-status"}, nil
+	case "backup-configure":
+		if r.BackupEnabled == nil {
+			return nil, fmt.Errorf("backup enabled flag is missing")
+		}
+		interval := maxInt(6, minInt(r.BackupInterval, 168))
+		keep := maxInt(2, minInt(r.BackupKeep, 90))
+		return []string{"backup-configure", "--enabled", fmt.Sprint(*r.BackupEnabled), "--interval-hours", fmt.Sprint(interval), "--retention", fmt.Sprint(keep)}, nil
+	case "backup-create":
+		return []string{"backup-create", "--reason", "manual"}, nil
+	case "backup-verify", "backup-export":
+		if r.BackupID == "" {
+			return nil, fmt.Errorf("backup ID is empty")
+		}
+		return []string{r.Action, "--id", r.BackupID}, nil
+	case "backup-delete":
+		if r.BackupID == "" {
+			return nil, fmt.Errorf("backup ID is empty")
+		}
+		return []string{"backup-delete", "--id", r.BackupID, "--confirm", "УДАЛИТЬ"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported server admin action %q", r.Action)
 	}

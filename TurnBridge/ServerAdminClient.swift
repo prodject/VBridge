@@ -43,6 +43,123 @@ struct ServerAdminClientInfo: Codable, Identifiable, Sendable {
 
 struct ServerAdminStatePayload: Decodable, Sendable {
     var passwords: [ServerAdminClientInfo]?
+    var backupStatus: ServerBackupStatus?
+    var backup: ServerBackupSummary?
+    var backupDocument: ServerBackupDocument?
+
+    private enum CodingKeys: String, CodingKey {
+        case passwords
+        case backupStatus = "backup_status"
+        case backup
+        case backupDocument = "backup_document"
+    }
+}
+
+struct ServerBackupPolicy: Codable, Sendable {
+    var enabled: Bool
+    var intervalHours: Int
+    var retentionCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case intervalHours = "interval_hours"
+        case retentionCount = "retention_count"
+    }
+}
+
+struct ServerBackupRuntimeState: Codable, Sendable {
+    var lastAttemptAt: Int64?
+    var lastSuccessAt: Int64?
+    var lastBackupId: String?
+    var lastError: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case lastAttemptAt = "last_attempt_at"
+        case lastSuccessAt = "last_success_at"
+        case lastBackupId = "last_backup_id"
+        case lastError = "last_error"
+    }
+}
+
+struct ServerBackupSummary: Codable, Identifiable, Sendable {
+    var id: String
+    var createdAt: Int64
+    var reason: String
+    var serverVersion: String
+    var passwordCount: Int
+    var deviceCount: Int
+    var sizeBytes: Int64
+    var sha256: String?
+    var valid: Bool
+    var error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt = "created_at"
+        case reason
+        case serverVersion = "server_version"
+        case passwordCount = "password_count"
+        case deviceCount = "device_count"
+        case sizeBytes = "size_bytes"
+        case sha256
+        case valid
+        case error
+    }
+}
+
+struct ServerBackupStatus: Codable, Sendable {
+    var policy: ServerBackupPolicy
+    var state: ServerBackupRuntimeState
+    var nextRunAt: Int64?
+    var backupRoot: String
+    var totalBytes: Int64
+    var validCount: Int
+    var brokenCount: Int
+    var backups: [ServerBackupSummary]
+
+    private enum CodingKeys: String, CodingKey {
+        case policy
+        case state
+        case nextRunAt = "next_run_at"
+        case backupRoot = "backup_root"
+        case totalBytes = "total_bytes"
+        case validCount = "valid_count"
+        case brokenCount = "broken_count"
+        case backups
+    }
+}
+
+struct ServerBackupFile: Codable, Sendable {
+    var path: String
+    var mode: UInt32
+    var size: Int64
+    var sha256: String
+    var dataBase64: String
+
+    private enum CodingKeys: String, CodingKey {
+        case path, mode, size, sha256
+        case dataBase64 = "data_b64"
+    }
+}
+
+struct ServerBackupDocument: Codable, Sendable {
+    var format: String
+    var version: Int
+    var id: String
+    var createdAt: Int64
+    var reason: String
+    var serverVersion: String
+    var passwordCount: Int
+    var deviceCount: Int
+    var files: [ServerBackupFile]
+
+    private enum CodingKeys: String, CodingKey {
+        case format, version, id, reason, files
+        case createdAt = "created_at"
+        case serverVersion = "server_version"
+        case passwordCount = "password_count"
+        case deviceCount = "device_count"
+    }
 }
 
 struct ServerAdminClientTransferPayload: Codable, Sendable {
@@ -105,6 +222,12 @@ enum ServerAdminAction: String {
     case updateClient = "update-client"
     case cleanupExpired = "cleanup-expired"
     case cleanupOrphans = "cleanup-orphans"
+    case backupStatus = "backup-status"
+    case backupConfigure = "backup-configure"
+    case backupCreate = "backup-create"
+    case backupVerify = "backup-verify"
+    case backupExport = "backup-export"
+    case backupDelete = "backup-delete"
 }
 
 private struct ServerAdminBridgeRequest: Encodable, Sendable {
@@ -121,6 +244,10 @@ private struct ServerAdminBridgeRequest: Encodable, Sendable {
     var days: Int?
     var expiresAt: Int64?
     var newPassword: String?
+    var backupID: String?
+    var backupEnabled: Bool?
+    var backupInterval: Int?
+    var backupKeep: Int?
 }
 
 private struct CSQTTAdminBridgeRequest: Encodable, Sendable {
@@ -270,6 +397,70 @@ enum ServerAdminBridge {
             password: target.password,
             port: target.port,
             mainPassword: target.mainPassword
+        ))
+    }
+
+    static func backupStatus(_ target: ServerAdminTarget) async throws -> ServerBackupStatus {
+        let response = try await backupCall(target, action: .backupStatus)
+        guard let status = response.state?.backupStatus else {
+            throw NSError(domain: "ServerAdminBridge", code: 20, userInfo: [NSLocalizedDescriptionKey: "Server did not return backup status."])
+        }
+        return status
+    }
+
+    static func configureBackups(_ target: ServerAdminTarget, enabled: Bool, intervalHours: Int, retentionCount: Int) async throws -> ServerBackupStatus {
+        let response = try await backupCall(target, action: .backupConfigure, enabled: enabled, intervalHours: intervalHours, retentionCount: retentionCount)
+        guard let status = response.state?.backupStatus else {
+            throw NSError(domain: "ServerAdminBridge", code: 21, userInfo: [NSLocalizedDescriptionKey: "Server did not return updated backup status."])
+        }
+        return status
+    }
+
+    static func createBackup(_ target: ServerAdminTarget) async throws -> ServerAdminEnvelope {
+        try await backupCall(target, action: .backupCreate)
+    }
+
+    static func verifyBackup(_ target: ServerAdminTarget, id: String) async throws -> ServerAdminEnvelope {
+        try await backupCall(target, action: .backupVerify, id: id)
+    }
+
+    static func deleteBackup(_ target: ServerAdminTarget, id: String) async throws -> ServerAdminEnvelope {
+        try await backupCall(target, action: .backupDelete, id: id)
+    }
+
+    static func exportBackup(_ target: ServerAdminTarget, id: String) async throws -> String {
+        let response = try await backupCall(target, action: .backupExport, id: id)
+        guard let document = response.state?.backupDocument else {
+            throw NSError(domain: "ServerAdminBridge", code: 22, userInfo: [NSLocalizedDescriptionKey: "Server did not return the backup document."])
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(document)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "ServerAdminBridge", code: 23, userInfo: [NSLocalizedDescriptionKey: "Failed to encode the backup document."])
+        }
+        return text
+    }
+
+    private static func backupCall(
+        _ target: ServerAdminTarget,
+        action: ServerAdminAction,
+        id: String? = nil,
+        enabled: Bool? = nil,
+        intervalHours: Int? = nil,
+        retentionCount: Int? = nil
+    ) async throws -> ServerAdminEnvelope {
+        try await call(ServerAdminBridgeRequest(
+            action: action.rawValue,
+            host: target.host,
+            user: target.user,
+            password: target.password,
+            port: target.port,
+            mainPassword: target.mainPassword,
+            backupID: id,
+            backupEnabled: enabled,
+            backupInterval: intervalHours,
+            backupKeep: retentionCount
         ))
     }
 
