@@ -101,6 +101,8 @@ type wdttUplinkPath struct {
 	checkAt      time.Time
 	probing      bool
 	pendingSince time.Time
+	failedProbes       int
+	onAdaptiveFailure func()
 }
 
 func (p *wdttUplinkPath) frame(payload []byte, kind byte) []byte {
@@ -139,6 +141,7 @@ func (p *wdttUplinkPath) noteAck(packet []byte) bool {
 	if p.probing && expected >= p.next && received-p.baseRecv >= 24 {
 		p.muted = false
 		p.probing = false
+		p.failedProbes = 0
 		p.baseExp, p.baseRecv = expected, received
 		log.Printf("proxy: [conn %d] WDTT uplink recovered", p.id)
 		return true
@@ -186,11 +189,20 @@ func (p *wdttUplinkPath) beginProbe(now time.Time) ([][]byte, bool) {
 }
 
 func (p *wdttUplinkPath) finishFailedProbe() {
+	var fallback func()
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.probing {
 		p.probing = false
 		p.checkAt = time.Now().Add(10 * time.Second)
+		p.failedProbes++
+		if p.failedProbes >= 2 {
+			fallback = p.onAdaptiveFailure
+			p.onAdaptiveFailure = nil
+		}
+	}
+	p.mu.Unlock()
+	if fallback != nil {
+		fallback()
 	}
 }
 

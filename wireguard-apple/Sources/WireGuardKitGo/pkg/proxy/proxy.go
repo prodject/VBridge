@@ -175,6 +175,7 @@ type Proxy struct {
 	wrapATransportSession string
 	wrapAWorkerAttempt    atomic.Uint64
 	wrapADispatcher       *wdttUplinkDispatcher
+	wrapALegacyFallback   atomic.Bool
 
 	wg sync.WaitGroup
 
@@ -2964,8 +2965,15 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 	if err != nil {
 		return fmt.Errorf("WRAP-A getconf: %w", err)
 	}
-	if adaptive {
+	if adaptive && p.wrapALegacyFallback.Load() {
+		adaptive = false
+		log.Printf("proxy: [conn %d] WDTT legacy transport selected after uplink2 fallback", connIdx)
+	} else if adaptive {
 		if err := negotiateWDTTUplink(connCtx, dtlsConn); err != nil {
+			if p.wrapALegacyFallback.CompareAndSwap(false, true) {
+				log.Printf("proxy: WDTT uplink2 negotiation failed; reconnecting with legacy transport: %v", err)
+				go p.ForceReconnect()
+			}
 			return fmt.Errorf("WRAP-A transport: %w", err)
 		}
 	}
@@ -2991,7 +2999,19 @@ func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh 
 		p.lastPongTimes[connIdx].Store(time.Now().Unix())
 	}
 
-	path := &wdttUplinkPath{id: connIdx, adaptive: adaptive, send: make(chan []byte, 256), done: connCtx.Done()}
+	path := &wdttUplinkPath{
+		id:       connIdx,
+		adaptive: adaptive,
+		send:     make(chan []byte, 256),
+		done:     connCtx.Done(),
+		onAdaptiveFailure: func() {
+			if !p.wrapALegacyFallback.CompareAndSwap(false, true) {
+				return
+			}
+			log.Printf("proxy: WDTT uplink2 delivery checks failed; reconnecting with legacy transport")
+			p.ForceReconnect()
+		},
+	}
 	p.wrapADispatcher.register(path)
 	defer p.wrapADispatcher.unregister(path)
 	if adaptive {

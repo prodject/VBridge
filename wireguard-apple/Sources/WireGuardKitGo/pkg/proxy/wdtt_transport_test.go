@@ -49,3 +49,31 @@ func TestWDTTUplinkMutesLossyPath(t *testing.T) {
 		t.Fatal("lossy path remained eligible")
 	}
 }
+
+func TestWDTTUplinkFallsBackAfterRepeatedFailedProbes(t *testing.T) {
+	called := 0
+	path := &wdttUplinkPath{
+		adaptive: true,
+		probing:  true,
+		onAdaptiveFailure: func() {
+			called++
+		},
+	}
+
+	path.finishFailedProbe()
+	if called != 0 {
+		t.Fatal("fallback triggered after the first failed probe")
+	}
+
+	path.probing = true
+	path.finishFailedProbe()
+	if called != 1 {
+		t.Fatalf("fallback calls = %d, want 1", called)
+	}
+
+	path.probing = true
+	path.finishFailedProbe()
+	if called != 1 {
+		t.Fatalf("fallback repeated: calls = %d", called)
+	}
+}

@@ -609,6 +609,12 @@ struct ContentView: View {
 #if targetEnvironment(macCatalyst)
                 _ = status
 #else
+                if isPreparingTunnelStart,
+                   vpnStatus == .connecting,
+                   status == .disconnected {
+                    SharedLogger.debug("Ignoring disconnected manager status during WDTT pre-bootstrap")
+                    return
+                }
                 applyVPNStatus(status)
 #endif
             }
