@@ -1,6 +1,8 @@
 package turnbind
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +19,7 @@ type TURNBind struct {
 	proxy  *proxy.Proxy
 	mu     sync.Mutex
 	closed bool
+	done   chan struct{}
 }
 
 // NewTURNBind creates a new TURNBind backed by the given proxy.
@@ -26,41 +29,58 @@ func NewTURNBind(p *proxy.Proxy) *TURNBind {
 
 // Open starts the proxy and returns a receive function.
 func (b *TURNBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
-	b.mu.Lock()
-	b.closed = false
-	b.mu.Unlock()
-
 	// Start the proxy (connects to VK TURN, establishes DTLS, etc.)
 	if err := b.proxy.Start(); err != nil {
 		log.Printf("TURNBind.Open: proxy.Start failed: %v", err)
 		return nil, 0, err
 	}
 
-	recvFunc := func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
-		if len(packets) == 0 {
-			return 0, nil
-		}
-		n, err := b.proxy.ReceivePacket(packets[0])
-		if err != nil {
-			b.mu.Lock()
-			closed := b.closed
-			b.mu.Unlock()
-			if closed {
-				return 0, net.ErrClosed
-			}
-			return 0, err
-		}
-		sizes[0] = n
-		eps[0] = &TURNEndpoint{}
-		return 1, nil
+	return b.open(port)
+}
+
+func (b *TURNBind) open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+	done := make(chan struct{})
+	b.mu.Lock()
+	b.closed = false
+	b.done = done
+	b.mu.Unlock()
+	recv := func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+		return b.receive(done, packets, sizes, eps)
 	}
-	return []conn.ReceiveFunc{recvFunc}, port, nil
+	return []conn.ReceiveFunc{recv}, port, nil
+}
+
+func (b *TURNBind) receive(done <-chan struct{}, packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+	if len(packets) == 0 {
+		return 0, nil
+	}
+	n, err := b.proxy.ReceivePacketUntil(done, packets[0])
+	if err != nil {
+		if b.isClosed() || errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+			return 0, net.ErrClosed
+		}
+		return 0, err
+	}
+	sizes[0] = n
+	eps[0] = &TURNEndpoint{}
+	return 1, nil
+}
+
+func (b *TURNBind) isClosed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closed
 }
 
 // Close stops receiving packets.
 func (b *TURNBind) Close() error {
 	b.mu.Lock()
-	b.closed = true
+	if !b.closed {
+		b.closed = true
+		if b.done != nil {
+			close(b.done)
+		}
+	}
 	b.mu.Unlock()
 	return nil
 }

@@ -1542,6 +1542,18 @@ func (p *Proxy) SendPacket(data []byte) error {
 // ReceivePacket receives a packet from the tunnel.
 // Blocks until a packet arrives or context is cancelled.
 func (p *Proxy) ReceivePacket(buf []byte) (int, error) {
+	return p.ReceivePacketUntil(nil, buf)
+}
+
+// ReceivePacketUntil receives a packet or reports that the caller-specific
+// receive lifetime ended. A closed done channel takes precedence over queued
+// data so an obsolete bind cannot consume packets after a re-open.
+func (p *Proxy) ReceivePacketUntil(done <-chan struct{}, buf []byte) (int, error) {
+	select {
+	case <-done:
+		return 0, net.ErrClosed
+	default:
+	}
 	select {
 	case pkt := <-p.recvCh:
 		n := copy(buf, pkt)
@@ -1555,6 +1567,8 @@ func (p *Proxy) ReceivePacket(buf []byte) (int, error) {
 		return n, nil
 	case <-p.ctx.Done():
 		return 0, p.ctx.Err()
+	case <-done:
+		return 0, net.ErrClosed
 	}
 }
 
