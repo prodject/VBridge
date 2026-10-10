@@ -340,6 +340,15 @@ struct DeployView: View {
                     .disabled(serverManagementTarget == nil)
                 }
 
+                if selectedDeployKind == .srtp {
+                    NavigationLink {
+                        SRTPManagementView(target: srtpAdminTarget, canConnect: canConnect)
+                    } label: {
+                        Label("Management", systemImage: "person.3")
+                    }
+                    .disabled(srtpAdminTarget == nil)
+                }
+
                 if supportsOutboundManagement {
                     NavigationLink {
                         OutboundManagementView(
@@ -1356,6 +1365,22 @@ struct DeployView: View {
         case .srtp:
             return nil
         }
+    }
+
+    private var srtpAdminTarget: SRTPAdminTarget? {
+        guard selectedDeployKind == .srtp else { return nil }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty, !password.isEmpty, isSSHPortValid, isValidPort(effectiveDTLSPort) else {
+            return nil
+        }
+        return SRTPAdminTarget(
+            host: trimmedHost,
+            user: trimmedUser.isEmpty ? "root" : trimmedUser,
+            password: password,
+            port: sshPort,
+            dtlsPort: effectiveDTLSPort
+        )
     }
 
     private var serverOutboundTarget: ServerOutboundTarget? {

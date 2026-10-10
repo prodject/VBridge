@@ -53,6 +53,7 @@ extern char *VBridgeWGGetTURNServerIP(int32_t handle);
 extern char *VBridgeWGDeployServer(const char *jsonConfig);
 extern char *VBridgeWGServerAdmin(const char *jsonConfig);
 extern char *VBridgeWGCSQTTAdmin(const char *jsonConfig);
+extern char *VBridgeWGSRTPAdmin(const char *jsonConfig);
 extern char *VBridgeWGServerOutbound(const char *jsonConfig);
 extern void VBridgeWGFreeCString(char *ptr);
 

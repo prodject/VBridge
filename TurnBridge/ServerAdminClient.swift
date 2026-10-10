@@ -25,6 +25,97 @@ struct CSQTTAdminTarget: Encodable, Sendable {
     var webPassword: String
 }
 
+struct SRTPAdminTarget: Encodable, Sendable {
+    var host: String
+    var user: String
+    var password: String
+    var port: Int
+    var dtlsPort: Int
+}
+
+struct SRTPAdminClientInfo: Codable, Identifiable, Sendable {
+    var id: String
+    var label: String
+    var address: String
+    var publicKey: String
+    var createdAt: Int64
+    var config: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, address, config
+        case publicKey = "public_key"
+        case createdAt = "created_at"
+    }
+}
+
+private struct SRTPAdminRequest: Encodable, Sendable {
+    var action: String
+    var host: String
+    var user: String
+    var password: String
+    var port: Int
+    var label: String?
+    var clientId: String?
+}
+
+private struct SRTPAdminResponse: Decodable, Sendable {
+    var ok: Bool
+    var message: String
+    var clients: [SRTPAdminClientInfo]?
+}
+
+enum SRTPAdminBridge {
+    static func list(_ target: SRTPAdminTarget) async throws -> [SRTPAdminClientInfo] {
+        try await call(action: "list", target: target).clients ?? []
+    }
+
+    static func create(_ target: SRTPAdminTarget, label: String) async throws -> [SRTPAdminClientInfo] {
+        try await call(action: "create", target: target, label: label).clients ?? []
+    }
+
+    static func delete(_ target: SRTPAdminTarget, id: String) async throws -> [SRTPAdminClientInfo] {
+        try await call(action: "delete", target: target, clientId: id).clients ?? []
+    }
+
+    static func profileLink(_ target: SRTPAdminTarget, client: SRTPAdminClientInfo) throws -> String {
+        let peer = target.host.contains(":") && !target.host.hasPrefix("[")
+            ? "[\(target.host)]:\(target.dtlsPort)"
+            : "\(target.host):\(target.dtlsPort)"
+        let payload: [String: Any] = [
+            "mode": "srtp",
+            "turn": "",
+            "peer": peer,
+            "listen": "127.0.0.1:9000",
+            "n": 30,
+            "wg": client.config,
+            "name": client.label.isEmpty ? "SRTP \(client.address)" : client.label,
+            "udp": false
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return ConfigParser.scheme + data.base64EncodedString()
+    }
+
+    private static func call(action: String, target: SRTPAdminTarget, label: String? = nil, clientId: String? = nil) async throws -> SRTPAdminResponse {
+        try await Task.detached(priority: .userInitiated) {
+            let request = SRTPAdminRequest(action: action, host: target.host, user: target.user, password: target.password, port: target.port, label: label, clientId: clientId)
+            let data = try JSONEncoder().encode(request)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw NSError(domain: "SRTPAdminBridge", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode SRTP admin request."])
+            }
+            let pointer = json.withCString { VBridgeWGSRTPAdmin(UnsafeMutablePointer(mutating: $0)) }
+            guard let pointer else {
+                throw NSError(domain: "SRTPAdminBridge", code: 2, userInfo: [NSLocalizedDescriptionKey: "SRTP admin bridge returned an empty response."])
+            }
+            defer { VBridgeWGFreeCString(pointer) }
+            let response = try JSONDecoder().decode(SRTPAdminResponse.self, from: Data(String(cString: pointer).utf8))
+            guard response.ok else {
+                throw NSError(domain: "SRTPAdminBridge", code: 3, userInfo: [NSLocalizedDescriptionKey: response.message])
+            }
+            return response
+        }.value
+    }
+}
+
 struct ServerAdminClientInfo: Codable, Identifiable, Sendable {
     var password: String
     var label: String?
