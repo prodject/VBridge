@@ -136,6 +136,9 @@ struct DeployView: View {
     @AppStorage("deploy.csqttManualPorts") private var csqttManualPorts = false
     @AppStorage("deploy.csqttPeerPort") private var csqttPeerPort = 46000
     @AppStorage("deploy.csqttWebPort") private var csqttWebPort = 46002
+    @AppStorage("deploy.srtpManualPorts") private var srtpManualPorts = false
+    @AppStorage("deploy.srtpDtlsPort") private var srtpDtlsPort = 57000
+    @AppStorage("deploy.srtpWgPort") private var srtpWgPort = 57001
     @AppStorage("deploy.serverArch") private var serverArch = "amd64"
     @AppStorage("deploy.maxPasswords") private var maxPasswords = 50
     @AppStorage("deploy.maxWorkersPerAccess") private var maxWorkersPerAccess = 0
@@ -228,7 +231,7 @@ struct DeployView: View {
                 }
             }
 
-            if isWDTTFamily {
+            if isWDTTFamily || selectedDeployKind == .srtp {
                 Section(header: Text("DNS")) {
                     TextField("Primary DNS", text: $dns1)
                         .textInputAutocapitalization(.never)
@@ -255,7 +258,7 @@ struct DeployView: View {
                     copyableTextField("Telegram Admin ID", text: $adminId, keyboardType: .numberPad)
                     secretField("Telegram Bot Token", text: $botToken)
                 }
-            } else {
+            } else if selectedDeployKind == .csqtt {
                 Section(header: Text("Secrets")) {
                     secretField("CSQTT Tunnel Password", text: $csqttTunnelPassword)
                     secretField("CSQTT Web Password", text: $csqttWebPassword)
@@ -405,7 +408,7 @@ struct DeployView: View {
                         )
                     }
                     .disabled(!canInstall)
-                } else if selectedDeployKind == .csqtt {
+                } else if selectedDeployKind == .csqtt || selectedDeployKind == .srtp {
                     Button {
                         run(.install)
                     } label: {
@@ -682,7 +685,7 @@ struct DeployView: View {
     }
 
     private var supportsReinstall: Bool {
-        isWDTTFamily || selectedDeployKind == .csqtt
+        isWDTTFamily || selectedDeployKind == .csqtt || selectedDeployKind == .srtp
     }
 
     private var supportsOutboundManagement: Bool {
@@ -694,27 +697,27 @@ struct DeployView: View {
     }
 
     private var serverArchitectures: [String] {
-        isWDTTFamily ? wdttServerArchitectures : ["amd64"]
+        selectedDeployKind == .csqtt ? ["amd64"] : wdttServerArchitectures
     }
 
     private var defaultPrimaryPort: Int {
-        isWDTTFamily ? 56000 : 46000
+        selectedDeployKind == .csqtt ? 46000 : selectedDeployKind == .srtp ? 57000 : 56000
     }
 
     private var defaultSecondaryPort: Int {
-        isWDTTFamily ? 56001 : 46002
+        selectedDeployKind == .csqtt ? 46002 : selectedDeployKind == .srtp ? 57001 : 56001
     }
 
     private var primaryPortTitle: String {
-        isWDTTFamily ? "DTLS Port" : "Peer Port"
+        selectedDeployKind == .csqtt ? "Peer Port" : "DTLS Port"
     }
 
     private var secondaryPortTitle: String {
-        isWDTTFamily ? "WireGuard Port" : "Web Port"
+        selectedDeployKind == .csqtt ? "Web Port" : "WireGuard Port"
     }
 
     private var installedStatusTitle: String {
-        isWDTTFamily ? "\(selectedDeployKind.title) installed" : "CSQTT installed"
+        "\(selectedDeployKind.title) installed"
     }
 
     private var detectedServerKindTitle: String? {
@@ -726,6 +729,8 @@ struct DeployView: View {
             return DeployServerKind.wdttPlus.title
         case DeployServerKind.csqtt.rawValue:
             return DeployServerKind.csqtt.title
+        case DeployServerKind.srtp.rawValue:
+            return DeployServerKind.srtp.title
         default:
             return "Unknown"
         }
@@ -770,7 +775,9 @@ struct DeployView: View {
         isValidPort(effectiveWGPort) &&
         (isWDTTFamily
             ? isSecretValueValid(mainPassword)
-            : isSecretValueValid(csqttTunnelPassword) && isSecretValueValid(csqttWebPassword))
+            : selectedDeployKind == .csqtt
+                ? isSecretValueValid(csqttTunnelPassword) && isSecretValueValid(csqttWebPassword)
+                : true)
     }
 
     private var canUpdatePreserve: Bool {
@@ -1102,7 +1109,8 @@ struct DeployView: View {
 
     private func makeRequest(_ action: DeployAction, wdttInstallFlavor: WDTTInstallFlavor? = nil) throws -> DeployRequest {
         let scriptName: String = {
-            guard isWDTTFamily else { return "csqtt-deploy" }
+            if selectedDeployKind == .csqtt { return "csqtt-deploy" }
+            if selectedDeployKind == .srtp { return "srtp-deploy" }
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.scriptName
             }
@@ -1114,7 +1122,8 @@ struct DeployView: View {
         }
 
         let binaryPrefix: String = {
-            guard isWDTTFamily else { return "csqtt" }
+            if selectedDeployKind == .csqtt { return "csqtt" }
+            if selectedDeployKind == .srtp { return "srtp" }
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.binaryPrefix
             }
@@ -1233,6 +1242,10 @@ struct DeployView: View {
             manualPorts = csqttManualPorts
             dtlsPort = csqttPeerPort
             wgPort = csqttWebPort
+        case .srtp:
+            manualPorts = srtpManualPorts
+            dtlsPort = srtpDtlsPort
+            wgPort = srtpWgPort
         }
         lastLoadedDeployKind = kind
     }
@@ -1251,6 +1264,10 @@ struct DeployView: View {
             csqttManualPorts = manualPorts
             csqttPeerPort = dtlsPort
             csqttWebPort = wgPort
+        case .srtp:
+            srtpManualPorts = manualPorts
+            srtpDtlsPort = dtlsPort
+            srtpWgPort = wgPort
         }
 
         // Keep legacy shared keys aligned for compatibility with older installs/import flows.

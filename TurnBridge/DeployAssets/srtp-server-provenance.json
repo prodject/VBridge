@@ -1,0 +1,10 @@
+{
+  "component": "SRTP server",
+  "source": "https://github.com/anton48/vk-turn-proxy",
+  "release": "srtp-build440",
+  "license": "GPL-3.0",
+  "assets": {
+    "srtp-linux-amd64": "sha256:52aecde3b7b161789c6275abbba775a98600b786305ddb02c1880db10dae734c",
+    "srtp-linux-arm64": "sha256:a69262b6e2a7019bbff19be74309adfd0a8de0e4014b25f4ecd90132afdadde8"
+  }
+}

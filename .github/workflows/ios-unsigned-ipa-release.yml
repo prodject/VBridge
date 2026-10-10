@@ -98,6 +98,13 @@ jobs:
           test -f TurnBridge/DeployAssets/wdtt-plus-linux-amd64
           test -f TurnBridge/DeployAssets/wdtt-plus-linux-arm64
 
+      - name: Fetch SRTP deploy server assets
+        run: |
+          set -euo pipefail
+          ./script/fetch_srtp_server_assets.sh
+          test -f TurnBridge/DeployAssets/srtp-linux-amd64
+          test -f TurnBridge/DeployAssets/srtp-linux-arm64
+
       - name: Build app
         run: |
           set -euo pipefail
@@ -260,6 +267,11 @@ jobs:
         run: |
           set -euo pipefail
           ./script/build_wdtt_server_assets.sh
+
+      - name: Fetch SRTP deploy server assets
+        run: |
+          set -euo pipefail
+          ./script/fetch_srtp_server_assets.sh
 
       - name: Prebuild WireGuard Go bridge for macOS
         run: |

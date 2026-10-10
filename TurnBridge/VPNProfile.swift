@@ -56,6 +56,7 @@ enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
     case srtpCommunity
     case wdtt
     case csqtt
+    case srtp
 
     var id: String { rawValue }
 
@@ -69,6 +70,8 @@ enum VPNTransportMode: String, Codable, CaseIterable, Identifiable {
             return "WDTT"
         case .csqtt:
             return "CSQTT"
+        case .srtp:
+            return "SRTP"
         }
     }
 }

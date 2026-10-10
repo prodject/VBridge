@@ -107,6 +107,10 @@ func (r deployRequest) isCSQTT() bool {
 	return r.DeployKind == "csqtt"
 }
 
+func (r deployRequest) isSRTP() bool {
+	return r.DeployKind == "srtp"
+}
+
 func (r deployRequest) isWDTTStable() bool {
 	return r.DeployKind == "wdtt"
 }
@@ -120,6 +124,9 @@ func (r deployRequest) isWDTTFamily() bool {
 }
 
 func (r deployRequest) deployLabel() string {
+	if r.isSRTP() {
+		return "SRTP"
+	}
 	if r.isCSQTT() {
 		return "CSQTT"
 	}
@@ -181,6 +188,11 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "status" {
+		if req.isSRTP() {
+			checks, text := checkSRTPStatus(client)
+			appendOutput(req.Action, text)
+			return deployResponse{OK: true, Status: "success", Message: deployLabel + " status checked", Output: output.String(), ServerConnected: checks.ServerConnected, WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect, DetectedDeployKind: checks.DetectedDeployKind, ServerVersion: checks.ServerVersion, DTLSPort: checks.DTLSPort, WGPort: checks.WGPort}
+		}
 		if req.isCSQTT() {
 			checks, text := checkCSQTTStatus(client)
 			detectedKind := "csqtt"
@@ -233,7 +245,7 @@ func runDeploy(req deployRequest) deployResponse {
 	if req.Action == "live_log" {
 		text, commandErr := runSSHCommand(
 			client,
-			rootDeployCommand(liveDeployLogCommand(req.isCSQTT()), req.Password),
+			rootDeployCommand(liveDeployLogCommand(req.DeployKind), req.Password),
 			20*time.Second,
 		)
 		if commandErr != nil {
@@ -255,6 +267,16 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "export_logs" {
+		if req.isSRTP() {
+			checks, text := checkSRTPStatus(client)
+			appendOutput("status", text)
+			logText, commandErr := runSSHCommand(client, rootDeployCommand(exportSRTPLogsCommand(), req.Password), 45*time.Second)
+			appendOutput("export logs", logText)
+			if commandErr != nil {
+				return deployResponse{OK: false, Status: "error", Message: "server log export failed: " + commandErr.Error(), Output: output.String(), ServerConnected: true, WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect, DetectedDeployKind: checks.DetectedDeployKind, DTLSPort: checks.DTLSPort, WGPort: checks.WGPort}
+			}
+			return deployResponse{OK: true, Status: "success", Message: deployLabel + " logs exported", Output: output.String(), ServerConnected: true, WDTTInstalled: checks.WDTTInstalled, ReadyToConnect: checks.ReadyToConnect, DetectedDeployKind: checks.DetectedDeployKind, DTLSPort: checks.DTLSPort, WGPort: checks.WGPort}
+		}
 		if req.isCSQTT() {
 			checks, text := checkCSQTTStatus(client)
 			appendOutput("status", text)
@@ -338,8 +360,8 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "export_state" {
-		if req.isCSQTT() {
-			return deployResponse{OK: false, Status: "error", Message: "CSQTT backup export is not supported yet"}
+		if req.isCSQTT() || req.isSRTP() {
+			return deployResponse{OK: false, Status: "error", Message: deployLabel + " backup export is not supported yet"}
 		}
 		checks, text := checkDeployStatus(client)
 		appendOutput("status", text)
@@ -387,8 +409,8 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "import_state" {
-		if req.isCSQTT() {
-			return deployResponse{OK: false, Status: "error", Message: "CSQTT backup restore is not supported yet"}
+		if req.isCSQTT() || req.isSRTP() {
+			return deployResponse{OK: false, Status: "error", Message: deployLabel + " backup restore is not supported yet"}
 		}
 		checks, text := checkDeployStatus(client)
 		appendOutput("status", text)
@@ -451,8 +473,8 @@ func runDeploy(req deployRequest) deployResponse {
 	}
 
 	if req.Action == "cleanup_devices" {
-		if req.isCSQTT() {
-			return deployResponse{OK: false, Status: "error", Message: "CSQTT device cleanup is not supported"}
+		if req.isCSQTT() || req.isSRTP() {
+			return deployResponse{OK: false, Status: "error", Message: deployLabel + " device cleanup is not supported"}
 		}
 		text, commandErr := runSSHCommand(
 			client,
@@ -480,6 +502,8 @@ func runDeploy(req deployRequest) deployResponse {
 	remoteScriptPath := "/tmp/vbridge-wdtt-deploy.sh"
 	if req.isCSQTT() {
 		remoteScriptPath = "/tmp/vbridge-csqtt-deploy.sh"
+	} else if req.isSRTP() {
+		remoteScriptPath = "/tmp/vbridge-srtp-deploy.sh"
 	}
 	if err := uploadDeployFile(client, req.DeployScript, remoteScriptPath, 0o755); err != nil {
 		return deployResponse{
@@ -495,6 +519,8 @@ func runDeploy(req deployRequest) deployResponse {
 		remoteBinaryPath := "/tmp/wdtt-server"
 		if req.isCSQTT() {
 			remoteBinaryPath = "/tmp/csqtt"
+		} else if req.isSRTP() {
+			remoteBinaryPath = "/tmp/srtp-server"
 		}
 		if err := uploadDeployFile(client, req.ServerBinary, remoteBinaryPath, 0o755); err != nil {
 			return deployResponse{
@@ -514,6 +540,8 @@ func runDeploy(req deployRequest) deployResponse {
 	var checkText string
 	if req.isCSQTT() {
 		checks, checkText = checkCSQTTStatus(client)
+	} else if req.isSRTP() {
+		checks, checkText = checkSRTPStatus(client)
 	} else {
 		checks, checkText = checkDeployStatus(client)
 	}
@@ -597,6 +625,8 @@ func (r *deployRequest) normalize() {
 	if r.DTLSPort == 0 {
 		if r.DeployKind == "csqtt" {
 			r.DTLSPort = 46000
+		} else if r.DeployKind == "srtp" {
+			r.DTLSPort = 57000
 		} else {
 			r.DTLSPort = 56000
 		}
@@ -604,6 +634,8 @@ func (r *deployRequest) normalize() {
 	if r.WGPort == 0 {
 		if r.DeployKind == "csqtt" {
 			r.WGPort = 46002
+		} else if r.DeployKind == "srtp" {
+			r.WGPort = 57001
 		} else {
 			r.WGPort = 56001
 		}
@@ -622,7 +654,7 @@ func (r *deployRequest) normalize() {
 }
 
 func (r deployRequest) validate() error {
-	if !r.isWDTTFamily() && r.DeployKind != "csqtt" {
+	if !r.isWDTTFamily() && r.DeployKind != "csqtt" && r.DeployKind != "srtp" {
 		return fmt.Errorf("unsupported deploy kind %q", r.DeployKind)
 	}
 	if r.Action != "install" && r.Action != "update_preserve" && r.Action != "uninstall" && r.Action != "status" && r.Action != "live_log" && r.Action != "cleanup_devices" && r.Action != "export_logs" && r.Action != "export_state" && r.Action != "import_state" {
@@ -748,6 +780,13 @@ func uploadDeployFile(client *ssh.Client, localPath, remotePath string, mode os.
 }
 
 func (r deployRequest) remoteCommand() string {
+	if r.isSRTP() {
+		action := r.Action
+		if action == "update_preserve" {
+			action = "install"
+		}
+		return fmt.Sprintf("env SRTP_DTLS_PORT=%d SRTP_WG_PORT=%d SRTP_DNS1=%s SRTP_DNS2=%s SRTP_PUBLIC_HOST=%s bash /tmp/vbridge-srtp-deploy.sh %s", r.DTLSPort, r.WGPort, shellQuoteDeploy(r.DNS1), shellQuoteDeploy(r.DNS2), shellQuoteDeploy(r.Host), shellQuoteDeploy(action))
+	}
 	if r.isCSQTT() {
 		webUser := strings.TrimSpace(r.CSQTTWebUser)
 		if webUser == "" {
@@ -936,15 +975,82 @@ func deployExistingTunFlag(enabled bool, iface string) string {
 	return deployFlag("-existing-tun", iface)
 }
 
-func liveDeployLogCommand(isCSQTT bool) string {
+func liveDeployLogCommand(deployKind string) string {
 	logFile := "/var/log/wdtt-install.log"
-	if isCSQTT {
+	if deployKind == "csqtt" {
 		logFile = "/var/log/csqtt-install.log"
+	} else if deployKind == "srtp" {
+		logFile = "/var/log/srtp-install.log"
 	}
 	return strings.Join([]string{
 		"set -eu",
 		fmt.Sprintf("if [ -f %s ]; then tail -n 200 %s; fi", shellQuoteDeploy(logFile), shellQuoteDeploy(logFile)),
 	}, "; ")
+}
+
+func exportSRTPLogsCommand() string {
+	return strings.Join([]string{
+		"set -eu",
+		"systemctl status vbridge-srtp --no-pager -n 50 2>&1 || true",
+		"journalctl -u vbridge-srtp --no-pager -b -n 400 2>&1 || true",
+		"systemctl status wg-quick@srtp0 --no-pager -n 50 2>&1 || true",
+		"[ -f /var/log/srtp.server.log ] && tail -n 300 /var/log/srtp.server.log 2>&1 || true",
+		"ip addr show srtp0 2>&1 || true",
+	}, "; ")
+}
+
+func checkSRTPStatus(client *ssh.Client) (deployStatusChecks, string) {
+	command := strings.Join([]string{
+		"service_active=0", "binary_installed=0", "service_file=0", "iface_active=0",
+		"systemctl is-active --quiet vbridge-srtp 2>/dev/null && service_active=1",
+		"[ -x /usr/local/bin/vbridge-srtp-server ] && binary_installed=1",
+		"[ -f /etc/systemd/system/vbridge-srtp.service ] && service_file=1",
+		"ip link show srtp0 >/dev/null 2>&1 && iface_active=1",
+		"printf 'Server connected: yes\\n'",
+		"if [ \"$binary_installed\" = 1 ] && [ \"$service_file\" = 1 ]; then printf 'SRTP installed: yes\\n'; else printf 'SRTP installed: no\\n'; fi",
+		"if [ \"$service_active\" = 1 ] && [ \"$iface_active\" = 1 ]; then printf 'Ready to connect: yes\\n'; else printf 'Ready to connect: no\\n'; fi",
+		"printf 'SRTP_STATUS|service_active=%s|binary_installed=%s|service_file=%s|iface_active=%s\\n' \"$service_active\" \"$binary_installed\" \"$service_file\" \"$iface_active\"",
+		"[ -f /etc/systemd/system/vbridge-srtp.service ] && sed -n 's/^ExecStart=//p' /etc/systemd/system/vbridge-srtp.service | tail -n 1 | sed 's/^/SRTP_EXECSTART|/' || true",
+		"[ -f /etc/vbridge-srtp/client.conf ] && { echo 'Client WireGuard configuration:'; cat /etc/vbridge-srtp/client.conf; } || true",
+	}, "; ")
+	text, err := runSSHCommand(client, command, 20*time.Second)
+	if err != nil {
+		return deployStatusChecks{ServerConnected: true}, text + "\nstatus check failed: " + err.Error()
+	}
+	checks := deployStatusChecks{ServerConnected: true}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "SRTP_EXECSTART|") {
+			execStart := strings.TrimPrefix(line, "SRTP_EXECSTART|")
+			fields := strings.Fields(execStart)
+			for i, token := range fields {
+				if i+1 >= len(fields) {
+					continue
+				}
+				if token == "-listen" {
+					checks.DTLSPort = parseDeployListenPort(fields[i+1])
+				}
+				if token == "-connect" {
+					checks.WGPort = parseDeployListenPort(fields[i+1])
+				}
+			}
+		}
+		if !strings.HasPrefix(line, "SRTP_STATUS|") {
+			continue
+		}
+		values := map[string]bool{}
+		for _, part := range strings.Split(strings.TrimPrefix(line, "SRTP_STATUS|"), "|") {
+			pair := strings.SplitN(part, "=", 2)
+			if len(pair) == 2 {
+				values[pair[0]] = pair[1] == "1"
+			}
+		}
+		checks.WDTTInstalled = values["binary_installed"] && values["service_file"]
+		checks.ReadyToConnect = checks.WDTTInstalled && values["service_active"] && values["iface_active"]
+	}
+	if checks.WDTTInstalled {
+		checks.DetectedDeployKind = "srtp"
+	}
+	return checks, text
 }
 
 func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {

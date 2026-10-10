@@ -8,6 +8,7 @@ enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
     case wdtt
     case wdttPlus = "wdtt-plus"
     case csqtt
+    case srtp
 
     var id: String { rawValue }
 
@@ -19,6 +20,8 @@ enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
             return "WDTT Plus"
         case .csqtt:
             return "CSQTT"
+        case .srtp:
+            return "SRTP"
         }
     }
 }

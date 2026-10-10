@@ -1072,6 +1072,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let useWDTT = mode == "wdtt"
         let useCSQTT = mode == "csqtt"
         let useSRTPCommunity = mode == "srtpCommunity"
+        let useSRTP = mode == "srtp"
         var payload: [String: Any] = [
             "vk_link": vkLink,
             "peer_addr": peerAddr,
@@ -1082,7 +1083,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             "use_udp": useUdp,
             "use_wrap": useSRTPCommunity,
             "wrap_key_hex": wrapKeyHex,
-            "use_srtp": false,
+            "use_srtp": useSRTP,
             "use_wrap_a": useWDTT,
             "wrap_a_password": wdttPassword,
             "device_id": resolvedDeviceID(mode: mode, csqttDeviceID: csqttDeviceID),
