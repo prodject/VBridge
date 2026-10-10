@@ -326,9 +326,29 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		readyCh:     make(chan struct{}),
 		provisionCh: make(chan struct{}),
 	}
-	runtime.getCreds, runtime.resetCreds = poolCreds(func(ctx context.Context, hash string) (*turnCred, error) {
+	credentialSource := func(ctx context.Context, hash string) (*turnCred, error) {
 		return getVKTurnCredWithFallback(ctx, hash)
-	}, identityPoolSize)
+	}
+	if seeded := config.SeededTURN; seeded != nil && strings.TrimSpace(seeded.Address) != "" {
+		seededCred := &turnCred{
+			user:      seeded.Username,
+			pass:      seeded.Password,
+			addr:      strings.TrimSpace(seeded.Address),
+			turnURLs:  []string{strings.TrimSpace(seeded.Address)},
+			lifetime:  10 * time.Minute,
+			fetchedAt: time.Now(),
+		}
+		seededPending := true
+		credentialSource = func(ctx context.Context, hash string) (*turnCred, error) {
+			if seededPending {
+				seededPending = false
+				log.Printf("csqtt: using pre-fetched TURN credentials (addr=%s)", seededCred.addr)
+				return cloneTurnCred(seededCred), nil
+			}
+			return getVKTurnCredWithFallback(ctx, hash)
+		}
+	}
+	runtime.getCreds, runtime.resetCreds = poolCreds(credentialSource, identityPoolSize)
 	runtime.downlinkFlows = make(map[csqttFlowReassemblyKey]*csqttFlowReassemblyState)
 	runtime.dispatcher = &csqttDispatcher{
 		runtime:   runtime,

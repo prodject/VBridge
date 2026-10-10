@@ -1298,20 +1298,22 @@ struct ContentView: View {
 
     @MainActor
     private func prepareSeededTURNIfNeeded(for profile: VPNProfile) async throws -> SeededTURNCredentials? {
-        guard profile.transportMode == .wdtt else { return nil }
+        guard profile.transportMode == .wdtt || profile.transportMode == .csqtt else { return nil }
+
+        let transportName = profile.transportMode == .csqtt ? "CSQTT" : "WDTT"
 
 #if targetEnvironment(macCatalyst)
-        SharedLogger.info("WDTT pre-bootstrap: skipped on macOS; privileged helper performs VK/TURN bootstrap")
+        SharedLogger.info("\(transportName) pre-bootstrap: skipped on macOS; privileged helper performs VK/TURN bootstrap")
         return nil
 #else
         configureGoRuntimeForPreBootstrap()
 
         if let cached = CredCache.loadValidCred() {
-            SharedLogger.info("WDTT pre-bootstrap: using cached TURN cred addr=\(cached.address)")
+            SharedLogger.info("\(transportName) pre-bootstrap: using cached TURN cred addr=\(cached.address)")
             return cached
         }
 
-        SharedLogger.info("WDTT pre-bootstrap: no usable cached TURN cred, probing VK before VPN start")
+        SharedLogger.info("\(transportName) pre-bootstrap: no usable cached TURN cred, probing VK before VPN start")
 
         var savedSID = ""
         var savedKey = ""
@@ -1322,7 +1324,7 @@ struct ContentView: View {
         let linkID = vkLinkID(from: profile.vkLink)
 
         for attempt in 1...5 {
-            SharedLogger.info("WDTT pre-bootstrap probe attempt \(attempt)/5")
+            SharedLogger.info("\(transportName) pre-bootstrap probe attempt \(attempt)/5")
             let result = await probeVKCreds(
                 linkID: linkID,
                 savedSID: savedSID,
@@ -1341,17 +1343,17 @@ struct ContentView: View {
                         username: creds.username,
                         password: creds.password
                     )
-                    SharedLogger.info("WDTT pre-bootstrap: TURN override active, using \(override.address)")
+                    SharedLogger.info("\(transportName) pre-bootstrap: TURN override active, using \(override.address)")
                     return override
                 }
-                SharedLogger.info("WDTT pre-bootstrap: TURN creds acquired addr=\(creds.address)")
+                SharedLogger.info("\(transportName) pre-bootstrap: TURN creds acquired addr=\(creds.address)")
                 return creds
 
             case .captcha(let url, let sid, let ts, let captchaAttempt, let token1, let clientID, let isRateLimit):
                 if isRateLimit {
                     throw preBootstrapError("VK temporarily rate-limited captcha. Try again in a minute.")
                 }
-                SharedLogger.warning("WDTT pre-bootstrap: captcha required before VPN start")
+                SharedLogger.warning("\(transportName) pre-bootstrap: captcha required before VPN start")
                 switch await awaitPreBootstrapCaptcha(url: url) {
                 case .solved(let token):
                     savedSID = sid
@@ -1369,19 +1371,19 @@ struct ContentView: View {
                     savedAttempt = 0
                     try? await Task.sleep(nanoseconds: 10_000_000_000)
                 case .dismissed:
-                    throw preBootstrapError("Captcha was dismissed before WDTT pre-bootstrap completed.")
+                    throw preBootstrapError("Captcha was dismissed before \(transportName) pre-bootstrap completed.")
                 }
 
             case .callUnavailable(let code, let message):
-                SharedLogger.error("WDTT pre-bootstrap: VK call unavailable code=\(code): \(message)")
+                SharedLogger.error("\(transportName) pre-bootstrap: VK call unavailable code=\(code): \(message)")
                 throw preBootstrapError("VK returns error: \(message)")
 
             case .error(let message):
-                throw preBootstrapError("WDTT pre-bootstrap probe failed: \(message)")
+                throw preBootstrapError("\(transportName) pre-bootstrap probe failed: \(message)")
             }
         }
 
-        throw preBootstrapError("WDTT pre-bootstrap exhausted 5 attempts without TURN credentials.")
+        throw preBootstrapError("\(transportName) pre-bootstrap exhausted 5 attempts without TURN credentials.")
 #endif
     }
 
