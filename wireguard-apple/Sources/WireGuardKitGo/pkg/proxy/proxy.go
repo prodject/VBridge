@@ -3881,6 +3881,7 @@ func pathSnapshotOSDefault() string {
 // as pre-emptively saturated. See credPool.MarkInUseSlotsForPathChange
 // for the full rationale.
 func (p *Proxy) OnPathChange() {
+	RotateVKSessionClient()
 	if p.credPool != nil {
 		p.credPool.MarkInUseSlotsForPathChange()
 	}

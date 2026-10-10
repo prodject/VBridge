@@ -502,8 +502,15 @@ func customSafariIOS26Profile() profiles.ClientProfile {
 // calls.okcdn.ru, id.vk.ru) flow through THIS one client.
 var (
 	sessionClientOnce sync.Once
-	sessionClient     tls_client.HttpClient
+	sessionClientMu   sync.RWMutex
+	sessionClient     *sessionClientHolder
+	vkProfileLogOnce  sync.Once
 )
+
+type sessionClientHolder struct {
+	client tls_client.HttpClient
+	used   atomic.Bool
+}
 
 // GetSessionClient returns the singleton bogdanfinn HttpClient configured with
 // Phase 9 Safari iOS 26 TLS profile + persistent cookie jar. Same instance
@@ -511,39 +518,82 @@ var (
 // persist. Exported (capitalized) so creds.go and proxy.go can call it.
 func GetSessionClient() tls_client.HttpClient {
 	sessionClientOnce.Do(func() {
-		var clientProfile profiles.ClientProfile
-		if desktopChromeProfile() != nil {
-			// VK_DESKTOP_CHROME diagnostic: real Chrome 146 JA3 to match the
-			// desktop UA + sec-ch-ua (same profile amurcanov uses).
-			clientProfile = profiles.Chrome_146
-			log.Printf("pow: TLS profile=Chrome_146 (bogdanfinn built-in) — VK_DESKTOP_CHROME diagnostic mode")
-		} else {
-			// Phase 9 spec diagnostic — confirms what TLS bytes we send.
-			// Phase 10 expected: ciphers=14 extensions=15 random_ext_order=false.
-			clientProfile = customSafariIOS26Profile()
-			spec, err := buildCustomSafariIOS26Spec()
-			if err != nil {
-				log.Printf("pow: TLS profile spec build ERROR: %v", err)
-			} else {
-				log.Printf("pow: TLS profile=Safari_iOS_26_custom ciphers=%d extensions=%d random_ext_order=false (Phase 9 spec, Phase 10 session-unified across bootstrap+captcha)",
-					len(spec.CipherSuites), len(spec.Extensions))
-			}
-		}
-
-		jar := tls_client.NewCookieJar()
-		options := []tls_client.HttpClientOption{
-			tls_client.WithTimeoutSeconds(20),
-			tls_client.WithClientProfile(clientProfile),
-			tls_client.WithCookieJar(jar),
-		}
-		client, cerr := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+		client, cerr := newVKSessionClient(nil)
 		if cerr != nil {
 			log.Printf("pow: ERROR creating bogdanfinn session client: %v", cerr)
 			return
 		}
-		sessionClient = client
+		sessionClientMu.Lock()
+		sessionClient = &sessionClientHolder{client: client}
+		sessionClientMu.Unlock()
 	})
+	if holder := currentSessionClientHolder(); holder != nil {
+		return holder.client
+	}
+	return nil
+}
+
+func newVKSessionClient(jar fhttp.CookieJar) (tls_client.HttpClient, error) {
+	var clientProfile profiles.ClientProfile
+	if desktopChromeProfile() != nil {
+		clientProfile = profiles.Chrome_146
+		vkProfileLogOnce.Do(func() {
+			log.Printf("pow: TLS profile=Chrome_146 (bogdanfinn built-in) — VK_DESKTOP_CHROME diagnostic mode")
+		})
+	} else {
+		clientProfile = customSafariIOS26Profile()
+		vkProfileLogOnce.Do(func() {
+			spec, err := buildCustomSafariIOS26Spec()
+			if err != nil {
+				log.Printf("pow: TLS profile spec build ERROR: %v", err)
+			} else {
+				log.Printf("pow: TLS profile=Safari_iOS_26_custom ciphers=%d extensions=%d random_ext_order=false (Phase 9 spec, Phase 10 session-unified across bootstrap+captcha)", len(spec.CipherSuites), len(spec.Extensions))
+			}
+		})
+	}
+	if jar == nil {
+		jar = tls_client.NewCookieJar()
+	}
+	return tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+		tls_client.WithTimeoutSeconds(20),
+		tls_client.WithClientProfile(clientProfile),
+		tls_client.WithCookieJar(jar),
+	)
+}
+
+func currentSessionClientHolder() *sessionClientHolder {
+	sessionClientMu.RLock()
+	defer sessionClientMu.RUnlock()
 	return sessionClient
+}
+
+func rotateVKSessionClient(old *sessionClientHolder, reason string) *sessionClientHolder {
+	if old == nil {
+		return currentSessionClientHolder()
+	}
+	sessionClientMu.Lock()
+	defer sessionClientMu.Unlock()
+	if sessionClient != old {
+		return sessionClient
+	}
+	client, err := newVKSessionClient(old.client.GetCookieJar())
+	if err != nil {
+		log.Printf("vk: session client rotation (%s) failed: %v", reason, err)
+		return old
+	}
+	fresh := &sessionClientHolder{client: client}
+	sessionClient = fresh
+	go old.client.CloseIdleConnections()
+	log.Printf("vk: session client rotated (%s)", reason)
+	return fresh
+}
+
+// RotateVKSessionClient drops pooled connections after a network-path change
+// while retaining the session cookie jar used by the VK bootstrap flow.
+func RotateVKSessionClient() {
+	if holder := currentSessionClientHolder(); holder != nil {
+		rotateVKSessionClient(holder, "path change")
+	}
 }
 
 // GetSessionUserAgent returns the User-Agent string ALL VK API requests in

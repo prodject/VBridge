@@ -52,6 +52,7 @@ import (
 	"sync/atomic"
 
 	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/google/uuid"
 )
 
@@ -105,36 +106,10 @@ func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
 	log.Printf("vkcalls: generated request identity (name=%d chars, device_id=%d chars, UA=%d chars)", len(name), len(deviceID), len(ua))
 
 	// doRequest issues a POST to the given URL with no body (all params in URL
-	// per VK API convention). Returns parsed JSON response or error.
+	// per VK API convention), retrying once on a replacement session client
+	// when a pooled connection belonged to the previous network path.
 	doRequest := func(url string) (map[string]interface{}, error) {
-		client := GetSessionClient()
-		req, err := fhttp.NewRequest("POST", url, bytes.NewReader(nil))
-		if err != nil {
-			return nil, err
-		}
-		// Headers — minimal set matching what frida-trace captured from real
-		// VK Calls. Notably absent: Origin, Referer (legacy flow sends these
-		// because it imitates WebView; VK Calls is a native app).
-		req.Header.Set("User-Agent", ua)
-		req.Header.Set("Accept", "*/*")
-		req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
-		req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
-
-		httpResp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = httpResp.Body.Close() }()
-
-		body, err := io.ReadAll(httpResp.Body)
-		if err != nil {
-			return nil, err
-		}
-		var resp map[string]interface{}
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("unmarshal: %w, body: %s", err, truncate(string(body), 200))
-		}
-		return resp, nil
+		return vkCallsPost(url, ua)
 	}
 
 	// Step 1: get anonymous_token from VK Connect.
@@ -282,6 +257,75 @@ func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
 		Address:   addresses[0],
 		Addresses: addresses,
 	}, nil
+}
+
+func vkCallsPost(url, ua string) (map[string]interface{}, error) {
+	if GetSessionClient() == nil {
+		return nil, fmt.Errorf("vkcalls: session client unavailable")
+	}
+	holder := currentSessionClientHolder()
+	if holder == nil {
+		return nil, fmt.Errorf("vkcalls: session client unavailable")
+	}
+
+	resp, err := vkCallsPostWithClient(holder.client, url, ua)
+	if err == nil {
+		holder.used.Store(true)
+		return resp, nil
+	}
+	if !isTransientNetworkError(err) {
+		return nil, err
+	}
+
+	current := currentSessionClientHolder()
+	if !holder.used.Load() && current == holder {
+		return nil, err
+	}
+	if current == holder {
+		log.Printf("vkcalls: transient network error, rotating session client: %v", err)
+		current = rotateVKSessionClient(holder, "network error")
+	} else {
+		log.Printf("vkcalls: transient network error, retrying with path-change client: %v", err)
+	}
+	if current == nil || current == holder {
+		return nil, err
+	}
+
+	resp, retryErr := vkCallsPostWithClient(current.client, url, ua)
+	if retryErr == nil {
+		current.used.Store(true)
+	}
+	return resp, retryErr
+}
+
+func vkCallsPostWithClient(client tls_client.HttpClient, url, ua string) (map[string]interface{}, error) {
+	req, err := fhttp.NewRequest("POST", url, bytes.NewReader(nil))
+	if err != nil {
+		return nil, err
+	}
+	// Headers — minimal set matching what frida-trace captured from real
+	// VK Calls. Notably absent: Origin, Referer (legacy flow sends these
+	// because it imitates WebView; VK Calls is a native app).
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+	req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
+
+	httpResp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = httpResp.Body.Close() }()
+
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w, body: %s", err, truncate(string(body), 200))
+	}
+	return resp, nil
 }
 
 // --- Helpers (duplicated from getVKCredsWithClientID closures for isolation) ---

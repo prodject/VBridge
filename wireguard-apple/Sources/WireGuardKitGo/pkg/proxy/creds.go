@@ -196,6 +196,8 @@ func isTransientNetworkError(err error) bool {
 		strings.Contains(s, "connection refused") ||
 		strings.Contains(s, "network is unreachable") ||
 		strings.Contains(s, "no route to host") ||
+		strings.Contains(s, "read: can't assign requested address") ||
+		strings.Contains(s, "write: can't assign requested address") ||
 		strings.Contains(s, "i/o timeout") ||
 		strings.Contains(s, "deadline exceeded") ||
 		strings.Contains(s, "connection reset")
