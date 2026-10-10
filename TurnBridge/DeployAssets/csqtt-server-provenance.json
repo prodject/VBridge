@@ -1,0 +1,21 @@
+{
+  "schema": "csqtt.server-asset-provenance.v2",
+  "marker": "CSQTT_RUST_SERVER_PRODUCTION_V1",
+  "producer": "rust-server/build_linux.bat",
+  "runtime": "rust",
+  "package": "csqtt",
+  "version": "2.1.9",
+  "wireProtocolRevision": "CSQTT-WIRE-3",
+  "buildInputSha256": "97D351ECD67CD16CFC4E6E864970140B617A468119F532A2BA3A05957814194E",
+  "cargoTomlSha256": "FC295F635F2DA5F5A687FE45194778F609A17A37CC53206CDAE828D98CC6D42C",
+  "cargoLockSha256": "2382CA33A22235AC5798114A824E5B49328C73C60A1B3178A03D1B787249AF18",
+  "artifact": {
+    "assetName": "csqtt-linux-amd64",
+    "target": "x86_64-unknown-linux-musl",
+    "elfClass": 2,
+    "elfMachine": 62,
+    "binarySize": 9917072,
+    "binarySha256": "9740816075518C9D1D09524DB0A9ABB48A73B554A8DBA6963F40B800CE65F9D3"
+  },
+  "generatedAtUtc": "2026-09-02T02:41:39.3916965Z"
+}
