@@ -14,6 +14,7 @@
 		A7EBA65B2F606BB7003CA7F3 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		A7EBA6602F606BB7003CA7F3 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 		B2D4C0012F90000100000001 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
+		B2D4C0042F90000100000004 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		B3A000012F00000000000003 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 /* End PBXBuildFile section */
 
@@ -164,6 +165,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B2D4C0042F90000100000004 /* WireGuardKit in Frameworks */,
 				B2D4C0012F90000100000001 /* WireGuardKitGo in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -268,6 +270,7 @@
 			);
 			name = VBridge;
 			packageProductDependencies = (
+				A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */,
 				A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */,
 				D2F0A0022F606C0003CA7F3 /* SpeedcheckerSDK */,
 			);
