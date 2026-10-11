@@ -1,7 +1,9 @@
 import Foundation
 import NetworkExtension
 import Combine
+#if targetEnvironment(macCatalyst)
 import WireGuardKit
+#endif
 
 enum TunnelOnDemandController {
     static func refreshTrustedWiFiPreferences() {
