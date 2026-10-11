@@ -44,7 +44,7 @@ struct SettingsView: View {
 
             Section(header: Text("Proxy Settings")) {
                 if profile.transportMode != .wdtt && profile.transportMode != .csqtt {
-                    TextField("TURN Server URL", text: binding(\.vkLink))
+                    TextField("VK Call URL or Hash", text: binding(\.vkLink))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                 }

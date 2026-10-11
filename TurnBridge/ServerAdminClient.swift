@@ -77,13 +77,13 @@ enum SRTPAdminBridge {
         try await call(action: "delete", target: target, clientId: id).clients ?? []
     }
 
-    static func profileLink(_ target: SRTPAdminTarget, client: SRTPAdminClientInfo, turnURL: String) throws -> String {
+    static func profileLink(_ target: SRTPAdminTarget, client: SRTPAdminClientInfo) throws -> String {
         let peer = target.host.contains(":") && !target.host.hasPrefix("[")
             ? "[\(target.host)]:\(target.dtlsPort)"
             : "\(target.host):\(target.dtlsPort)"
         let payload: [String: Any] = [
             "mode": "srtp",
-            "turn": turnURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            "turn": "",
             "peer": peer,
             "listen": "127.0.0.1:9000",
             "n": 30,

@@ -1066,9 +1066,7 @@ struct ContentView: View {
 
     private func validateConfig(_ profile: VPNProfile) -> String? {
         if profile.vkLink.isEmpty {
-            return profile.transportMode == .wdtt || profile.transportMode == .csqtt
-                ? "Please provide a valid VK call URL or hash."
-                : "Please provide a valid TURN Server URL."
+            return "Please provide a valid VK call URL or hash."
         }
         if profile.peerAddr.isEmpty {
             return "Please provide a valid Peer Address."
