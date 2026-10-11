@@ -28,6 +28,15 @@ struct SettingsView: View {
         draft ?? store.profiles.first(where: { $0.id == profileID }) ?? VPNProfile()
     }
 
+    private var supportsVKCallCreation: Bool {
+        switch profile.transportMode {
+        case .wdtt, .csqtt, .srtp, .srtpCommunity:
+            return true
+        case .wg:
+            return false
+        }
+    }
+
     var body: some View {
         Form {
             Section(header: Text("Profile")) {
@@ -150,24 +159,6 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
                 Section {
-                    Button {
-                        createVKCallLinkFromSavedSession()
-                    } label: {
-                        Label("Get VK Call URL", systemImage: "phone.badge.plus")
-                    }
-
-                    if let vkCallCreatorStatus, !vkCallCreatorStatus.isEmpty {
-                        Text(vkCallCreatorStatus)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Text("Creates a new VK call from the saved VK session and inserts its link at the top of this profile.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Section {
                     NavigationLink {
                         WDTTAdvancedSettingsView(
                             profile: bindingToDraftProfile(),
@@ -204,6 +195,26 @@ struct SettingsView: View {
                     Toggle("Use RTP Masking", isOn: binding(\.csqttUseMasking))
 
                     Text("Password is required. Web Port, Client Tag, Device ID, masking and extra threads can be imported from a CSQTT link or copied from the server web panel.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if supportsVKCallCreation {
+                Section(header: Text("VK Call")) {
+                    Button {
+                        createVKCallLinkFromSavedSession()
+                    } label: {
+                        Label("Get VK Call URL", systemImage: "phone.badge.plus")
+                    }
+
+                    if let vkCallCreatorStatus, !vkCallCreatorStatus.isEmpty {
+                        Text(vkCallCreatorStatus)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Text("Creates a new VK call from the saved VK session and inserts its URL at the top of VK Call URL or Hash.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
