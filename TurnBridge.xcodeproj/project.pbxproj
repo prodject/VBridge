@@ -16,6 +16,7 @@
 		B2D4C0012F90000100000001 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
 		B2D4C0042F90000100000004 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 		B3A000012F00000000000003 /* WireGuardKitGo in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */; };
+		B3A000012F00000000000014 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -191,6 +192,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B3A000012F00000000000014 /* WireGuardKit in Frameworks */,
 				B3A000012F00000000000003 /* WireGuardKitGo in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -345,6 +347,7 @@
 			);
 			name = VBridgeMac;
 			packageProductDependencies = (
+				A7EBA65A2F606BB7003CA7F3 /* WireGuardKit */,
 				A7EBA65F2F606BB7003CA7F3 /* WireGuardKitGo */,
 			);
 			productName = VBridgeMac;
