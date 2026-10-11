@@ -507,18 +507,8 @@ struct ConfigParser {
             throw ConfigParseError.invalidCSQTTLink("Password is empty.")
         }
 
-        return CSQTTConfigImport(
-            host: host,
-            peerPort: peerPort,
-            password: password,
-            hashes: [],
-            profileName: nil,
-            webPort: nil,
-            clientTag: nil,
-            deviceID: nil,
-            localPort: 9000,
-            extraThreads: nil,
-            useMasking: nil
+        throw ConfigParseError.invalidCSQTTLink(
+            "Legacy CSQTT links do not include the VK hashes required by VBridge. Export a v2 link with hashes from the CSQTT web panel."
         )
     }
 
@@ -651,7 +641,11 @@ struct ConfigParser {
     }
 
     private static func parseCSQTTHashes(_ rawValue: String?) throws -> [String] {
-        guard let rawValue else { return [] }
+        guard let rawValue else {
+            throw ConfigParseError.invalidCSQTTLink(
+                "CSQTT links must include VK hashes. Export the client link with hashes from the CSQTT web panel."
+            )
+        }
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw ConfigParseError.invalidCSQTTLink("hashes is present but empty.")

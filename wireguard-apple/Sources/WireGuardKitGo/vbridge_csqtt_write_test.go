@@ -134,6 +134,30 @@ func TestCSQTTProtocolMismatchIsFatal(t *testing.T) {
 	}
 }
 
+func TestCSQTTSeededCredentialsCoverEveryPoolIdentity(t *testing.T) {
+	seeded := &turnCred{
+		user:      "seed-user",
+		pass:      "seed-password",
+		addr:      "203.0.113.10:3478",
+		turnURLs:  []string{"203.0.113.10:3478"},
+		lifetime:  10 * time.Minute,
+		fetchedAt: time.Now(),
+	}
+	getter, _ := poolCreds(csqttSeededCredentialSource(seeded), 3)
+	for index := 0; index < 6; index++ {
+		cred, err := getter(context.Background(), "unused-hash")
+		if err != nil {
+			t.Fatalf("credential %d: %v", index, err)
+		}
+		if cred.user != seeded.user || cred.pass != seeded.pass || cred.addr != seeded.addr {
+			t.Fatalf("credential %d = %+v, want seeded credential", index, cred)
+		}
+		if cred == seeded {
+			t.Fatalf("credential %d reused the mutable seed pointer", index)
+		}
+	}
+}
+
 func TestCSQTTStreamRepairParsingAndDeduplication(t *testing.T) {
 	payload := append([]byte(nil), csqttStreamRepairPrefix...)
 	payload = binary.BigEndian.AppendUint64(payload, 7)

@@ -1025,7 +1025,7 @@ private extension ISO8601DateFormatter {
     }()
 }
 
-private struct ServerManagementActivityView: UIViewControllerRepresentable {
+struct ServerManagementActivityView: UIViewControllerRepresentable {
     let items: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {

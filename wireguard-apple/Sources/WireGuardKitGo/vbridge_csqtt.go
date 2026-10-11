@@ -326,9 +326,9 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 		readyCh:     make(chan struct{}),
 		provisionCh: make(chan struct{}),
 	}
-	credentialSource := func(ctx context.Context, hash string) (*turnCred, error) {
+	credentialSource := getCredsFunc(func(ctx context.Context, hash string) (*turnCred, error) {
 		return getVKTurnCredWithFallback(ctx, hash)
-	}
+	})
 	if seeded := config.SeededTURN; seeded != nil && strings.TrimSpace(seeded.Address) != "" {
 		seededCred := &turnCred{
 			user:      seeded.Username,
@@ -338,15 +338,7 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 			lifetime:  10 * time.Minute,
 			fetchedAt: time.Now(),
 		}
-		seededPending := true
-		credentialSource = func(ctx context.Context, hash string) (*turnCred, error) {
-			if seededPending {
-				seededPending = false
-				log.Printf("csqtt: using pre-fetched TURN credentials (addr=%s)", seededCred.addr)
-				return cloneTurnCred(seededCred), nil
-			}
-			return getVKTurnCredWithFallback(ctx, hash)
-		}
+		credentialSource = csqttSeededCredentialSource(seededCred)
 	}
 	runtime.getCreds, runtime.resetCreds = poolCreds(credentialSource, identityPoolSize)
 	runtime.downlinkFlows = make(map[csqttFlowReassemblyKey]*csqttFlowReassemblyState)
@@ -357,6 +349,23 @@ func newCSQTTRuntime(config ProxyConfig) (*csqttRuntime, error) {
 	}
 	log.Printf("csqtt: TURN identity strategy: %d workers, %d cached identities", workerCount, identityPoolSize)
 	return runtime, nil
+}
+
+// csqttSeededCredentialSource deliberately serves the pre-fetched credential
+// to every pool slot. Once the packet tunnel starts, it cannot present the
+// captcha UI, so falling back to VK credential acquisition for later slots can
+// leave otherwise valid multi-worker profiles stuck during bootstrap.
+func csqttSeededCredentialSource(seeded *turnCred) getCredsFunc {
+	var logOnce sync.Once
+	return func(context.Context, string) (*turnCred, error) {
+		if seeded == nil {
+			return nil, errors.New("csqtt: seeded TURN credentials are missing")
+		}
+		logOnce.Do(func() {
+			log.Printf("csqtt: using pre-fetched TURN credentials for all identities (addr=%s)", seeded.addr)
+		})
+		return cloneTurnCred(seeded), nil
+	}
 }
 
 func (r *csqttRuntime) Start() {
