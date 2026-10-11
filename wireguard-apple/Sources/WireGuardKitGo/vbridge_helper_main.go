@@ -1,3 +1,5 @@
+//go:build vbridge_helper
+
 package main
 
 import (
@@ -26,31 +28,37 @@ import (
 )
 
 const (
-	listenAddress   = "127.0.0.1:41737"
-	stateDir        = "/Library/Application Support/VBridge"
+	listenAddress  = "127.0.0.1:41737"
+	stateDir       = "/Library/Application Support/VBridge"
 	routeStatePath = stateDir + "/active-route.json"
-	logPath         = "/Users/Shared/VBridge/vpn_tunnel.log"
+	logPath        = "/Users/Shared/VBridge/vpn_tunnel.log"
 )
 
 type tunnelStartConfiguration struct {
-	VKLink          string      `json:"vkLink"`
-	PeerAddr        string      `json:"peerAddr"`
-	ListenAddr       string      `json:"listenAddr"`
-	NValue          int         `json:"nValue"`
-	CredsGroupSize  int         `json:"credsGroupSize"`
-	WgQuickConfig   string      `json:"wgQuickConfig"`
-	TurnHost        string      `json:"turnHost"`
-	TurnPort        string      `json:"turnPort"`
-	UseUDP          bool        `json:"useUdp"`
-	TransportMode   string      `json:"transportMode"`
-	WrapKeyHex      string      `json:"wrapKeyHex"`
-	WDTTPassword    string      `json:"wdttPassword"`
-	WDTTClientKey   string      `json:"wdttClientKey"`
-	WDTTServerKey   string      `json:"wdttServerKey"`
-	WDTTFingerprint string      `json:"wdttFingerprint"`
-	WDTTClientIDMode string     `json:"wdttClientIDMode"`
-	WDTTUseVKCallsPreflight bool `json:"wdttUseVKCallsPreflight"`
-	SeededTURN      *seededTURN `json:"seededTURN"`
+	VKLink                  string      `json:"vkLink"`
+	PeerAddr                string      `json:"peerAddr"`
+	ListenAddr              string      `json:"listenAddr"`
+	NValue                  int         `json:"nValue"`
+	CredsGroupSize          int         `json:"credsGroupSize"`
+	WgQuickConfig           string      `json:"wgQuickConfig"`
+	TurnHost                string      `json:"turnHost"`
+	TurnPort                string      `json:"turnPort"`
+	UseUDP                  bool        `json:"useUdp"`
+	TransportMode           string      `json:"transportMode"`
+	WrapKeyHex              string      `json:"wrapKeyHex"`
+	WDTTPassword            string      `json:"wdttPassword"`
+	WDTTClientKey           string      `json:"wdttClientKey"`
+	WDTTServerKey           string      `json:"wdttServerKey"`
+	WDTTFingerprint         string      `json:"wdttFingerprint"`
+	WDTTClientIDMode        string      `json:"wdttClientIDMode"`
+	WDTTUseVKCallsPreflight bool        `json:"wdttUseVKCallsPreflight"`
+	CSQTTPassword           string      `json:"csqttPassword"`
+	CSQTTWebPort            int         `json:"csqttWebPort"`
+	CSQTTClientTag          string      `json:"csqttClientTag"`
+	CSQTTDeviceID           string      `json:"csqttDeviceID"`
+	CSQTTExtraThreads       int         `json:"csqttExtraThreads"`
+	CSQTTUseMasking         bool        `json:"csqttUseMasking"`
+	SeededTURN              *seededTURN `json:"seededTURN"`
 }
 
 type seededTURN struct {
@@ -60,10 +68,11 @@ type seededTURN struct {
 }
 
 type activeTunnel struct {
-	device        *device.Device
-	proxy         *proxy.Proxy
-	interfaceName string
-	turnServerIP  string
+	device         *device.Device
+	proxy          *proxy.Proxy
+	csqtt          *csqttRuntime
+	interfaceName  string
+	turnServerIP   string
 	defaultGateway string
 	routesApplied  bool
 }
@@ -198,6 +207,9 @@ func (s *helperServer) stopLocked() {
 	if t.proxy != nil {
 		t.proxy.StopWithTimeout(2 * time.Second)
 	}
+	if t.csqtt != nil {
+		t.csqtt.Stop()
+	}
 	if t.device != nil {
 		t.device.Close()
 	}
@@ -205,9 +217,17 @@ func (s *helperServer) stopLocked() {
 }
 
 func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
-	if cfg.TransportMode != "wdtt" {
-		return nil, fmt.Errorf("macOS helper currently supports WDTT mode only; got %q", cfg.TransportMode)
+	switch cfg.TransportMode {
+	case "csqtt":
+		return startCSQTTTunnel(ctx, cfg)
+	case "wdtt":
+		return startWDTTTunnel(ctx, cfg)
+	default:
+		return nil, fmt.Errorf("macOS helper does not support transport mode %q", cfg.TransportMode)
 	}
+}
+
+func startWDTTTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
 	if cfg.PeerAddr == "" {
 		return nil, errors.New("peerAddr is empty")
 	}
@@ -316,6 +336,118 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 		turnServerIP:   turnServerIP,
 		defaultGateway: defaultGateway,
 		routesApplied:  routesApplied,
+	}, nil
+}
+
+func startCSQTTTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
+	if cfg.PeerAddr == "" {
+		return nil, errors.New("peerAddr is empty")
+	}
+	if strings.TrimSpace(cfg.CSQTTPassword) == "" {
+		return nil, errors.New("csqttPassword is empty")
+	}
+
+	defaultGateway, err := currentDefaultGateway()
+	if err != nil {
+		return nil, fmt.Errorf("read default gateway: %w", err)
+	}
+
+	useMasking := cfg.CSQTTUseMasking
+	pcfg := ProxyConfig{
+		VKLink:            cfg.VKLink,
+		PeerAddr:          cfg.PeerAddr,
+		ListenAddr:        cfg.ListenAddr,
+		TurnServer:        cfg.TurnHost,
+		TurnPort:          cfg.TurnPort,
+		UseUDP:            cfg.UseUDP,
+		NumConns:          cfg.NValue,
+		UseCSQTT:          true,
+		CSQTTPassword:     cfg.CSQTTPassword,
+		CSQTTWebPort:      cfg.CSQTTWebPort,
+		CSQTTClientTag:    cfg.CSQTTClientTag,
+		CSQTTExtraThreads: cfg.CSQTTExtraThreads,
+		CSQTTUseMasking:   &useMasking,
+		DeviceID:          cfg.CSQTTDeviceID,
+	}
+	if cfg.SeededTURN != nil && strings.TrimSpace(cfg.SeededTURN.Address) != "" {
+		pcfg.SeededTURN = &struct {
+			Address  string `json:"address"`
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}{
+			Address: cfg.SeededTURN.Address, Username: cfg.SeededTURN.Username, Password: cfg.SeededTURN.Password,
+		}
+	}
+
+	runtime, err := newCSQTTRuntime(pcfg)
+	if err != nil {
+		return nil, err
+	}
+	runtime.Start()
+
+	var tunDevice tun.Device
+	var interfaceName string
+	var turnServerIP string
+	routesApplied := false
+	startSucceeded := false
+	defer func() {
+		if startSucceeded {
+			return
+		}
+		if routesApplied || interfaceName != "" || turnServerIP != "" {
+			cleanupRoutes(interfaceName, turnServerIP)
+			clearRouteState()
+		}
+		runtime.Stop()
+	}()
+
+	if err := runtime.WaitBootstrap(120 * time.Second); err != nil {
+		return nil, fmt.Errorf("CSQTT bootstrap: %w", err)
+	}
+	provision, err := runtime.WaitProvision(30 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("wait CSQTT provision: %w", err)
+	}
+	turnServerIP = runtime.TURNServerIP()
+	if turnServerIP == "" {
+		return nil, errors.New("TURN server IP is empty after CSQTT provision")
+	}
+
+	mtu := provision.MTU
+	if mtu <= 0 {
+		mtu = csqttDefaultMTU
+	}
+	tunDevice, err = tun.CreateTUN("utun", mtu)
+	if err != nil {
+		return nil, fmt.Errorf("create CSQTT utun: %w", err)
+	}
+	interfaceName, err = tunDevice.Name()
+	if err != nil {
+		return nil, fmt.Errorf("read CSQTT utun name: %w", err)
+	}
+	if err := configureInterface(interfaceName, provision.Address, mtu); err != nil {
+		return nil, err
+	}
+
+	runtime.tunDevice = tunDevice
+	go runtime.runTUNReader(tunDevice)
+	if err := applyRoutes(interfaceName, turnServerIP, defaultGateway); err != nil {
+		return nil, err
+	}
+	routesApplied = true
+	writeRouteState(interfaceName, turnServerIP, defaultGateway)
+
+	if provision.DNS != "" {
+		log.Printf("CSQTT DNS requested by server: %s (not applied globally by helper yet)", provision.DNS)
+	}
+	log.Printf("CSQTT tunnel started interface=%s address=%s dns=%s mtu=%d turn=%s gateway=%s", interfaceName, provision.Address, provision.DNS, mtu, turnServerIP, defaultGateway)
+	startSucceeded = true
+	return &activeTunnel{
+		csqtt:          runtime,
+		interfaceName:  interfaceName,
+		turnServerIP:   turnServerIP,
+		defaultGateway: defaultGateway,
+		routesApplied:  true,
 	}, nil
 }
 

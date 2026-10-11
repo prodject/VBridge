@@ -698,6 +698,8 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
         SharedLogger.info("Connecting... mode=\(configuration.transportMode.rawValue), peer=\(configuration.peerAddr), listen=\(configuration.listenAddr), n=\(configuration.nValue)")
         if configuration.transportMode == .wdtt {
             SharedLogger.info("WDTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.wdttPassword.isEmpty), primaryHashLen=\(configuration.wdttClientKey.count), extraHashesLen=\(configuration.wdttServerKey.count)")
+        } else if configuration.transportMode == .csqtt {
+            SharedLogger.info("CSQTT start config: vkLinkLen=\(configuration.vkLink.count), passwordSet=\(!configuration.csqttPassword.isEmpty), webPort=\(configuration.csqttWebPort ?? 0), clientTagLen=\(configuration.csqttClientTag.count), deviceIDLen=\(configuration.csqttDeviceID.count), extraThreads=\(configuration.csqttExtraThreads), masking=\(configuration.csqttUseMasking)")
         }
 
         do {

@@ -314,16 +314,25 @@ jobs:
 
           (
             cd wireguard-apple/Sources/WireGuardKitGo
-            GOOS=darwin GOARCH=arm64 go build \
+            HELPER_SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+            CGO_ENABLED=1 \
+            CC=clang \
+            CGO_CFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -isysroot $HELPER_SDKROOT -arch arm64" \
+            CGO_LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -isysroot $HELPER_SDKROOT -arch arm64" \
+            GOOS=darwin GOARCH=arm64 go build -tags vbridge_helper \
               -trimpath \
               -ldflags "-s -w" \
               -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-arm64" \
-              ./cmd/vbridge-helper
-            GOOS=darwin GOARCH=amd64 go build \
+              .
+            CGO_ENABLED=1 \
+            CC=clang \
+            CGO_CFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -isysroot $HELPER_SDKROOT -arch x86_64" \
+            CGO_LDFLAGS="-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -isysroot $HELPER_SDKROOT -arch x86_64" \
+            GOOS=darwin GOARCH=amd64 go build -tags vbridge_helper \
               -trimpath \
               -ldflags "-s -w" \
               -o "$HELPER_BUILD_DIR/com.prodject.vbridge.helper-amd64" \
-              ./cmd/vbridge-helper
+              .
           )
 
           lipo -create \
@@ -365,6 +374,32 @@ jobs:
           echo "helper_pkg_filename=$HELPER_PKG_FILENAME" >> "$GITHUB_OUTPUT"
           echo "helper_pkg_path=$HELPER_PKG_PATH" >> "$GITHUB_OUTPUT"
 
+      - name: Package macOS helper uninstaller
+        id: package_helper_uninstaller
+        run: |
+          set -euo pipefail
+
+          UNINSTALLER_ROOT="$GITHUB_WORKSPACE/build/vbridge-helper-uninstaller-pkgroot"
+          UNINSTALLER_SCRIPTS="$GITHUB_WORKSPACE/build/vbridge-helper-uninstaller-scripts"
+          UNINSTALLER_PKG_FILENAME="vbridge-${GITHUB_SHA}-${APP_VERSION}-helper-uninstaller.pkg"
+          UNINSTALLER_PKG_PATH="$GITHUB_WORKSPACE/$UNINSTALLER_PKG_FILENAME"
+
+          rm -rf "$UNINSTALLER_ROOT" "$UNINSTALLER_SCRIPTS"
+          mkdir -p "$UNINSTALLER_ROOT" "$UNINSTALLER_SCRIPTS"
+          ditto "packaging/macos-helper-uninstaller/postinstall" "$UNINSTALLER_SCRIPTS/postinstall"
+          chmod 755 "$UNINSTALLER_SCRIPTS/postinstall"
+
+          pkgbuild \
+            --root "$UNINSTALLER_ROOT" \
+            --scripts "$UNINSTALLER_SCRIPTS" \
+            --identifier "com.prodject.vbridge.helper.uninstaller.pkg" \
+            --version "$APP_VERSION" \
+            --install-location "/" \
+            "$UNINSTALLER_PKG_PATH"
+
+          echo "uninstaller_pkg_filename=$UNINSTALLER_PKG_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "uninstaller_pkg_path=$UNINSTALLER_PKG_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Package macOS DMG
         id: package_macos
         run: |
@@ -376,6 +411,7 @@ jobs:
           DMG_ROOT="$(mktemp -d)"
           ditto "$APP_PATH" "$DMG_ROOT/VBridge.app"
           ditto "${{ steps.package_helper.outputs.helper_pkg_path }}" "$DMG_ROOT/VBridge Helper.pkg"
+          ditto "${{ steps.package_helper_uninstaller.outputs.uninstaller_pkg_path }}" "$DMG_ROOT/VBridge Helper Uninstaller.pkg"
 
           sign_nested_code() {
             local root="$1"
@@ -439,6 +475,13 @@ jobs:
         with:
           name: ${{ steps.package_helper.outputs.helper_pkg_filename }}
           path: ${{ steps.package_helper.outputs.helper_pkg_path }}
+          if-no-files-found: error
+
+      - name: Upload macOS helper uninstaller artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_helper_uninstaller.outputs.uninstaller_pkg_filename }}
+          path: ${{ steps.package_helper_uninstaller.outputs.uninstaller_pkg_path }}
           if-no-files-found: error
 
       - name: Attach macOS artifacts to IPA release

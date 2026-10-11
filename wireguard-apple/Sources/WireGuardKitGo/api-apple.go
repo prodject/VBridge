@@ -1,3 +1,5 @@
+//go:build !vbridge_helper
+
 /* SPDX-License-Identifier: MIT
  *
  * Copyright (C) 2018-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
@@ -24,10 +26,10 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/sys/unix"
 	"github.com/amnezia-vpn/amneziawg-go/conn"
 	"github.com/amnezia-vpn/amneziawg-go/device"
 	"github.com/amnezia-vpn/amneziawg-go/tun"
+	"golang.org/x/sys/unix"
 )
 
 var loggerFunc unsafe.Pointer

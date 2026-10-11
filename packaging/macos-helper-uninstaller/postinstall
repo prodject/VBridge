@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+LABEL="com.prodject.vbridge.helper"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+HELPER="/Library/PrivilegedHelperTools/${LABEL}"
+STATE_DIR="/Library/Application Support/VBridge"
+ROUTE_STATE="${STATE_DIR}/active-route.json"
+SHARED_DIR="/Users/Shared/VBridge"
+
+interface_name=""
+default_gateway=""
+if [ -f "$ROUTE_STATE" ]; then
+  interface_name="$(/usr/bin/plutil -extract InterfaceName raw "$ROUTE_STATE" 2>/dev/null || true)"
+  default_gateway="$(/usr/bin/plutil -extract DefaultGateway raw "$ROUTE_STATE" 2>/dev/null || true)"
+fi
+
+/bin/launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || \
+  /bin/launchctl bootout system "$PLIST" >/dev/null 2>&1 || true
+
+if [ -n "$interface_name" ]; then
+  /sbin/route delete -net 0.0.0.0/1 -interface "$interface_name" >/dev/null 2>&1 || true
+  /sbin/route delete -net 128.0.0.0/1 -interface "$interface_name" >/dev/null 2>&1 || true
+fi
+if ! /sbin/route -n get default >/dev/null 2>&1 && [ -n "$default_gateway" ]; then
+  /sbin/route add default "$default_gateway" >/dev/null 2>&1 || true
+fi
+
+/bin/rm -f "$HELPER" "$PLIST"
+/bin/rm -rf "$STATE_DIR"
+/bin/rm -f \
+  "$SHARED_DIR/vpn_tunnel.log" \
+  "$SHARED_DIR/helper.stderr.log" \
+  "$SHARED_DIR/helper.stdout.log"
+/bin/rmdir "$SHARED_DIR" >/dev/null 2>&1 || true
+
+/usr/sbin/pkgutil --forget com.prodject.vbridge.helper.pkg >/dev/null 2>&1 || true
+
+exit 0

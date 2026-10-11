@@ -1303,9 +1303,11 @@ struct ContentView: View {
         let transportName = profile.transportMode == .csqtt ? "CSQTT" : "WDTT"
 
 #if targetEnvironment(macCatalyst)
-        SharedLogger.info("\(transportName) pre-bootstrap: skipped on macOS; privileged helper performs VK/TURN bootstrap")
-        return nil
-#else
+        if profile.transportMode == .wdtt {
+            SharedLogger.info("\(transportName) pre-bootstrap: skipped on macOS; privileged helper performs VK/TURN bootstrap")
+            return nil
+        }
+#endif
         configureGoRuntimeForPreBootstrap()
 
         if let cached = CredCache.loadValidCred() {
@@ -1384,7 +1386,6 @@ struct ContentView: View {
         }
 
         throw preBootstrapError("\(transportName) pre-bootstrap exhausted 5 attempts without TURN credentials.")
-#endif
     }
 
     private func configureGoRuntimeForPreBootstrap() {
