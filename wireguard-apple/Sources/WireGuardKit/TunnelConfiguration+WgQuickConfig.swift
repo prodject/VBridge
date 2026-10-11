@@ -2,7 +2,6 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Foundation
-import WireGuardKit
 
 extension TunnelConfiguration {
 
@@ -37,7 +36,7 @@ extension TunnelConfiguration {
         case multipleEntriesForKey(String)
     }
 
-    convenience init(fromWgQuickConfig wgQuickConfig: String, called name: String? = nil) throws {
+    public convenience init(fromWgQuickConfig wgQuickConfig: String, called name: String? = nil) throws {
         var interfaceConfiguration: InterfaceConfiguration?
         var peerConfigurations = [PeerConfiguration]()
 
@@ -147,7 +146,7 @@ extension TunnelConfiguration {
         }
     }
 
-    func asWgQuickConfig() -> String {
+    public func asWgQuickConfig() -> String {
         var output = "[Interface]\n"
         output.append("PrivateKey = \(interface.privateKey.base64Key)\n")
         if let listenPort = interface.listenPort {
@@ -253,7 +252,7 @@ extension TunnelConfiguration {
         }
         if let addressesString = attributes["address"] {
             var addresses = [IPAddressRange]()
-            for addressString in addressesString.splitToArray(trimmingCharacters: .whitespacesAndNewlines) {
+            for addressString in addressesString.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) {
                 guard let address = IPAddressRange(from: addressString) else {
                     throw ParseError.interfaceHasInvalidAddress(addressString)
                 }
@@ -264,7 +263,7 @@ extension TunnelConfiguration {
         if let dnsString = attributes["dns"] {
             var dnsServers = [DNSServer]()
             var dnsSearch = [String]()
-            for dnsServerString in dnsString.splitToArray(trimmingCharacters: .whitespacesAndNewlines) {
+            for dnsServerString in dnsString.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) {
                 if let dnsServer = DNSServer(from: dnsServerString) {
                     dnsServers.append(dnsServer)
                 } else {
@@ -368,7 +367,7 @@ extension TunnelConfiguration {
         }
         if let allowedIPsString = attributes["allowedips"] {
             var allowedIPs = [IPAddressRange]()
-            for allowedIPString in allowedIPsString.splitToArray(trimmingCharacters: .whitespacesAndNewlines) {
+            for allowedIPString in allowedIPsString.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) {
                 guard let allowedIP = IPAddressRange(from: allowedIPString) else {
                     throw ParseError.peerHasInvalidAllowedIP(allowedIPString)
                 }
