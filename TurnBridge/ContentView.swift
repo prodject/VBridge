@@ -1296,9 +1296,18 @@ struct ContentView: View {
 
     @MainActor
     private func prepareSeededTURNIfNeeded(for profile: VPNProfile) async throws -> SeededTURNCredentials? {
-        guard profile.transportMode == .wdtt || profile.transportMode == .csqtt else { return nil }
+        guard profile.transportMode == .wdtt ||
+                profile.transportMode == .csqtt ||
+                profile.transportMode == .srtp ||
+                profile.transportMode == .srtpCommunity else { return nil }
 
-        let transportName = profile.transportMode == .csqtt ? "CSQTT" : "WDTT"
+        let transportName: String
+        switch profile.transportMode {
+        case .csqtt: transportName = "CSQTT"
+        case .srtp: transportName = "SRTP"
+        case .srtpCommunity: transportName = "SRTP-Community"
+        default: transportName = "WDTT"
+        }
 
 #if targetEnvironment(macCatalyst)
         if profile.transportMode == .wdtt {

@@ -59,6 +59,10 @@ type tunnelStartConfiguration struct {
 	CSQTTExtraThreads       int         `json:"csqttExtraThreads"`
 	CSQTTUseMasking         bool        `json:"csqttUseMasking"`
 	SeededTURN              *seededTURN `json:"seededTURN"`
+	WGUAPI                  string      `json:"wgUAPI"`
+	WGAddress               string      `json:"wgAddress"`
+	WGDNS                   string      `json:"wgDNS"`
+	WGMTU                   int         `json:"wgMTU"`
 }
 
 type seededTURN struct {
@@ -222,9 +226,110 @@ func startTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunn
 		return startCSQTTTunnel(ctx, cfg)
 	case "wdtt":
 		return startWDTTTunnel(ctx, cfg)
+	case "srtp", "srtpCommunity":
+		return startSRTPTunnel(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("macOS helper does not support transport mode %q", cfg.TransportMode)
 	}
+}
+
+func startSRTPTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
+	if strings.TrimSpace(cfg.PeerAddr) == "" {
+		return nil, errors.New("peerAddr is empty")
+	}
+	if strings.TrimSpace(cfg.WGUAPI) == "" {
+		return nil, errors.New("WireGuard UAPI config is empty")
+	}
+	if strings.TrimSpace(cfg.WGAddress) == "" {
+		return nil, errors.New("WireGuard interface address is empty")
+	}
+
+	defaultGateway, err := currentDefaultGateway()
+	if err != nil {
+		return nil, fmt.Errorf("read default gateway: %w", err)
+	}
+	p, err := newSRTPProxy(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	var tunDevice tun.Device
+	var dev *device.Device
+	var interfaceName string
+	var turnServerIP string
+	routesApplied := false
+	startSucceeded := false
+	defer func() {
+		if startSucceeded {
+			return
+		}
+		if routesApplied || interfaceName != "" || turnServerIP != "" {
+			cleanupRoutes(interfaceName, turnServerIP)
+			clearRouteState()
+		}
+		if dev != nil {
+			dev.Close()
+		} else if tunDevice != nil {
+			tunDevice.Close()
+		}
+		p.StopWithTimeout(2 * time.Second)
+	}()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- p.Start() }()
+	if err := waitBootstrap(ctx, p, errCh, 120*time.Second); err != nil {
+		return nil, fmt.Errorf("SRTP bootstrap: %w", err)
+	}
+	turnServerIP = p.TURNServerIP()
+	if turnServerIP == "" {
+		return nil, errors.New("TURN server IP is empty after SRTP bootstrap")
+	}
+
+	mtu := cfg.WGMTU
+	if mtu <= 0 {
+		mtu = 1280
+	}
+	tunDevice, err = tun.CreateTUN("utun", mtu)
+	if err != nil {
+		return nil, fmt.Errorf("create SRTP utun: %w", err)
+	}
+	interfaceName, err = tunDevice.Name()
+	if err != nil {
+		return nil, fmt.Errorf("read SRTP utun name: %w", err)
+	}
+	if err := configureInterface(interfaceName, cfg.WGAddress, mtu); err != nil {
+		return nil, err
+	}
+
+	bind := turnbind.NewTURNBind(p)
+	logger := device.NewLogger(device.LogLevelVerbose, "(vbridge-helper/srtp-wireguard) ")
+	dev = device.NewDevice(tunDevice, bind, logger)
+	tunDevice = nil
+	if err := dev.IpcSet(cfg.WGUAPI); err != nil {
+		return nil, fmt.Errorf("SRTP wireguard ipc set: %w", err)
+	}
+	if err := dev.Up(); err != nil {
+		return nil, fmt.Errorf("SRTP wireguard up: %w", err)
+	}
+	if err := applyRoutes(interfaceName, turnServerIP, defaultGateway); err != nil {
+		return nil, err
+	}
+	routesApplied = true
+	writeRouteState(interfaceName, turnServerIP, defaultGateway)
+
+	if cfg.WGDNS != "" {
+		log.Printf("SRTP DNS requested by profile: %s (not applied globally by helper yet)", cfg.WGDNS)
+	}
+	log.Printf("SRTP tunnel started mode=%s interface=%s address=%s dns=%s mtu=%d turn=%s gateway=%s", cfg.TransportMode, interfaceName, cfg.WGAddress, cfg.WGDNS, mtu, turnServerIP, defaultGateway)
+	startSucceeded = true
+	return &activeTunnel{
+		device:         dev,
+		proxy:          p,
+		interfaceName:  interfaceName,
+		turnServerIP:   turnServerIP,
+		defaultGateway: defaultGateway,
+		routesApplied:  true,
+	}, nil
 }
 
 func startWDTTTunnel(ctx context.Context, cfg tunnelStartConfiguration) (*activeTunnel, error) {
@@ -483,6 +588,40 @@ func newProxy(cfg tunnelStartConfiguration) (*proxy.Proxy, error) {
 		UseWrapA:         true,
 		WrapAPassword:    cfg.WDTTPassword,
 		DeviceID:         deviceID,
+		NumConns:         numConns,
+		CredPoolCooldown: 120 * time.Second,
+		SeededTURN:       seeded,
+		CredCachePath:    filepath.Join(stateDir, "creds-pool.json"),
+	}), nil
+}
+
+func newSRTPProxy(cfg tunnelStartConfiguration) (*proxy.Proxy, error) {
+	var seeded *proxy.TURNCreds
+	if cfg.SeededTURN != nil && strings.TrimSpace(cfg.SeededTURN.Address) != "" {
+		seeded = &proxy.TURNCreds{
+			Address:  cfg.SeededTURN.Address,
+			Username: cfg.SeededTURN.Username,
+			Password: cfg.SeededTURN.Password,
+		}
+	}
+	wrapKey, err := decodeWrapKey(cfg.TransportMode == "srtpCommunity", cfg.WrapKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("SRTP WRAP key: %w", err)
+	}
+	numConns := cfg.NValue
+	if numConns <= 0 {
+		numConns = 1
+	}
+	return proxy.NewProxy(proxy.Config{
+		PeerAddr:         cfg.PeerAddr,
+		TurnServer:       cfg.TurnHost,
+		TurnPort:         cfg.TurnPort,
+		VKLink:           cfg.VKLink,
+		UseDTLS:          true,
+		UseUDP:           cfg.UseUDP,
+		UseWrap:          cfg.TransportMode == "srtpCommunity",
+		WrapKey:          wrapKey,
+		UseSrtp:          cfg.TransportMode == "srtp",
 		NumConns:         numConns,
 		CredPoolCooldown: 120 * time.Second,
 		SeededTURN:       seeded,

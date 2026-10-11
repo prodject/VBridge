@@ -1,6 +1,7 @@
 import Foundation
 import NetworkExtension
 import Combine
+import WireGuardKit
 
 enum TunnelOnDemandController {
     static func refreshTrustedWiFiPreferences() {
@@ -83,6 +84,10 @@ struct TunnelStartConfiguration: Codable {
     var csqttExtraThreads: Int
     var csqttUseMasking: Bool
     var seededTURN: SeededTURNCredentials?
+    var wgUAPI: String? = nil
+    var wgAddress: String? = nil
+    var wgDNS: String? = nil
+    var wgMTU: Int? = nil
 
     var normalizedWgQuickConfig: String {
         Self.normalizedWgQuickConfig(wgQuickConfig, listenAddr: listenAddr)
@@ -703,7 +708,26 @@ final class MacPrivilegedHelperTunnelBackend: TunnelBackend {
         }
 
         do {
-            try post("start", body: configuration, completionHandler: completionHandler)
+            var helperConfiguration = configuration
+            if configuration.transportMode == .srtp || configuration.transportMode == .srtpCommunity {
+                let parsedConfiguration = try TunnelConfiguration(fromWgQuickConfig: configuration.normalizedWgQuickConfig)
+                guard let address = parsedConfiguration.interface.addresses.first?.stringRepresentation else {
+                    throw NSError(
+                        domain: "MacPrivilegedHelperTunnelBackend",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "WireGuard configuration has no interface address."]
+                    )
+                }
+                helperConfiguration.wgUAPI = PacketTunnelSettingsGenerator(
+                    tunnelConfiguration: parsedConfiguration,
+                    resolvedEndpoints: parsedConfiguration.peers.map(\.endpoint)
+                ).uapiConfigurationString()
+                helperConfiguration.wgAddress = address
+                helperConfiguration.wgDNS = parsedConfiguration.interface.dns.first?.stringRepresentation
+                helperConfiguration.wgMTU = parsedConfiguration.interface.mtu.map(Int.init) ?? 1280
+                SharedLogger.info("macOS SRTP WireGuard config prepared address=\(address), mtu=\(helperConfiguration.wgMTU ?? 1280)")
+            }
+            try post("start", body: helperConfiguration, completionHandler: completionHandler)
         } catch {
             SharedLogger.error("macOS privileged helper request failed: \(error.localizedDescription)")
             completionHandler(false)
