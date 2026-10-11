@@ -13,6 +13,9 @@ struct SRTPManagementView: View {
     @State private var alertMessage = ""
     @State private var showAlert = false
     @State private var shareItems: [Any] = []
+    @State private var showVKCallCreator = false
+    @State private var pendingProfileClient: SRTPAdminClientInfo?
+    @State private var pendingProfileExport = false
 
     var body: some View {
         Form {
@@ -64,6 +67,24 @@ struct SRTPManagementView: View {
         .sheet(isPresented: Binding(get: { !shareItems.isEmpty }, set: { if !$0 { shareItems = [] } })) {
             if !shareItems.isEmpty { ServerManagementActivityView(items: shareItems) }
         }
+        .sheet(isPresented: $showVKCallCreator) {
+            VKCallURLCreatorView(
+                onSuccess: { turnURL in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        completeProfileDelivery(turnURL: turnURL)
+                    }
+                },
+                onCancel: { clearPendingProfileDelivery() },
+                onNeedsLogin: {
+                    clearPendingProfileDelivery()
+                    fail("VK Authorization Required", NSError(
+                        domain: "SRTPManagementView",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Saved VK session is missing or expired. Run VK Authorization in Settings -> Extended Features."]
+                    ))
+                }
+            )
+        }
         .alert(alertTitle, isPresented: $showAlert) { Button("OK", role: .cancel) {} } message: { Text(alertMessage) }
     }
 
@@ -103,24 +124,58 @@ struct SRTPManagementView: View {
     }
 
     private func copyProfile(_ client: SRTPAdminClientInfo) {
-        guard let target else { return }
-        do {
-            UIPasteboard.general.string = try SRTPAdminBridge.profileLink(target, client: client)
-            alertTitle = "Profile Copied"
-            alertMessage = "Import the copied VBridge profile and add a VK call link."
-            showAlert = true
-        } catch { fail("Copy Failed", error) }
+        beginProfileDelivery(client, export: false)
     }
 
     private func exportProfile(_ client: SRTPAdminClientInfo) {
-        guard let target else { return }
+        beginProfileDelivery(client, export: true)
+    }
+
+    private func beginProfileDelivery(_ client: SRTPAdminClientInfo, export: Bool) {
+        guard target != nil else { return }
+        guard VKCookieStore.isValid() else {
+            fail("VK Authorization Required", NSError(
+                domain: "SRTPManagementView",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Authorize VK in Settings -> Extended Features before copying or exporting an SRTP profile."]
+            ))
+            return
+        }
+        pendingProfileClient = client
+        pendingProfileExport = export
+        showVKCallCreator = true
+    }
+
+    private func completeProfileDelivery(turnURL: String) {
+        defer { clearPendingProfileDelivery() }
+        let trimmedURL = turnURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty, let target, let client = pendingProfileClient else {
+            fail("Profile Export Failed", NSError(
+                domain: "SRTPManagementView",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "VK returned an empty TURN call URL."]
+            ))
+            return
+        }
         do {
-            let text = try SRTPAdminBridge.profileLink(target, client: client)
-            let safeName = client.label.replacingOccurrences(of: "/", with: "-")
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName.isEmpty ? "srtp-client" : safeName).vbridge")
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            shareItems = [url]
-        } catch { fail("Export Failed", error) }
+            let text = try SRTPAdminBridge.profileLink(target, client: client, turnURL: trimmedURL)
+            if pendingProfileExport {
+                let safeName = client.label.replacingOccurrences(of: "/", with: "-")
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName.isEmpty ? "srtp-client" : safeName).vbridge")
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                shareItems = [url]
+            } else {
+                UIPasteboard.general.string = text
+                alertTitle = "Profile Copied"
+                alertMessage = "The SRTP profile includes its TURN call URL and is ready to import."
+                showAlert = true
+            }
+        } catch { fail(pendingProfileExport ? "Export Failed" : "Copy Failed", error) }
+    }
+
+    private func clearPendingProfileDelivery() {
+        pendingProfileClient = nil
+        pendingProfileExport = false
     }
 
     private func fail(_ title: String, _ error: Error) {
