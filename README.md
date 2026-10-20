@@ -20,6 +20,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.
 * **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`1.X`) and release artifact publishing.
 * **Built-In WDTT Server Management:** Deploy, inspect, and manage a WDTT server directly from the app, including client listing, create/edit/delete actions, cleanup actions, runtime limits, reinstall flows, and server state export.
+  Ordinary WDTT uses the [WDTT server](third_party/wdtt-stable/VBRIDGE.md); WDTT Plus uses a separate source tree with its extended runtime controls.
 * **Client Transfer and Share Flows:** Move a WDTT client separately via transfer code, file export/import, quick link, or QR code, with camera-based QR import and compatibility with modern `wdtt://connect?...` links.
 * **User and Admin Separation:** User-facing VPN connection workflows stay available without server administration, while deploy and server-management tools remain grouped under the admin flow.
 * **Safer WDTT Reinstall and Recovery:** Reinstall, uninstall, update-preserve, backup, export, and import flows are integrated around the migrated WDTT-Plus-style server management model.

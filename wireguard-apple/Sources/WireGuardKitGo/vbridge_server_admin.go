@@ -79,14 +79,29 @@ def entry_status(entry, now):
         return "expired"
     if entry.get("is_deactivated"):
         return "deactivated"
-    if str(entry.get("device_id") or "").strip():
+    if bound_device_ids(entry):
         return "active"
     return "new"
+
+def bound_device_ids(entry):
+    ids = {str(value).strip() for value in (entry.get("device_ids") or []) if str(value).strip()}
+    legacy = str(entry.get("device_id") or "").strip()
+    if legacy and legacy != "multi":
+        ids.add(legacy)
+    return ids
+
+def unbind_devices(db, entry):
+    ids = bound_device_ids(entry)
+    for device_id in ids:
+        db["devices"].pop(device_id, None)
+    entry["device_id"] = ""
+    entry["device_ids"] = []
+    return ids
 
 def build_password_info(password, entry, now):
     return {
         "password": password,
-        "label": str(entry.get("label") or ""),
+        "label": str(entry.get("label") or entry.get("marker") or ""),
         "vk_hash": str(entry.get("vk_hash") or ""),
         "ports": str(entry.get("ports") or DEFAULT_PORTS),
         "status": entry_status(entry, now),
@@ -112,9 +127,7 @@ def cleanup_orphan_devices(db):
     for entry in db["passwords"].values():
         if not isinstance(entry, dict):
             continue
-        device_id = str(entry.get("device_id") or "").strip()
-        if device_id:
-            used.add(device_id)
+        used.update(bound_device_ids(entry))
     devices = db.get("devices") or {}
     if not isinstance(devices, dict):
         devices = {}
@@ -197,26 +210,20 @@ client_password = normalize_password(payload.get("clientPassword"))
 entry = require_entry(db, client_password)
 
 if action == "delete":
-    device_id = str(entry.get("device_id") or "").strip()
-    if device_id:
-        entry["device_id"] = ""
-        if device_id in db["devices"]:
-            db["devices"].pop(device_id, None)
+    unbind_devices(db, entry)
     passwords.pop(client_password, None)
     save_db(db)
     print(json.dumps({"ok": True, "status": "success", "message": "Клиент удалён", "state": {"ok": True, "passwords": sorted_password_rows(passwords, int(time.time()))}}, ensure_ascii=False))
     sys.exit(0)
 
 if action == "unbind":
-    device_id = str(entry.get("device_id") or "").strip()
-    if device_id:
-        entry["device_id"] = ""
-        if device_id in db["devices"]:
-            db["devices"].pop(device_id, None)
+    device_ids = unbind_devices(db, entry)
+    if device_ids:
         history = entry.get("bind_history")
         if not isinstance(history, list):
             history = []
-        history.append({"device_id": device_id, "unbound_at": now, "event_at": now, "status": "unbound"})
+        for device_id in sorted(device_ids):
+            history.append({"device_id": device_id, "unbound_at": now, "event_at": now, "status": "unbound"})
         entry["bind_history"] = history[-50:]
     save_db(db)
     print(json.dumps({"ok": True, "status": "success", "message": "Устройство отвязано", "state": {"ok": True, "passwords": sorted_password_rows(passwords, int(time.time()))}}, ensure_ascii=False))
@@ -303,10 +310,7 @@ if action == "cleanup-expired":
             continue
         expires_at = int(entry.get("expires_at") or 0)
         if expires_at > 0 and expires_at <= now:
-            device_id = str(entry.get("device_id") or "").strip()
-            if device_id:
-                entry["device_id"] = ""
-                db["devices"].pop(device_id, None)
+            unbind_devices(db, entry)
             changed = True
     if changed:
         save_db(db)
@@ -505,14 +509,25 @@ func runStableServerAdmin(sshClient *ssh.Client, req serverAdminRequest) (server
 	if err != nil {
 		return serverAdminResponse{OK: false, Status: "error", Message: "failed to encode stable admin payload: " + err.Error()}, true
 	}
-	command := rootDeployCommand(
-		fmt.Sprintf(
-			`python3 -c %s %s`,
-			shellQuoteDeploy(wdttStableAdminScript),
-			shellQuoteDeploy(base64.StdEncoding.EncodeToString(payloadData)),
-		),
-		req.Password,
+	adminCommand := fmt.Sprintf(
+		`python3 -c %s %s`,
+		shellQuoteDeploy(wdttStableAdminScript),
+		shellQuoteDeploy(base64.StdEncoding.EncodeToString(payloadData)),
 	)
+	// The stable server keeps its database in memory and periodically saves it.
+	// Stop it while editing so changes cannot be overwritten, then restart to
+	// apply passwords and peer removals. Always recover the service on failure.
+	if req.Action != "list" {
+		adminCommand = strings.Join([]string{
+			"set -e",
+			"systemctl stop wdtt",
+			"trap 'systemctl start wdtt >/dev/null 2>&1 || true' EXIT",
+			adminCommand,
+			"systemctl start wdtt >/dev/null",
+			"trap - EXIT",
+		}, "\n")
+	}
+	command := rootDeployCommand(adminCommand, req.Password)
 	stdoutText, stderrText, cmdErr := runSSHCommandSeparated(sshClient, command, 70*time.Second)
 	text := stdoutText
 	if strings.TrimSpace(stderrText) != "" {

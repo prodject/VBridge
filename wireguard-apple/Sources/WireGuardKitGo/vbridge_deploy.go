@@ -719,7 +719,7 @@ func cleanupOrphanDevicesCommand() string {
 		"trap 'systemctl start wdtt >/dev/null 2>&1 || true' EXIT",
 		"cp -p \"$db\" \"$backup\"",
 		"before=$(jq '.devices | length' \"$db\")",
-		"jq '[.passwords[].device_id | select(. != \"\")] as $keep | .devices |= with_entries(select(.key as $id | $keep | index($id)))' \"$db\" > \"${db}.tmp\"",
+		"jq '[.passwords[] | (.device_ids[]?, .device_id) | select(. != null and . != \"\" and . != \"multi\")] as $keep | .devices |= with_entries(select(.key as $id | $keep | index($id)))' \"$db\" > \"${db}.tmp\"",
 		"chown --reference=\"$db\" \"${db}.tmp\" 2>/dev/null || true",
 		"chmod --reference=\"$db\" \"${db}.tmp\" 2>/dev/null || chmod 600 \"${db}.tmp\"",
 		"mv \"${db}.tmp\" \"$db\"",
@@ -848,7 +848,7 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-admin", r.AdminID),
 			deployFlag("-bot-token", r.BotToken),
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
-			deployExistingTunFlag(r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
+			deployExistingTunFlag(r.isWDTTPlus() && r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
 		}, " "))
 		return fmt.Sprintf(
 			"env WDTT_INSTALL_MODE=preserve WDTT_PRESERVE_DATA=1 WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",
@@ -868,7 +868,7 @@ func (r deployRequest) remoteCommand() string {
 			deployFlag("-admin", r.AdminID),
 			deployFlag("-bot-token", r.BotToken),
 			deployFlag("-dns", deployDNSValue(r.DNS1, r.DNS2)),
-			deployExistingTunFlag(r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
+			deployExistingTunFlag(r.isWDTTPlus() && r.WDTTExistingTunEnabled, r.WDTTExistingTunName),
 		}, " "))
 		return fmt.Sprintf(
 			"env WDTT_MAX_PASSWORDS=%d WDTT_MAX_WORKERS_PER_ACCESS=%d WDTT_MAX_HANDSHAKES=%d WDTT_HANDSHAKE_RATE=%d WDTT_MAX_CLIENT_MBPS=%d WDTT_ARGS=%s WDTT_DTLS_PORT=%d WDTT_WG_PORT=%d WDTT_SSH_PORT=%d bash /tmp/vbridge-wdtt-deploy.sh install",

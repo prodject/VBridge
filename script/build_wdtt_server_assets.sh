@@ -5,7 +5,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 assets_dir="$project_root/TurnBridge/DeployAssets"
-stable_server_dir="$project_root/third_party/wdtt-server"
+stable_server_dir="$project_root/third_party/wdtt-stable"
 plus_server_dir="$project_root/third_party/wdtt-server"
 
 GO_BIN=$(command -v go 2>/dev/null || true)

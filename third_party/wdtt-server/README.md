@@ -1,6 +1,6 @@
 # WDTT Server
 
-This directory contains the Linux WDTT server sources imported from:
+This directory contains the Linux WDTT Plus server sources imported from:
 
 - Repository: https://github.com/Ivan4537/WDTT-Plus
 - Branch: `main`
@@ -9,7 +9,9 @@ This directory contains the Linux WDTT server sources imported from:
 
 VBridge builds these sources in GitHub Actions into deploy assets:
 
-- `TurnBridge/DeployAssets/wdtt-server-linux-amd64`
-- `TurnBridge/DeployAssets/wdtt-server-linux-arm64`
+- `TurnBridge/DeployAssets/wdtt-plus-linux-amd64`
+- `TurnBridge/DeployAssets/wdtt-plus-linux-arm64`
+
+The ordinary WDTT deploy assets are built separately from `../wdtt-stable`.
 
 The generated binaries are intentionally not committed.

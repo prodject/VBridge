@@ -39,3 +39,19 @@ func TestWDTTFreshInstallDoesNotEnablePreserveMode(t *testing.T) {
 		t.Fatalf("fresh install unexpectedly enables preserve mode: %s", command)
 	}
 }
+
+func TestWDTTExistingTunIsPlusOnly(t *testing.T) {
+	for _, action := range []string{"install", "update_preserve"} {
+		for _, kind := range []string{"wdtt", "wdtt-plus"} {
+			request := deployRequest{
+				DeployKind: kind, Action: action,
+				DTLSPort: 56000, WGPort: 56001, Port: 22,
+				WDTTExistingTunEnabled: true, WDTTExistingTunName: "tun0",
+			}
+			command := request.remoteCommand()
+			if strings.Contains(command, "-existing-tun") != (kind == "wdtt-plus") {
+				t.Fatalf("%s/%s has incompatible TUN arguments: %s", kind, action, command)
+			}
+		}
+	}
+}
