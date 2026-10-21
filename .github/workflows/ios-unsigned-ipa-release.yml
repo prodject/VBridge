@@ -61,6 +61,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test external client links
+        run: sh script/test_external_client_links.sh
+
       - name: Test WDTT database migration
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s script/tests -p "test_wdtt_database_migration.py" -v
 
@@ -255,6 +258,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Test external client links
+        run: sh script/test_external_client_links.sh
 
       - name: Test WDTT database migration
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s script/tests -p "test_wdtt_database_migration.py" -v

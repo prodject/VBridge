@@ -13,9 +13,17 @@ struct SRTPManagementView: View {
     @State private var alertMessage = ""
     @State private var showAlert = false
     @State private var shareItems: [Any] = []
+    @AppStorage("deploy.srtp.shareVKLinks") private var shareVKLinks = ""
 
     var body: some View {
         Form {
+            Section("Quick Link") {
+                TextField("VK call URL or hash", text: $shareVKLinks, axis: .vertical)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("Included in Quick Link for VK TURN Proxy. Multiple calls can be separated by newlines.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
             Section("Clients") {
                 HStack {
                     Button(loading ? "Refreshing..." : "Refresh") { refresh() }
@@ -36,6 +44,7 @@ struct SRTPManagementView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
                                 Button("Copy Profile") { copyProfile(client) }.buttonStyle(.bordered)
+                                Button("Quick Link") { shareQuickLink(client) }.buttonStyle(.bordered)
                                 Button("Export") { exportProfile(client) }.buttonStyle(.bordered)
                                 Button("Delete", role: .destructive) { delete(client) }.buttonStyle(.bordered)
                             }
@@ -110,6 +119,16 @@ struct SRTPManagementView: View {
             alertMessage = "Import the copied VBridge profile, then add a VK call URL or hash."
             showAlert = true
         } catch { fail("Copy Failed", error) }
+    }
+
+    private func shareQuickLink(_ client: SRTPAdminClientInfo) {
+        guard let target else { return }
+        do {
+            shareItems = [try ExternalClientLinks.srtp(
+                host: target.host, port: target.dtlsPort, config: client.config,
+                calls: shareVKLinks, name: client.label.isEmpty ? "SRTP \(client.address)" : client.label
+            )]
+        } catch { fail("Share Failed", error) }
     }
 
     private func exportProfile(_ client: SRTPAdminClientInfo) {

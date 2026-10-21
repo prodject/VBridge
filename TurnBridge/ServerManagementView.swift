@@ -121,6 +121,14 @@ struct ServerManagementView: View {
                                     }
                                     .buttonStyle(.bordered)
 
+                                    if isWDTTManagement {
+                                        Menu("Other Link") {
+                                            Button("VK TURN Proxy") { shareOtherLink(client, legacy: false) }
+                                            Button("WDTT (classic)") { shareOtherLink(client, legacy: true) }
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+
                                     Button("QR") {
                                         shareClientQR(client)
                                     }
@@ -837,6 +845,22 @@ struct ServerManagementView: View {
             return
         }
         shareItems = [link]
+    }
+
+    private func shareOtherLink(_ client: ServerAdminClientInfo, legacy: Bool) {
+        guard case .wdtt(let server) = target else { return }
+        do {
+            let ports = client.ports?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            shareItems = [try ExternalClientLinks.wdtt(
+                host: server.host, ports: ports.isEmpty ? "56000,56001,9000" : ports,
+                password: client.password, hashes: client.vkHash ?? "",
+                name: client.label ?? "WDTT", legacy: legacy
+            )]
+        } catch {
+            resultTitle = "Share Failed"
+            resultMessage = error.localizedDescription
+            showAlert = true
+        }
     }
 
     private func shareClientQR(_ client: ServerAdminClientInfo) {
