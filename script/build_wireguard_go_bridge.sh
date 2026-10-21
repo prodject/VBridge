@@ -77,7 +77,7 @@ source_hash=$(
     find . \
         \( -path './out' -o -path './.tmp' \) -prune -o \
         -type f \
-        \( -name '*.go' -o -name '*.c' -o -name '*.h' -o -name '*.s' -o -name 'Makefile' -o -name 'go.mod' -o -name 'go.sum' \) \
+        \( -name '*.go' -o -name '*.py' -o -name '*.c' -o -name '*.h' -o -name '*.s' -o -name 'Makefile' -o -name 'go.mod' -o -name 'go.sum' \) \
         -print |
         LC_ALL=C sort |
         while IFS= read -r source_file; do
@@ -96,7 +96,7 @@ if [ -f "$out_dir/libwg-go.a" ] && [ -f "$out_dir/wireguard-go-version.h" ] && [
     if [ "$(cat "$stamp_file")" = "$current_stamp" ]; then
         if ! find "$wireguard_go_dir" \
             -type f \
-            \( -name '*.go' -o -name '*.c' -o -name '*.h' -o -name '*.s' -o -name 'Makefile' -o -name 'go.mod' -o -name 'go.sum' \) \
+            \( -name '*.go' -o -name '*.py' -o -name '*.c' -o -name '*.h' -o -name '*.s' -o -name 'Makefile' -o -name 'go.mod' -o -name 'go.sum' \) \
             -newer "$stamp_file" -print -quit 2>/dev/null | grep -q .; then
             outputs_ready=1
         fi

@@ -61,6 +61,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test WDTT database migration
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s script/tests -p "test_wdtt_database_migration.py" -v
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -72,7 +75,7 @@ jobs:
         with:
           path: |
             wireguard-apple/Sources/WireGuardKitGo/out
-          key: wireguard-go-bridge-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
+          key: wireguard-go-bridge-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.py', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
 
       - name: Show toolchain
         run: |
@@ -251,6 +254,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test WDTT database migration
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s script/tests -p "test_wdtt_database_migration.py" -v
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -261,7 +267,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: wireguard-apple/Sources/WireGuardKitGo/out
-          key: wireguard-go-bridge-macos-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
+          key: wireguard-go-bridge-macos-${{ runner.os }}-${{ hashFiles('wireguard-apple/Sources/WireGuardKitGo/go.mod', 'wireguard-apple/Sources/WireGuardKitGo/go.sum', 'wireguard-apple/Sources/WireGuardKitGo/**/*.go', 'wireguard-apple/Sources/WireGuardKitGo/**/*.py', 'wireguard-apple/Sources/WireGuardKitGo/**/*.c', 'wireguard-apple/Sources/WireGuardKitGo/**/*.h', 'wireguard-apple/Sources/WireGuardKitGo/**/*.s', 'wireguard-apple/Sources/WireGuardKitGo/Makefile') }}
 
       - name: Build WDTT deploy server assets
         run: |

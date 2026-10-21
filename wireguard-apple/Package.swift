@@ -37,6 +37,7 @@ let package = Package(
                 "go.sum",
                 "api-apple.go",
                 "api-xray.go",
+                "wdtt_database_migration.py",
                 "Makefile"
             ],
             publicHeadersPath: ".",

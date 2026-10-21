@@ -533,6 +533,17 @@ func runDeploy(req deployRequest) deployResponse {
 		}
 	}
 
+	if req.isWDTTFamily() && (req.Action == "install" || req.Action == "update_preserve") {
+		migrationText, migrationErr := prepareWDTTDatabase(client, req)
+		appendOutput("prepare WDTT database", migrationText)
+		if migrationErr != nil {
+			return deployResponse{
+				OK: false, Status: "error", Message: "WDTT database migration failed: " + migrationErr.Error(),
+				Output: output.String(), ServerConnected: true,
+			}
+		}
+	}
+
 	command := req.remoteCommand()
 	text, err := runSSHCommand(client, rootDeployCommand(command, req.Password), 15*time.Minute)
 	appendOutput(req.Action, text)
