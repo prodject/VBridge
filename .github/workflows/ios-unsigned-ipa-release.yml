@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          MAJOR_VERSION="2"
+          MAJOR_VERSION="3"
           LATEST_VERSION="$(
             gh release list \
               --repo "$GITHUB_REPOSITORY" \

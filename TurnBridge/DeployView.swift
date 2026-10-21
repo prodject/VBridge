@@ -189,12 +189,27 @@ struct DeployView: View {
     var body: some View {
         Form {
             Section(header: Text("What to Deploy")) {
-                Picker("Server Type", selection: $deployKind) {
-                    ForEach(DeployServerKind.deployOptions) { kind in
-                        Text(kind.title).tag(kind.rawValue)
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: 8) {
+                        ForEach(DeployServerKind.deployOptions) { kind in
+                            Button {
+                                deployKind = kind.rawValue
+                            } label: {
+                                Text(kind.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .foregroundColor(deployKind == kind.rawValue ? .white : .primary)
+                                    .background(deployKind == kind.rawValue ? Color.accentColor : Color.secondary.opacity(0.12))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(deployKind == kind.rawValue ? .isSelected : [])
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
-                .pickerStyle(.segmented)
             }
 
             Section(header: Text("Server")) {

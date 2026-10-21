@@ -18,7 +18,7 @@ The project is based on the repositories listed in the **Acknowledgments** secti
 * **Shortcut Support:** Connect, disconnect, or toggle the VPN from Shortcuts.
 * **Theme Control:** User-selectable app theme (System / Light / Dark).
 * **Modernized UI:** Refreshed iOS-style layout with glass cards and status-focused connect controls.
-* **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`1.X`) and release artifact publishing.
+* **CI/CD Release Automation:** GitHub Actions build pipeline with automatic versioning (`3.X`, starting at `3.1`) and release artifact publishing.
 * **Built-In WDTT Server Management:** Deploy, inspect, and manage a WDTT server directly from the app, including client listing, create/edit/delete actions, cleanup actions, runtime limits, reinstall flows, and server state export.
   Deploy offers **WDTT Simple**, **WDTT**, **WDTT Plus**, and **SRTP**. WDTT Simple uses the [imported simple server](third_party/wdtt-stable/VBRIDGE.md). WDTT restores the implementation used before commit `92c0070`; WDTT and WDTT Plus build from `third_party/wdtt-server`, with separate installers and runtime settings. CSQTT remains supported internally but is hidden from Deploy.
 * **Client Transfer and Share Flows:** Move a WDTT client separately via transfer code, file export/import, quick link, or QR code, with camera-based QR import and compatibility with modern `wdtt://connect?...` links.
