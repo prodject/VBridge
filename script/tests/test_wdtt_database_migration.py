@@ -35,7 +35,7 @@ class MigrationTests(unittest.TestCase):
     def test_plus_to_standard_to_plus_preserves_access_and_keys(self):
         source = self.database()
         source["main_password"] = "owner"
-        standard = migration.adapt_database(source, self.settings("wdtt"))
+        standard = migration.adapt_database(source, self.settings("wdtt-simple"))
         self.assertEqual(standard["passwords"]["client"]["device_ids"], ["phone"])
         self.assertEqual(standard["passwords"]["client"]["max_devices"], 1)
         plus = migration.adapt_database(standard, self.settings())
@@ -56,6 +56,25 @@ class MigrationTests(unittest.TestCase):
         result = migration.adapt_database(source, self.settings())
         self.assertEqual(result["passwords"]["client"]["device_id"], "phone")
         self.assertEqual(result["passwords"]["client"]["label"], "My phone")
+
+    def test_all_three_variants_preserve_single_device_access(self):
+        for origin in ("wdtt-simple", "wdtt", "wdtt-plus"):
+            for target in ("wdtt-simple", "wdtt", "wdtt-plus"):
+                with self.subTest(origin=origin, target=target):
+                    source = migration.adapt_database(self.database(), self.settings(origin))
+                    result = migration.adapt_database(source, self.settings(target))
+                    self.assertEqual(result["main_password"], "owner")
+                    self.assertEqual(result["devices"], source["devices"])
+                    self.assertEqual(result["passwords"]["client"]["device_id"], "phone")
+                    self.assertEqual(result["passwords"]["client"]["expires_at"], 1234)
+                    self.assertEqual(result["passwords"]["client"]["down_bytes"], 17)
+
+    def test_both_extended_variants_reject_multiple_devices(self):
+        source = self.database()
+        source["passwords"]["client"].update(device_id="multi", device_ids=["phone", "tablet"])
+        for target in ("wdtt", "wdtt-plus"):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "multiple bound devices"):
+                migration.adapt_database(source, self.settings(target))
 
     def test_blank_optional_settings_preserve_existing_credentials(self):
         source = self.database()

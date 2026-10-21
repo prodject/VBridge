@@ -69,11 +69,14 @@ private struct DeployResponse: Decodable, Sendable {
 }
 
 private enum WDTTInstallFlavor {
+    case simple
     case stable
     case plus
 
     var buttonTitle: String {
         switch self {
+        case .simple:
+            return "Install WDTT Simple"
         case .stable:
             return "Install WDTT"
         case .plus:
@@ -83,6 +86,8 @@ private enum WDTTInstallFlavor {
 
     var progressTitle: String {
         switch self {
+        case .simple:
+            return "Installing WDTT Simple..."
         case .stable:
             return "Installing WDTT..."
         case .plus:
@@ -92,6 +97,8 @@ private enum WDTTInstallFlavor {
 
     var scriptName: String {
         switch self {
+        case .simple:
+            return "wdtt-simple"
         case .stable:
             return "wdtt"
         case .plus:
@@ -101,6 +108,8 @@ private enum WDTTInstallFlavor {
 
     var binaryPrefix: String {
         switch self {
+        case .simple:
+            return "wdtt-simple"
         case .stable:
             return "wdtt"
         case .plus:
@@ -181,7 +190,7 @@ struct DeployView: View {
         Form {
             Section(header: Text("What to Deploy")) {
                 Picker("Server Type", selection: $deployKind) {
-                    ForEach(DeployServerKind.allCases) { kind in
+                    ForEach(DeployServerKind.deployOptions) { kind in
                         Text(kind.title).tag(kind.rawValue)
                     }
                 }
@@ -392,12 +401,12 @@ struct DeployView: View {
 
                 if isWDTTStable {
                     Button {
-                        runInstall(.stable)
+                        runInstall(ordinaryInstallFlavor)
                     } label: {
                         Label(
-                            isRunning && currentAction == .install && currentInstallFlavor == .stable
-                                ? WDTTInstallFlavor.stable.progressTitle
-                                : WDTTInstallFlavor.stable.buttonTitle,
+                            isRunning && currentAction == .install && currentInstallFlavor == ordinaryInstallFlavor
+                                ? ordinaryInstallFlavor.progressTitle
+                                : ordinaryInstallFlavor.buttonTitle,
                             systemImage: "arrow.down.circle"
                         )
                     }
@@ -584,6 +593,9 @@ struct DeployView: View {
             Text("The app will uninstall \(selectedDeployKind.title) from the server and then install it again using the current Deploy settings.")
         }
         .task {
+            if deployKind == DeployServerKind.csqtt.rawValue {
+                deployKind = DeployServerKind.wdttPlus.rawValue
+            }
             syncVisiblePorts(for: selectedDeployKind)
             await refreshSavedServerStatus()
             consumePendingLaunchActionIfNeeded()
@@ -666,7 +678,11 @@ struct DeployView: View {
     }
 
     private var isWDTTStable: Bool {
-        selectedDeployKind == .wdtt
+        selectedDeployKind == .wdtt || selectedDeployKind == .wdttSimple
+    }
+
+    private var ordinaryInstallFlavor: WDTTInstallFlavor {
+        selectedDeployKind == .wdttSimple ? .simple : .stable
     }
 
     private var isWDTTPlus: Bool {
@@ -732,6 +748,8 @@ struct DeployView: View {
     private var detectedServerKindTitle: String? {
         guard let detectedDeployKind else { return nil }
         switch detectedDeployKind {
+        case DeployServerKind.wdttSimple.rawValue:
+            return DeployServerKind.wdttSimple.title
         case DeployServerKind.wdtt.rawValue:
             return DeployServerKind.wdtt.title
         case DeployServerKind.wdttPlus.rawValue:
@@ -901,7 +919,7 @@ struct DeployView: View {
                 resultMessage = response.message
                 showAlert = true
 
-                let flavorLabel = flavor == .stable ? "WDTT" : "WDTT Plus"
+                let flavorLabel = flavor == .simple ? "WDTT Simple" : (flavor == .stable ? "WDTT" : "WDTT Plus")
                 if response.ok {
                     SharedLogger.info("\(flavorLabel) deploy install completed")
                 } else {
@@ -1123,7 +1141,7 @@ struct DeployView: View {
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.scriptName
             }
-            return isWDTTPlus ? "wdtt-plus" : "wdtt"
+            return isWDTTPlus ? "wdtt-plus" : ordinaryInstallFlavor.scriptName
         }()
         let scriptURL = Bundle.main.url(forResource: scriptName, withExtension: "sh")
         if (action == .install || action == .updatePreserve || action == .uninstall), scriptURL == nil {
@@ -1136,7 +1154,7 @@ struct DeployView: View {
             if action == .install, let wdttInstallFlavor {
                 return wdttInstallFlavor.binaryPrefix
             }
-            return isWDTTPlus ? "wdtt-plus" : "wdtt"
+            return isWDTTPlus ? "wdtt-plus" : ordinaryInstallFlavor.binaryPrefix
         }()
         let binaryName = "\(binaryPrefix)-linux-\(serverArch)"
         let binaryURL = Bundle.main.url(forResource: binaryName, withExtension: nil)
@@ -1239,7 +1257,7 @@ struct DeployView: View {
 
     private func syncVisiblePorts(for kind: DeployServerKind) {
         switch kind {
-        case .wdtt:
+        case .wdttSimple, .wdtt:
             manualPorts = wdttManualPorts
             dtlsPort = wdttDtlsPort
             wgPort = wdttWgPort
@@ -1261,7 +1279,7 @@ struct DeployView: View {
 
     private func persistVisiblePorts(for kind: DeployServerKind) {
         switch kind {
-        case .wdtt:
+        case .wdttSimple, .wdtt:
             wdttManualPorts = manualPorts
             wdttDtlsPort = dtlsPort
             wdttWgPort = wgPort
@@ -1353,7 +1371,7 @@ struct DeployView: View {
 
     private var serverManagementTarget: ServerManagementTarget? {
         switch selectedDeployKind {
-        case .wdtt:
+        case .wdttSimple, .wdtt:
             guard let target = serverAdminTarget else { return nil }
             return .wdtt(target)
         case .wdttPlus:

@@ -5,7 +5,8 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 assets_dir="$project_root/TurnBridge/DeployAssets"
-stable_server_dir="$project_root/third_party/wdtt-stable"
+simple_server_dir="$project_root/third_party/wdtt-stable"
+stable_server_dir="$project_root/third_party/wdtt-server"
 plus_server_dir="$project_root/third_party/wdtt-server"
 
 GO_BIN=$(command -v go 2>/dev/null || true)
@@ -39,6 +40,8 @@ build_one() {
     chmod 0644 "$out"
 }
 
+build_one "$simple_server_dir" "wdtt-simple" amd64
+build_one "$simple_server_dir" "wdtt-simple" arm64
 build_one "$stable_server_dir" "wdtt" amd64
 build_one "$stable_server_dir" "wdtt" arm64
 build_one "$plus_server_dir" "wdtt-plus" amd64

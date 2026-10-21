@@ -112,7 +112,7 @@ func (r deployRequest) isSRTP() bool {
 }
 
 func (r deployRequest) isWDTTStable() bool {
-	return r.DeployKind == "wdtt"
+	return r.DeployKind == "wdtt" || r.DeployKind == "wdtt-simple"
 }
 
 func (r deployRequest) isWDTTPlus() bool {
@@ -132,6 +132,9 @@ func (r deployRequest) deployLabel() string {
 	}
 	if r.isWDTTPlus() {
 		return "WDTT Plus"
+	}
+	if r.DeployKind == "wdtt-simple" {
+		return "WDTT Simple"
 	}
 	return "WDTT"
 }
@@ -1082,6 +1085,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		"if [ -f /etc/systemd/system/wdtt.service ]; then sed -n 's/^ExecStart=//p' /etc/systemd/system/wdtt.service | tail -n 1 | sed 's/^/WDTT_EXECSTART|/'; fi",
 		"if [ -f /etc/wdtt/deploy-kind ]; then tr -d '\\r' </etc/wdtt/deploy-kind | head -n 1 | sed 's/^/WDTT_KIND|/'; fi",
 		"if [ -S /run/wdtt/admin.sock ]; then printf 'WDTT_ADMINSOCK|1\\n'; else printf 'WDTT_ADMINSOCK|0\\n'; fi",
+		"if [ \"$binary_installed\" = \"1\" ]; then help=$(/usr/local/bin/wdtt-server -h 2>&1 || true); if printf '%s' \"$help\" | grep -q -- '-config-dir' && ! printf '%s' \"$help\" | grep -q -- '-max-passwords'; then printf 'WDTT_SIMPLE|1\\n'; fi; fi",
 	}, "; ")
 
 	text, err := runSSHCommand(client, command, 20*time.Second)
@@ -1091,6 +1095,12 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 
 	checks := deployStatusChecks{ServerConnected: true}
 	for _, line := range strings.Split(text, "\n") {
+		if line == "WDTT_SIMPLE|1" {
+			// Older Simple installs used the ordinary WDTT marker. Inspect
+			// supported flags to identify those binaries without starting them.
+			checks.DetectedDeployKind = "wdtt-simple"
+			continue
+		}
 		if strings.HasPrefix(line, "WDTT_VERSION|") {
 			checks.ServerVersion = strings.TrimSpace(strings.TrimPrefix(line, "WDTT_VERSION|"))
 			continue
@@ -1102,7 +1112,7 @@ func checkDeployStatus(client *ssh.Client) (deployStatusChecks, string) {
 		}
 		if strings.HasPrefix(line, "WDTT_KIND|") {
 			kind := strings.TrimSpace(strings.TrimPrefix(line, "WDTT_KIND|"))
-			if kind == "wdtt" || kind == "wdtt-plus" {
+			if kind == "wdtt-simple" || kind == "wdtt" || kind == "wdtt-plus" {
 				checks.DetectedDeployKind = kind
 			}
 			continue

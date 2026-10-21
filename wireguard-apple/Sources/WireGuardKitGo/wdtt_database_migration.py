@@ -13,7 +13,7 @@ import tempfile
 
 
 def adapt_database(original, settings):
-    if settings.get("target") not in ("wdtt", "wdtt-plus"):
+    if settings.get("target") not in ("wdtt-simple", "wdtt", "wdtt-plus"):
         raise ValueError("Unsupported WDTT migration target")
     if not isinstance(original, dict):
         raise ValueError("WDTT database must be a JSON object")
@@ -47,9 +47,9 @@ def adapt_database(original, settings):
             raise ValueError("Missing WDTT device_ids for a multi-device binding")
         if not entry.get("label") and entry.get("marker"):
             entry["label"] = entry["marker"]
-        if settings["target"] == "wdtt-plus":
+        if settings["target"] in ("wdtt", "wdtt-plus"):
             if len(devices) > 1:
-                raise ValueError("Cannot migrate to WDTT Plus: an access password has multiple bound devices. Create separate accesses or unbind extra devices first; database left unchanged")
+                raise ValueError("Cannot migrate to WDTT/WDTT Plus: an access password has multiple bound devices. Create separate accesses or unbind extra devices first; database left unchanged")
             entry["device_id"] = devices[0] if devices else ""
             entry.pop("device_ids", None)
             entry.pop("max_devices", None)

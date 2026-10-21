@@ -5,15 +5,20 @@
 import Foundation
 
 enum DeployServerKind: String, Codable, CaseIterable, Identifiable {
+    case wdttSimple = "wdtt-simple"
     case wdtt
     case wdttPlus = "wdtt-plus"
     case csqtt
     case srtp
 
+    static let deployOptions: [DeployServerKind] = [.wdttSimple, .wdtt, .wdttPlus, .srtp]
+
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .wdttSimple:
+            return "WDTT Simple"
         case .wdtt:
             return "WDTT"
         case .wdttPlus:

@@ -42,7 +42,7 @@ func TestWDTTFreshInstallDoesNotEnablePreserveMode(t *testing.T) {
 
 func TestWDTTExistingTunIsPlusOnly(t *testing.T) {
 	for _, action := range []string{"install", "update_preserve"} {
-		for _, kind := range []string{"wdtt", "wdtt-plus"} {
+		for _, kind := range []string{"wdtt-simple", "wdtt", "wdtt-plus"} {
 			request := deployRequest{
 				DeployKind: kind, Action: action,
 				DTLSPort: 56000, WGPort: 56001, Port: 22,

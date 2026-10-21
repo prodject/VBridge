@@ -96,6 +96,8 @@ jobs:
         run: |
           set -euo pipefail
           ./script/build_wdtt_server_assets.sh
+          test -f TurnBridge/DeployAssets/wdtt-simple-linux-amd64
+          test -f TurnBridge/DeployAssets/wdtt-simple-linux-arm64
           test -f TurnBridge/DeployAssets/wdtt-linux-amd64
           test -f TurnBridge/DeployAssets/wdtt-linux-arm64
           test -f TurnBridge/DeployAssets/wdtt-plus-linux-amd64
