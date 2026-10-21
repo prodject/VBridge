@@ -18,10 +18,10 @@ struct SRTPManagementView: View {
     var body: some View {
         Form {
             Section("Quick Link") {
-                TextField("VK call URL or hash", text: $shareVKLinks, axis: .vertical)
+                TextField("VK call URL or hash (optional)", text: $shareVKLinks, axis: .vertical)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                Text("Included in Quick Link for VK TURN Proxy. Multiple calls can be separated by newlines.")
+                Text("Leave empty to keep the receiving app's existing VK calls. If filled in, these calls replace its current list. Separate multiple calls by newlines.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Clients") {

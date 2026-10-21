@@ -41,10 +41,10 @@ enum ExternalClientLinks {
             throw LinkError.invalid("The client needs a server address, password and three valid ports.")
         }
         let calls = try callLinks(hashes)
-        guard !calls.isEmpty else {
-            throw LinkError.invalid("Set a VK call URL or hash using Edit before creating an Other Link.")
-        }
         if legacy {
+            guard !calls.isEmpty else {
+                throw LinkError.invalid("Classic WDTT links require a VK call URL or hash. Set it using Edit, or choose VK TURN Proxy to keep the receiving app's existing calls.")
+            }
             guard !host.contains(":"), !password.contains(":"),
                   password.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
                 throw LinkError.invalid("Classic WDTT links cannot represent IPv6 addresses or passwords containing colons or whitespace. Choose VK TURN Proxy instead.")
@@ -67,9 +67,6 @@ enum ExternalClientLinks {
             throw LinkError.invalid("Invalid SRTP server address or port.")
         }
         let links = try callLinks(calls)
-        guard !links.isEmpty else {
-            throw LinkError.invalid("Enter a VK call URL or hash in the Quick Link section first.")
-        }
         var section = ""
         var interface: [String: String] = [:]
         var peer: [String: String] = [:]

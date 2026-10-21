@@ -329,6 +329,9 @@ struct ServerManagementView: View {
                             TextField("VK Hash (optional)", text: $newClientHash)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                            Text("Leave empty to keep existing VK calls when importing Other Link → VK TURN Proxy. Classic WDTT links require a call hash.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                         TextField("Ports", text: $newClientPorts)
                             .textInputAutocapitalization(.never)

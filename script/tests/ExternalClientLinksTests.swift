@@ -57,8 +57,13 @@ require(unkeyed["presharedKey"] as? String == "", "An absent PSK must clear a st
 rejects { _ = try ExternalClientLinks.wdtt(host: "2001:db8::1", ports: "56000,56001,9000", password: "secret", hashes: "hash", name: "", legacy: true) }
 rejects { _ = try ExternalClientLinks.wdtt(host: "host", ports: "56000,56001,9000", password: "secret:colon", hashes: "hash", name: "", legacy: true) }
 rejects { _ = try ExternalClientLinks.wdtt(host: "host", ports: "0,56001,9000", password: "secret", hashes: "hash", name: "", legacy: false) }
-rejects { _ = try ExternalClientLinks.wdtt(host: "host", ports: "56000,56001,9000", password: "secret", hashes: "", name: "", legacy: false) }
-rejects { _ = try ExternalClientLinks.srtp(host: "host", port: 57000, config: config, calls: "", name: "") }
+let wdttWithoutCalls = try settings(ExternalClientLinks.wdtt(host: "host", ports: "56000,56001,9000", password: "secret", hashes: "  \n", name: "Client", legacy: false))
+require(wdttWithoutCalls["vkLink"] as? String == "", "An empty WDTT call list must preserve the receiving app's calls")
+require(wdttWithoutCalls["wrapAPassword"] as? String == "secret", "Password lost without calls")
+let srtpWithoutCalls = try settings(ExternalClientLinks.srtp(host: "host", port: 57000, config: config, calls: "", name: "SRTP"))
+require(srtpWithoutCalls["vkLink"] as? String == "", "An empty SRTP call list must preserve the receiving app's calls")
+require(srtpWithoutCalls["privateKey"] as? String == key, "WG key lost without calls")
+rejects { _ = try ExternalClientLinks.wdtt(host: "host", ports: "56000,56001,9000", password: "secret", hashes: "", name: "", legacy: true) }
 rejects { _ = try ExternalClientLinks.srtp(host: "host", port: 57000, config: config + "\n[Peer]\nPublicKey = \(key)", calls: "hash", name: "") }
 rejects { _ = try ExternalClientLinks.srtp(host: "host", port: 57000, config: config.replacingOccurrences(of: key, with: "bad-key"), calls: "hash", name: "") }
 rejects { _ = try ExternalClientLinks.callLinks("https://example.com/call/join/hash") }
