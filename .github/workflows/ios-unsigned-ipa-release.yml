@@ -16,6 +16,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-simple-backups:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: third_party/wdtt-stable/go.sum
+      - name: Test Simple backup API and scheduler
+        working-directory: third_party/wdtt-stable
+        run: go test -race ./...
+      - name: Test database migration and restore
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s script/tests -p "test_wdtt_database_migration.py" -v
+
   prepare-version:
     runs-on: ubuntu-latest
     outputs:
@@ -44,7 +58,7 @@ jobs:
           echo "app_build=$APP_BUILD" >> "$GITHUB_OUTPUT"
 
   build-ios:
-    needs: prepare-version
+    needs: [prepare-version, test-simple-backups]
     runs-on: macos-26
     timeout-minutes: 90
 
@@ -246,7 +260,7 @@ jobs:
           files: ${{ steps.package.outputs.ipa_path }}
 
   build-macos:
-    needs: prepare-version
+    needs: [prepare-version, test-simple-backups]
     runs-on: macos-26
     timeout-minutes: 90
     env:

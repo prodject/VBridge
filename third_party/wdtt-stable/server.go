@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"crypto/cipher"
 	"context"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -15,10 +15,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net"
 	"net/http"
 	neturl "net/url"
-	"mime/multipart"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -71,11 +71,11 @@ type PasswordEntry struct {
 	Label         string   `json:"label,omitempty"`  // понятное имя в боте
 	Marker        string   `json:"marker,omitempty"` // то же самое имя, но под именем поля, которое пишут внешние панели управления — старые ключи хранятся так
 	DeviceID      string   `json:"device_id"`        // Для обратной совместимости, если нужно
-	DeviceIDs     []string `json:"device_ids"`  // Список привязанных deviceID
-	MaxDevices    int      `json:"max_devices"` // Максимальное кол-во устройств (0 или 1 = 1 устройство)
-	ExpiresAt     int64    `json:"expires_at"`  // unix timestamp
-	DownBytes     int64    `json:"down_bytes"`  // скачано клиентом
-	UpBytes       int64    `json:"up_bytes"`    // отдано клиентом
+	DeviceIDs     []string `json:"device_ids"`       // Список привязанных deviceID
+	MaxDevices    int      `json:"max_devices"`      // Максимальное кол-во устройств (0 или 1 = 1 устройство)
+	ExpiresAt     int64    `json:"expires_at"`       // unix timestamp
+	DownBytes     int64    `json:"down_bytes"`       // скачано клиентом
+	UpBytes       int64    `json:"up_bytes"`         // отдано клиентом
 	VkHash        string   `json:"vk_hash,omitempty"`
 	Ports         string   `json:"ports,omitempty"` // "dtls,wg,tun"
 	IsDeactivated bool     `json:"is_deactivated,omitempty"`
@@ -141,10 +141,10 @@ type Database struct {
 }
 
 var (
-	db           *Database
-	dbMutex      sync.Mutex
-	dbFile       string
-	globalWgDev  *device.Device
+	db          *Database
+	dbMutex     sync.Mutex
+	dbFile      string
+	globalWgDev *device.Device
 )
 
 var serverWrapKeys = newWrapKeyStore()
@@ -439,8 +439,13 @@ func initDB(dir, mainPass, adminID, botToken string) {
 }
 
 func saveDB() {
-	data, _ := json.MarshalIndent(db, "", "  ")
-	os.WriteFile(dbFile, data, 0600)
+	data, err := json.MarshalIndent(db, "", "  ")
+	if err == nil {
+		err = writeSyncedFileAtomically(dbFile, data, 0600)
+	}
+	if err != nil {
+		log.Printf("[DB] Не удалось сохранить базу: %v", err)
+	}
 }
 
 func isPasswordExpired(entry *PasswordEntry) bool {
@@ -863,7 +868,7 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 
 				tempDays = days
 				tempMaxDevs = maxDevs
-				
+
 				var keyboard [][]map[string]interface{}
 				keyboard = append(keyboard, []map[string]interface{}{
 					{"text": "Да", "callback_data": "ports_def"},
@@ -882,7 +887,7 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 				p1 := strings.TrimSpace(parts[0])
 				p2 := strings.TrimSpace(parts[1])
 				p3 := strings.TrimSpace(parts[2])
-				
+
 				if _, err := strconv.Atoi(p1); err != nil {
 					sendTelegram(token, adminID, "❌ Неверный порт. Повторите ввод:", nil)
 					continue
@@ -895,7 +900,7 @@ func botLoop(token string, adminIDstr string, wgDev *device.Device) {
 					sendTelegram(token, adminID, "❌ Неверный порт. Повторите ввод:", nil)
 					continue
 				}
-				
+
 				waitingForPorts = false
 				tempPorts = fmt.Sprintf("%s,%s,%s", p1, p2, p3)
 				waitingForHash = true
@@ -1915,6 +1920,7 @@ func handleAPIProfileUnbind(w http.ResponseWriter, r *http.Request) {
 // ==================== Main ====================
 
 func main() {
+	version := flag.Bool("version", false, "print server version")
 	listen := flag.String("listen", "0.0.0.0:56000", "DTLS адрес")
 	wgPort := flag.Int("wg-port", defaultInternalWGPort, "WireGuard UDP порт")
 	configDir := flag.String("config-dir", "/etc/wdtt", "директория конфигурации")
@@ -1923,6 +1929,10 @@ func main() {
 	botToken := flag.String("bot-token", "", "Telegram Bot Token")
 	dnsFlag := flag.String("dns", "8.8.8.8", "DNS серверы для клиентов")
 	flag.Parse()
+	if *version {
+		fmt.Println(wdttServerVersion)
+		return
+	}
 	dns = *dnsFlag
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
@@ -1971,6 +1981,10 @@ func main() {
 		log.Fatalf("[WG] Запуск: %v", err)
 	}
 	globalWgDev = wgDev
+	if err := startSimpleBackupAdmin(ctx, *configDir, "/run/wdtt/simple-backup.sock"); err != nil {
+		log.Fatalf("[BACKUP] %v", err)
+	}
+	startServerBackupScheduler(ctx, *configDir)
 	if removed := cleanupExpiredPasswords(wgDev); removed > 0 {
 		log.Printf("[DB] Удалено истёкших паролей при старте: %d", removed)
 	}
@@ -2301,6 +2315,7 @@ type ObfsConfig struct {
 	PayloadType uint8
 	PaddingMax  int
 }
+
 var aeadCache sync.Map
 
 func getAEAD(key []byte) (cipher.AEAD, error) {

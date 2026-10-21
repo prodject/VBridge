@@ -14,8 +14,13 @@ import (
 var wdttDatabaseMigration string
 
 func prepareWDTTDatabase(client *ssh.Client, req deployRequest) (string, error) {
+	return runWDTTDatabaseAction(client, req, "")
+}
+
+func runWDTTDatabaseAction(client *ssh.Client, req deployRequest, archive string) (string, error) {
 	payload, err := json.Marshal(map[string]string{
 		"target":        req.DeployKind,
+		"archive":       archive,
 		"main_password": req.MainPassword,
 		"admin_id":      req.AdminID,
 		"bot_token":     req.BotToken,

@@ -436,6 +436,10 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 	if stableResp, handled := runStableServerAdmin(client, req); handled {
 		return stableResp
 	}
+	return runServerAdminSocket(client, req, args, "/run/wdtt/admin.sock")
+}
+
+func runServerAdminSocket(client *ssh.Client, req serverAdminRequest, args []string, socketPath string) serverAdminResponse {
 	socketRequest, err := json.Marshal(map[string]any{
 		"main_password": req.MainPassword,
 		"args":          args,
@@ -448,7 +452,7 @@ func runServerAdmin(req serverAdminRequest) serverAdminResponse {
 		shellQuoteDeploy(fmt.Sprintf(`import base64, socket, sys
 payload = base64.b64decode(%q)
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.settimeout(15)
+sock.settimeout(60)
 sock.connect(%q)
 sock.sendall(payload)
 sock.shutdown(socket.SHUT_WR)
@@ -459,7 +463,7 @@ while True:
         break
     chunks.append(chunk)
 sys.stdout.buffer.write(b"".join(chunks))
-`, socketPayload, "/run/wdtt/admin.sock"))), req.Password)
+`, socketPayload, socketPath))), req.Password)
 	stdoutText, stderrText, cmdErr := runSSHCommandSeparated(client, command, 70*time.Second)
 	text := stdoutText
 	if strings.TrimSpace(stderrText) != "" {
@@ -503,7 +507,11 @@ func runStableServerAdmin(sshClient *ssh.Client, req serverAdminRequest) (server
 		return serverAdminResponse{}, false
 	}
 	if strings.HasPrefix(req.Action, "backup-") {
-		return serverAdminResponse{OK: false, Status: "error", Message: "server backup management requires the current WDTT server"}, true
+		args, err := req.adminArgs()
+		if err != nil {
+			return serverAdminResponse{OK: false, Status: "error", Message: err.Error()}, true
+		}
+		return runServerAdminSocket(sshClient, req, args, "/run/wdtt/simple-backup.sock"), true
 	}
 	payloadData, err := json.Marshal(req)
 	if err != nil {

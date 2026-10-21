@@ -432,7 +432,22 @@ func runDeploy(req deployRequest) deployResponse {
 			}
 		}
 
-		importText, commandErr := importDeployState(client, req.Password, archiveText)
+		// Restore for the installed implementation, even if another variant
+		// is currently selected in Deploy. Keep credentials used by its unit.
+		restoreReq := req
+		if checks.DetectedDeployKind != "" {
+			restoreReq.DeployKind = checks.DetectedDeployKind
+		}
+		if checks.MainPassword != "" {
+			restoreReq.MainPassword = checks.MainPassword
+		}
+		if checks.AdminID != "" {
+			restoreReq.AdminID = checks.AdminID
+		}
+		if checks.BotToken != "" {
+			restoreReq.BotToken = checks.BotToken
+		}
+		importText, commandErr := importDeployState(client, restoreReq, archiveText)
 		appendOutput("import state", importText)
 		checks, checkText := checkDeployStatus(client)
 		appendOutput("status", checkText)
@@ -913,36 +928,8 @@ func exportDeployState(client *ssh.Client, password string) (string, error) {
 	return runSSHCommand(client, rootDeployCommand(command, password), 45*time.Second)
 }
 
-func importDeployState(client *ssh.Client, password, archiveText string) (string, error) {
-	if err := uploadDeployContent(client, []byte(archiveText), "/tmp/vbridge-wdtt-state.json", 0o600); err != nil {
-		return "", err
-	}
-	pythonScript := strings.Join([]string{
-		"import base64, json, pathlib",
-		"archive = pathlib.Path('/tmp/vbridge-wdtt-state.json')",
-		"data = json.loads(archive.read_text())",
-		"if data.get('format') != 'wdtt-plus-state': raise SystemExit('invalid format')",
-		"db_bytes = base64.b64decode(data.get('passwordsJson', ''))",
-		"if not db_bytes: raise SystemExit('empty passwordsJson')",
-		"pathlib.Path('/etc/wdtt').mkdir(parents=True, exist_ok=True)",
-		"pathlib.Path('/etc/wdtt/passwords.json').write_bytes(db_bytes)",
-		"wg_data = data.get('wgKeysData', '')",
-		"wg_path = pathlib.Path('/etc/wdtt/wg-keys.dat')",
-		"wg_path.write_bytes(base64.b64decode(wg_data)) if wg_data else (wg_path.unlink() if wg_path.exists() else None)",
-	}, "; ")
-	command := strings.Join([]string{
-		"set -euo pipefail",
-		"db=/etc/wdtt/passwords.json",
-		"keys=/etc/wdtt/wg-keys.dat",
-		"archive=/tmp/vbridge-wdtt-state.json",
-		"python3 -c " + shellQuoteDeploy(pythonScript),
-		"chmod 600 \"$db\"",
-		"[ -f \"$keys\" ] && chmod 600 \"$keys\" || true",
-		"systemctl restart wdtt >/dev/null 2>&1 || true",
-		"rm -f \"$archive\"",
-		"echo 'Server state imported into /etc/wdtt'",
-	}, "; ")
-	return runSSHCommand(client, rootDeployCommand(command, password), 2*time.Minute)
+func importDeployState(client *ssh.Client, req deployRequest, archiveText string) (string, error) {
+	return runWDTTDatabaseAction(client, req, archiveText)
 }
 
 func uploadDeployContent(client *ssh.Client, data []byte, remotePath string, mode os.FileMode) error {

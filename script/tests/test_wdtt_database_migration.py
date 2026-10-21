@@ -1,4 +1,6 @@
 import copy
+import base64
+import hashlib
 import importlib.util
 import io
 import json
@@ -152,6 +154,84 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(run.call_args_list[0].args[0], ["systemctl", "is-active", "--quiet", "wdtt"])
             self.assertEqual(run.call_args_list[1].args[0], ["systemctl", "stop", "wdtt"])
             self.assertEqual(run.call_args_list[-1].args[0], ["systemctl", "start", "wdtt"])
+
+
+class RestoreTests(unittest.TestCase):
+    def settings(self, target="wdtt-simple"):
+        return {"target": target, "main_password": "current-owner"}
+
+    def archive(self):
+        database = {"main_password": "archived-owner", "passwords": {"client": {"device_id": "phone"}}, "devices": {"phone": {"priv_key": "client-key"}}}
+        key = base64.b64encode(bytes(32)).decode()
+        files = {"passwords.json": json.dumps(database).encode(), "wg-keys.dat": ((key + "\n") * 4).encode(),
+                 "backup-policy.json": json.dumps({"enabled": True, "interval_hours": 12, "retention_count": 3}).encode()}
+        return {"format": "wdtt-server-snapshot", "version": 3, "files": [
+            {"path": name, "mode": 0o600, "size": len(raw), "data_b64": base64.b64encode(raw).decode(),
+             "sha256": hashlib.sha256(raw).hexdigest()} for name, raw in files.items()]}
+
+    def test_snapshot_restore_adapts_to_simple(self):
+        files = migration.decode_restore_archive(json.dumps(self.archive()), self.settings())
+        database = json.loads(files["passwords.json"])
+        self.assertEqual(database["main_password"], "current-owner")
+        self.assertEqual(database["passwords"]["client"]["device_ids"], ["phone"])
+        self.assertEqual(database["devices"]["phone"]["priv_key"], "client-key")
+
+    def test_snapshot_checksum_and_unsafe_paths_are_rejected(self):
+        for field, value in (("path", "../passwords.json"), ("sha256", "bad"), ("size", 1), ("mode", 0o644)):
+            archive = self.archive()
+            archive["files"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                migration.decode_restore_archive(json.dumps(archive), self.settings())
+
+    def test_legacy_state_restore_remains_supported(self):
+        entries = {f["path"]: f["data_b64"] for f in self.archive()["files"]}
+        archive = {"format": "wdtt-plus-state", "version": 1, "passwordsJson": entries["passwords.json"], "wgKeysData": entries["wg-keys.dat"]}
+        files = migration.decode_restore_archive(json.dumps(archive), self.settings())
+        self.assertEqual(set(files), {"passwords.json", "wg-keys.dat"})
+
+    def test_simple_multi_device_restore_to_plus_is_rejected(self):
+        archive = self.archive()
+        entry = archive["files"][0]
+        database = json.loads(base64.b64decode(entry["data_b64"]))
+        database["passwords"]["client"].update(device_id="multi", device_ids=["phone", "tablet"])
+        raw = json.dumps(database).encode()
+        entry.update(data_b64=base64.b64encode(raw).decode(), size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+        with self.assertRaisesRegex(ValueError, "multiple bound devices"):
+            migration.decode_restore_archive(json.dumps(archive), self.settings("wdtt-plus"))
+
+    def test_restore_installs_database_keys_policy_and_keeps_previous_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "wdtt"
+            directory.mkdir()
+            (directory / "passwords.json").write_bytes(b"old database")
+            (directory / "wg-keys.dat").write_bytes(b"old keys")
+            files = migration.decode_restore_archive(json.dumps(self.archive()), self.settings())
+            restarted = []
+            backup = migration.restore_files(files, directory, root / "backups", root / "policy", lambda: restarted.append(True))
+            self.assertEqual(restarted, [True])
+            self.assertEqual((directory / "passwords.json").read_bytes(), files["passwords.json"])
+            self.assertEqual((directory / "wg-keys.dat").read_bytes(), files["wg-keys.dat"])
+            self.assertEqual((root / "policy/backup-policy.json").read_bytes(), files["backup-policy.json"])
+            self.assertEqual((backup / "passwords.json").read_bytes(), b"old database")
+            self.assertEqual((backup / "wg-keys.dat").read_bytes(), b"old keys")
+            self.assertEqual(stat.S_IMODE((directory / "passwords.json").stat().st_mode), 0o600)
+
+    def test_failed_restart_rolls_back_database_keys_and_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "wdtt"
+            directory.mkdir()
+            for name in ("passwords.json", "wg-keys.dat"):
+                (directory / name).write_bytes(("old " + name).encode())
+            files = migration.decode_restore_archive(json.dumps(self.archive()), self.settings())
+            def fail():
+                raise ValueError("restart failed")
+            with patch.object(migration.subprocess, "run"), self.assertRaisesRegex(ValueError, "restart failed"):
+                migration.restore_files(files, directory, root / "backups", root / "policy", fail)
+            for name in ("passwords.json", "wg-keys.dat"):
+                self.assertEqual((directory / name).read_bytes(), ("old " + name).encode())
+            self.assertFalse((root / "policy/backup-policy.json").exists())
 
 
 if __name__ == "__main__":
