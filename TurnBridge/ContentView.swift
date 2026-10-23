@@ -612,7 +612,7 @@ struct ContentView: View {
 #else
                 if isPreparingTunnelStart,
                    vpnStatus == .connecting,
-                   status == .disconnected {
+                   status == .disconnected || status == .invalid {
                     SharedLogger.debug("Ignoring disconnected manager status during WDTT pre-bootstrap")
                     return
                 }
@@ -1575,9 +1575,8 @@ struct ContentView: View {
                 let currentStatus = self.tunnelManagerStore.status
                 if self.isPreparingTunnelStart,
                    self.vpnStatus == .connecting,
-                   currentStatus == .disconnected {
+                   currentStatus == .disconnected || currentStatus == .invalid {
                     SharedLogger.debug("Ignoring disconnected manager status while preparing tunnel startup")
-                    self.reconcileLiveActivityIfNeeded(for: currentStatus)
                     return
                 }
                 let selectedProfileName = self.store.selectedProfile?.name ?? "VBridge"
@@ -1624,6 +1623,13 @@ struct ContentView: View {
 #if !targetEnvironment(macCatalyst)
         guard #available(iOS 16.1, *) else { return }
         guard status == .disconnected || status == .invalid else { return }
+        // The saved manager can still report the previous disconnected session
+        // while TURN bootstrap and startVPNTunnel are being prepared.
+        if !isUserInitiatedDisconnect, vpnStatus == .connecting {
+            if isPreparingTunnelStart { return }
+            if let connectionStartedAt,
+               Date().timeIntervalSince(connectionStartedAt) < tunnelStartStatusGraceInterval { return }
+        }
 
         guard let snapshot = VBridgeLiveActivityStore.load(),
               snapshot.content.phase.isActiveSession || snapshot.content.phase == .unknown else {
@@ -1641,7 +1647,7 @@ struct ContentView: View {
         let previousStatus = vpnStatus
         guard previousStatus != newStatus else { return }
 
-        if newStatus == .disconnected,
+        if newStatus == .disconnected || newStatus == .invalid,
            previousStatus == .connecting,
            !isUserInitiatedDisconnect,
            let connectionStartedAt {
@@ -2261,18 +2267,17 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
     private func beginLiveActivity(for profile: VPNProfile, targetWorkers: Int) {
         guard #available(iOS 16.1, *) else { return }
-        Task { @MainActor in
-            VBridgeLiveActivityCoordinator.shared.sync(
-                profileName: profile.name,
-                phase: .connecting,
-                activeConnections: 0,
-                totalConnections: targetWorkers,
-                relayIP: nil,
-                estimatedRemainingSeconds: nil
-            )
-        }
+        VBridgeLiveActivityCoordinator.shared.sync(
+            profileName: profile.name,
+            phase: .connecting,
+            activeConnections: 0,
+            totalConnections: targetWorkers,
+            relayIP: nil,
+            estimatedRemainingSeconds: nil
+        )
     }
 
     private func resetSpeedTelemetry() {
@@ -2366,6 +2371,7 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
     private func syncLiveActivityState(
         profileName: String,
         phase: VBridgeLiveActivityPhase,
@@ -2380,21 +2386,19 @@ struct ContentView: View {
         pingSamples: [VBridgePingSample]? = nil
     ) {
         guard #available(iOS 16.1, *) else { return }
-        Task { @MainActor in
-            VBridgeLiveActivityCoordinator.shared.sync(
-                profileName: profileName,
-                phase: phase,
-                activeConnections: activeConnections,
-                totalConnections: totalConnections,
-                relayIP: relayIP,
-                estimatedRemainingSeconds: estimatedRemainingSeconds,
-                downloadSpeedMbps: downloadSpeedMbps,
-                uploadSpeedMbps: uploadSpeedMbps,
-                ispName: ispName,
-                ipAddress: ipAddress,
-                pingSamples: pingSamples
-            )
-        }
+        VBridgeLiveActivityCoordinator.shared.sync(
+            profileName: profileName,
+            phase: phase,
+            activeConnections: activeConnections,
+            totalConnections: totalConnections,
+            relayIP: relayIP,
+            estimatedRemainingSeconds: estimatedRemainingSeconds,
+            downloadSpeedMbps: downloadSpeedMbps,
+            uploadSpeedMbps: uploadSpeedMbps,
+            ispName: ispName,
+            ipAddress: ipAddress,
+            pingSamples: pingSamples
+        )
     }
 
     private func syncLiveActivityState(for status: NEVPNStatus) {
@@ -2426,17 +2430,16 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
     private func endLiveActivity(profileName: String? = nil, immediate: Bool) {
         guard #available(iOS 16.1, *) else { return }
         let resolvedProfileName = profileName ?? store.selectedProfile?.name ?? "VBridge"
         resetSpeedTelemetry()
-        Task { @MainActor in
-            VBridgeLiveActivityCoordinator.shared.end(
-                profileName: resolvedProfileName,
-                finalPhase: .disconnected,
-                immediate: immediate
-            )
-        }
+        VBridgeLiveActivityCoordinator.shared.end(
+            profileName: resolvedProfileName,
+            finalPhase: .disconnected,
+            immediate: immediate
+        )
     }
 
     private func cancelSpeedTest() {

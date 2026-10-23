@@ -156,7 +156,9 @@ The Live Activity shows the profile, connection status, session timer, and relay
 details. On iOS 17 or later, its **Bypass VPN Tunnel / Use VPN Tunnel** and
 **Disconnect** buttons work without opening the app. Bypass state changes after
 the tunnel extension confirms the routing change. If the app stops refreshing the
-activity, it shows **Last known** and hides the timer until refreshed.
+activity, it keeps the last reported connection count, dims the status, shows
+**Last update** separately, and hides the session timer until refreshed.
+The compact **Reconnect** button opens VBridge and restarts the selected profile.
 
 VBridge includes two widget sizes:
 

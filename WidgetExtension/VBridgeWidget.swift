@@ -1042,6 +1042,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(status(context))
                             .font(.headline)
+                            .foregroundStyle(context.isStale ? .gray : .white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                         Text(context.attributes.profileName)
@@ -1050,6 +1051,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
+                    .layoutPriority(1)
                     Spacer(minLength: 8)
                     clock(context)
                         .font(.subheadline.monospacedDigit())
@@ -1058,6 +1060,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                         .minimumScaleFactor(0.7)
                         .frame(maxWidth: 110, alignment: .trailing)
                 }
+                if context.isStale { freshnessRow(context) }
                 if context.state.phase == .connecting {
                     ProgressView(value: context.state.progressFraction)
                         .tint(accent(context))
@@ -1092,6 +1095,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                         shield(context)
                         Text(status(context))
                             .font(.subheadline.weight(.medium))
+                            .foregroundStyle(context.isStale ? .gray : .white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                     }
@@ -1111,6 +1115,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if context.isStale { freshnessRow(context) }
                         if context.state.phase == .connecting {
                             ProgressView(value: context.state.progressFraction).tint(accent(context))
                         }
@@ -1121,14 +1126,17 @@ private struct VBridgeLiveActivityWidget: Widget {
                 shield(context)
             } compactTrailing: {
                 // Avoid an unbounded live timer widening the compact island.
-                if context.isStale {
-                    Text("?").font(.caption2).foregroundStyle(.secondary)
-                } else if context.state.bypassEnabled == true {
+                if context.state.bypassEnabled == true {
                     Image(systemName: "arrow.triangle.branch").foregroundStyle(.orange)
                 } else {
-                    Text(String(context.state.activeConnections ?? 0))
+                    // Staleness means the app stopped publishing, not that the
+                    // tunnel lost its workers. Keep the last reported count.
+                    Text(context.state.activeConnections.map { String($0) } ?? "—")
                         .font(.caption2.monospacedDigit())
-                        .frame(maxWidth: 30)
+                        .foregroundStyle(context.isStale ? .gray : .white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: 36)
                 }
             } minimal: {
                 shield(context)
@@ -1139,10 +1147,10 @@ private struct VBridgeLiveActivityWidget: Widget {
 
     @available(iOS 17.0, *)
     private func controls(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Button(intent: DisconnectVBridgeLiveActivityIntent()) {
                 Label("Disconnect", systemImage: "power")
-                    .font(.caption)
+                    .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .frame(maxWidth: .infinity)
@@ -1151,10 +1159,21 @@ private struct VBridgeLiveActivityWidget: Widget {
             .tint(.red)
             .disabled(context.state.phase == .disconnecting)
 
+            Button(intent: ReconnectVBridgeWidgetIntent()) {
+                Label("Reconnect", systemImage: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.blue)
+            .disabled(context.state.phase == .disconnecting)
+
             Button(intent: SetBypassTunnelIntent(enabled: context.state.bypassEnabled != true)) {
-                Label(context.state.bypassEnabled == true ? "Use VPN Tunnel" : "Bypass VPN Tunnel",
+                Label(context.state.bypassEnabled == true ? "Use VPN" : "Bypass",
                       systemImage: context.state.bypassEnabled == true ? "lock.shield" : "arrow.triangle.branch")
-                    .font(.caption)
+                    .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity)
@@ -1162,13 +1181,31 @@ private struct VBridgeLiveActivityWidget: Widget {
             .buttonStyle(.bordered)
             .tint(context.state.bypassEnabled == true ? .orange : .green)
             .disabled(context.state.phase != .connected)
+            .accessibilityLabel(context.state.bypassEnabled == true ? "Use VPN Tunnel" : "Bypass VPN Tunnel")
         }
+        .controlSize(.mini)
+        .buttonBorderShape(.capsule)
     }
 
     private func status(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> String {
-        let label = context.state.bypassEnabled == true && context.state.phase == .connected
+        // The leading island region is too narrow for a freshness qualifier.
+        // Show that separately in the full-width bottom region.
+        return context.state.bypassEnabled == true && context.state.phase == .connected
             ? "Bypass active" : context.state.phase.displayTitle
-        return context.isStale ? "Last known: " + label : label
+    }
+
+    private func freshnessRow(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> some View {
+        HStack(spacing: 4) {
+            Label("Last update", systemImage: "clock")
+            Spacer(minLength: 4)
+            Text(context.state.updatedAt, style: .relative)
+                .monospacedDigit()
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .accessibilityLabel("Connection status has not been refreshed")
     }
 
     private func accent(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> Color {
@@ -1189,10 +1226,9 @@ private struct VBridgeLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func clock(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> some View {
-        if context.isStale { Text("?") }
-        else if context.state.phase == .connected, let since = context.state.connectedSince {
+        if !context.isStale, context.state.phase == .connected, let since = context.state.connectedSince {
             Text(since, style: .timer)
-        } else { Text("—") }
+        } else if !context.isStale { Text("—") }
     }
 }
 

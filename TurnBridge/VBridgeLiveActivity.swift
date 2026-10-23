@@ -416,6 +416,7 @@ final class VBridgeLiveActivityCoordinator {
     static let shared = VBridgeLiveActivityCoordinator()
 
     private var activity: Activity<VBridgeVPNLiveActivityAttributes>?
+    private var revision = 0
 
     private init() {
         activity = Activity<VBridgeVPNLiveActivityAttributes>.activities.first
@@ -434,6 +435,10 @@ final class VBridgeLiveActivityCoordinator {
         ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil
     ) {
+        if phase == .disconnected {
+            end(profileName: profileName)
+            return
+        }
         let updatedAt = Date()
         var content = VBridgeVPNLiveActivityAttributes.ContentState(
             phase: phase,
@@ -499,8 +504,38 @@ final class VBridgeLiveActivityCoordinator {
             return
         }
 
+        // Activity.request must happen before the app leaves the foreground.
+        // Do not defer creation to a Task after asynchronous VPN bootstrap.
+        let published = VBridgeLiveActivityStore.load() ?? snapshot
+        revision += 1
+        let currentRevision = revision
+        if let current = activity,
+           current.activityState == .ended || current.activityState == .dismissed {
+            activity = nil
+        }
+        if activity?.attributes.profileName != profileName {
+            let previous = activity
+            activity = Activity<VBridgeVPNLiveActivityAttributes>.activities.first {
+                $0.attributes.profileName == profileName && ($0.activityState == .active || $0.activityState == .stale)
+            }
+            if let previous, previous.id != activity?.id {
+                Task { await previous.end(nil, dismissalPolicy: .immediate) }
+            }
+        }
+        if activity == nil, phase == .connecting || phase == .connected {
+            do {
+                activity = try Activity.request(
+                    attributes: VBridgeVPNLiveActivityAttributes(profileName: profileName),
+                    content: ActivityContent(state: published.content, staleDate: Date().addingTimeInterval(120)),
+                    pushType: nil
+                )
+            } catch {
+                NSLog("Failed to start Live Activity: \(error.localizedDescription)")
+            }
+        }
         Task { @MainActor in
-            await self.apply(snapshot: VBridgeLiveActivityStore.load() ?? snapshot)
+            guard self.revision == currentRevision else { return }
+            await self.apply(snapshot: published)
         }
     }
 
@@ -509,6 +544,7 @@ final class VBridgeLiveActivityCoordinator {
         finalPhase: VBridgeLiveActivityPhase = .disconnected,
         immediate: Bool = true
     ) {
+        revision += 1
         let updatedAt = Date()
         let snapshot = VBridgeLiveActivitySnapshot(
             profileName: profileName,
@@ -528,12 +564,14 @@ final class VBridgeLiveActivityCoordinator {
         )
         VBridgeLiveActivityStore.save(snapshot)
 
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            return
+        // Capture the old session now so a delayed end cannot remove a newly
+        // created activity for the same profile after a reconnect.
+        let activities = Activity<VBridgeVPNLiveActivityAttributes>.activities.filter {
+            $0.attributes.profileName == profileName
         }
-
+        if activity?.attributes.profileName == profileName { activity = nil }
         Task { @MainActor in
-            await self.endActivity(snapshot: snapshot, immediate: immediate)
+            await self.endActivity(snapshot: snapshot, immediate: immediate, activities: activities)
         }
     }
 
@@ -546,32 +584,15 @@ final class VBridgeLiveActivityCoordinator {
 
         if let currentActivity = activity, currentActivity.attributes.profileName == snapshot.profileName {
             await currentActivity.update(content)
-            if snapshot.content.phase == .disconnected {
-                await currentActivity.end(content, dismissalPolicy: .immediate)
-                activity = nil
-            }
             return
         }
 
-        if snapshot.content.phase == .disconnected {
-            activity = nil
-            return
-        }
-
-        do {
-            let requested = try Activity.request(
-                attributes: VBridgeVPNLiveActivityAttributes(profileName: snapshot.profileName),
-                content: content,
-                pushType: nil
-            )
-            activity = requested
-        } catch {
-            activity = nil
-            NSLog("Failed to start Live Activity: \(error.localizedDescription)")
-        }
+        // Creation is synchronous in sync(); an outdated update must never
+        // create another activity after end() has already run.
     }
 
-    private func endActivity(snapshot: VBridgeLiveActivitySnapshot, immediate: Bool) async {
+    private func endActivity(snapshot: VBridgeLiveActivitySnapshot, immediate: Bool,
+                             activities: [Activity<VBridgeVPNLiveActivityAttributes>]) async {
         let content = ActivityContent(
             state: snapshot.content,
             staleDate: nil,
@@ -579,18 +600,9 @@ final class VBridgeLiveActivityCoordinator {
         )
         let dismissalPolicy: ActivityUIDismissalPolicy = immediate ? .immediate : .default
 
-        if let currentActivity = activity, currentActivity.attributes.profileName == snapshot.profileName {
-            await currentActivity.end(content, dismissalPolicy: dismissalPolicy)
-            activity = nil
-            return
+        for ongoingActivity in activities {
+            await ongoingActivity.end(content, dismissalPolicy: dismissalPolicy)
         }
-
-        for ongoingActivity in Activity<VBridgeVPNLiveActivityAttributes>.activities {
-            if ongoingActivity.attributes.profileName == snapshot.profileName {
-                await ongoingActivity.end(content, dismissalPolicy: dismissalPolicy)
-            }
-        }
-        activity = nil
     }
 }
 #else
