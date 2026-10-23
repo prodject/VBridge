@@ -1081,6 +1081,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
+                if context.state.phase == .connected { networkDetails(context.state) }
                 if #available(iOS 17.0, *) { controls(context) }
             }
             .padding(.horizontal, 16)
@@ -1119,6 +1120,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                         if context.state.phase == .connecting {
                             ProgressView(value: context.state.progressFraction).tint(accent(context))
                         }
+                        if context.state.phase == .connected { networkDetails(context.state) }
                         if #available(iOS 17.0, *) { controls(context) }
                     }
                 }
@@ -1185,6 +1187,29 @@ private struct VBridgeLiveActivityWidget: Widget {
         }
         .controlSize(.mini)
         .buttonBorderShape(.capsule)
+    }
+
+    @ViewBuilder
+    private func networkDetails(_ state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        if state.ispName != nil || state.ipAddress != nil {
+            HStack(spacing: 6) {
+                Label(state.ispName ?? "Public IP", systemImage: "globe")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let ipAddress = state.ipAddress {
+                    Spacer(minLength: 4)
+                    Text(ipAddress)
+                        .monospaced()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                        .layoutPriority(1)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Last measured provider and public IP")
+        }
     }
 
     private func status(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> String {
