@@ -347,6 +347,7 @@ final class NetworkExtensionTunnelBackend: TunnelBackend {
                 from: configuration.seededTURN?.address ?? configuration.peerAddr
             )
             protocolConfiguration.providerConfiguration = configuration.providerConfiguration
+            protocolConfiguration.providerConfiguration?["bypassVPNTunnel"] = BypassTunnelPreference.enabled
 
             let defaults = UserDefaults.standard
             let excludeAPNs = defaults.object(forKey: "excludeAPNs") as? Bool ?? false

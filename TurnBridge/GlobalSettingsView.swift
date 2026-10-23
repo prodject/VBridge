@@ -1048,6 +1048,10 @@ private struct SplitTunnelRuleListView: View {
 }
 
 struct GlobalSettingsView: View {
+    @AppStorage(BypassTunnelPreference.key, store: BypassTunnelPreference.defaults) private var bypassVPNTunnel = false
+    @State private var changingBypass = false
+    @State private var bypassError: String?
+
     @AppStorage("excludeAPNs") private var excludeAPNs = false
     @AppStorage("excludeCellularServices") private var excludeCellularServices = false
     @AppStorage("excludeLocalNetworks") private var excludeLocalNetworks = true
@@ -1080,6 +1084,32 @@ struct GlobalSettingsView: View {
             }
 
             Section(header: Text("Routing")) {
+                Toggle(isOn: Binding(
+                    get: { bypassVPNTunnel },
+                    set: { enabled in
+                        changingBypass = true
+                        Task { @MainActor in
+                            defer { changingBypass = false }
+                            do { try await BypassTunnelControl.setEnabled(enabled) }
+                            catch { bypassError = error.localizedDescription }
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Bypass VPN Tunnel")
+                        Text("Send all traffic directly while keeping the VPN session running. Applies immediately when connected.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .disabled(changingBypass)
+                .tint(.orange)
+                .alert("Routing change failed", isPresented: Binding(
+                    get: { bypassError != nil }, set: { if !$0 { bypassError = nil } }
+                )) {
+                    Button("OK", role: .cancel) { bypassError = nil }
+                } message: { Text(bypassError ?? "") }
+
                 Toggle(isOn: $excludeLocalNetworks) {
                     VStack(alignment: .leading) {
                         Text("Allow LAN Access")

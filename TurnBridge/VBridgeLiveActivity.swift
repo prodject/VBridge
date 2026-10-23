@@ -98,6 +98,8 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         var ispName: String?
         var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
+        var bypassEnabled: Bool? = nil
+        var connectedSince: Date? = nil
         var updatedAt: Date
 
         var progressFraction: Double? {
@@ -262,7 +264,22 @@ enum VBridgeLiveActivityStore {
         return try? decoder.decode(VBridgeLiveActivitySnapshot.self, from: data)
     }
 
-    static func save(_ snapshot: VBridgeLiveActivitySnapshot) {
+    static func save(_ incoming: VBridgeLiveActivitySnapshot) {
+        var snapshot = incoming
+        let previous = load()
+        if snapshot.content.phase.isActiveSession {
+            snapshot.content.bypassEnabled = snapshot.content.bypassEnabled ?? previous?.content.bypassEnabled
+            if snapshot.content.phase == .connected {
+                snapshot.content.connectedSince = snapshot.content.connectedSince
+                    ?? (previous?.profileName == snapshot.profileName ? previous?.content.connectedSince : nil)
+                    ?? .now
+            } else {
+                snapshot.content.connectedSince = nil
+            }
+        } else {
+            snapshot.content.bypassEnabled = false
+            snapshot.content.connectedSince = nil
+        }
         guard let data = try? encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: snapshotKey)
         defaults.synchronize()
@@ -299,6 +316,7 @@ enum VBridgeLiveActivityStore {
         ispName: String? = nil,
         ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil,
+        bypassEnabled: Bool? = nil,
         updatedAt: Date = .now
     ) {
         var snapshot = load() ?? VBridgeLiveActivitySnapshot(
@@ -372,6 +390,7 @@ enum VBridgeLiveActivityStore {
         if let pingSamples {
             snapshot.content.pingSamples = pingSamples
         }
+        if let bypassEnabled { snapshot.content.bypassEnabled = bypassEnabled }
         snapshot.content.updatedAt = updatedAt
         save(snapshot)
     }
@@ -481,7 +500,7 @@ final class VBridgeLiveActivityCoordinator {
         }
 
         Task { @MainActor in
-            await self.apply(snapshot: snapshot)
+            await self.apply(snapshot: VBridgeLiveActivityStore.load() ?? snapshot)
         }
     }
 
@@ -521,7 +540,7 @@ final class VBridgeLiveActivityCoordinator {
     private func apply(snapshot: VBridgeLiveActivitySnapshot) async {
         let content = ActivityContent(
             state: snapshot.content,
-            staleDate: snapshot.content.phase == .connecting ? Date().addingTimeInterval(45) : nil,
+            staleDate: Date().addingTimeInterval(120),
             relevanceScore: snapshot.content.phase == .connecting ? 1.0 : 0.75
         )
 
@@ -644,6 +663,8 @@ struct VBridgeVPNLiveActivityAttributes {
         var ispName: String?
         var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
+        var bypassEnabled: Bool? = nil
+        var connectedSince: Date? = nil
         var updatedAt: Date
 
         var progressText: String? {
@@ -700,6 +721,7 @@ enum VBridgeLiveActivityStore {
         ispName: String? = nil,
         ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil,
+        bypassEnabled: Bool? = nil,
         updatedAt: Date = .now
     ) {}
 }

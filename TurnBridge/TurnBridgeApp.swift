@@ -23,6 +23,14 @@ struct VBridge: App {
         }
         UserNotificationDispatcher.shared.requestAuthorizationIfNeeded()
 #if !targetEnvironment(macCatalyst)
+        if #available(iOS 17.0, *) {
+            VBridgeLiveActivityActionRouter.shared.handler = { action in
+                switch action {
+                case .setBypass(let enabled): try await BypassTunnelControl.setEnabled(enabled)
+                case .disconnect: try await BypassTunnelControl.disconnect()
+                }
+            }
+        }
         if #available(iOS 16.0, *) {
             VBridgeAppShortcuts.updateAppShortcutParameters()
         }

@@ -148,6 +148,16 @@ The individual-IP list is very large; prefer the CIDR list unless exact host rou
 
 ## Widget and Shortcuts
 
+**Settings → Routing → Bypass VPN Tunnel** sends traffic directly while keeping the
+VPN session running. Turning it off restores the tunnel's routes and DNS, including
+split-tunneling rules. The preference also applies to the next connection.
+
+The Live Activity shows the profile, connection status, session timer, and relay
+details. On iOS 17 or later, its **Bypass VPN Tunnel / Use VPN Tunnel** and
+**Disconnect** buttons work without opening the app. Bypass state changes after
+the tunnel extension confirms the routing change. If the app stops refreshing the
+activity, it shows **Last known** and hides the timer until refreshed.
+
 VBridge includes two widget sizes:
 
 * **Small widget:** VPN state, connection count, relay IP, and tap-to-toggle behavior.

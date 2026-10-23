@@ -702,6 +702,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         traceStartTunnel("providerConfiguration loaded keys=\(providerConfiguration.keys.sorted())")
+        bypassEnabled = sharedDefaultsForTunnel()?.object(forKey: "bypassVPNTunnel") as? Bool
+            ?? providerConfiguration["bypassVPNTunnel"] as? Bool ?? false
 
         let rawTransportMode = (providerConfiguration["transportMode"] as? String) ?? "nil"
         let rawCSQTTPassword = ((providerConfiguration["csqttPassword"] as? String) ?? "").isEmpty ? "empty" : "set"
@@ -1527,6 +1529,40 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         guard let completionHandler = completionHandler else { return }
 
+        if let request = try? JSONSerialization.jsonObject(with: messageData) as? [String: Any],
+           request["command"] as? String == "set_bypass",
+           let enabled = request["enabled"] as? Bool {
+            enqueueNetworkSettingsChange {
+                guard let base = self.tunnelRoutingSettings else {
+                    completionHandler(nil)
+                    self.finishNetworkSettingsChange()
+                    return
+                }
+                let settings = self.routingSettings(base, bypass: enabled)
+                let interfaceName = self.currentTunnelInterfaceName()
+                self.applySystemNetworkSettings(settings) { error in
+                    DispatchQueue.main.async {
+                        let descriptorChanged = interfaceName == nil || interfaceName != self.currentTunnelInterfaceName()
+                        if error == nil && !descriptorChanged {
+                            self.bypassEnabled = enabled
+                            sharedDefaultsForTunnel()?.set(enabled, forKey: "bypassVPNTunnel")
+                            VBridgeLiveActivityStore.update(bypassEnabled: enabled)
+                        }
+                        completionHandler(try? JSONSerialization.data(withJSONObject: [
+                            "ok": error == nil && !descriptorChanged,
+                            "enabled": self.bypassEnabled
+                        ]))
+                        if descriptorChanged {
+                            self.cancelTunnelWithError(NSError(domain: "VBridge.BypassTunnel", code: 2,
+                                userInfo: [NSLocalizedDescriptionKey: "Tunnel interface changed while applying routing. Reconnect required."]))
+                        }
+                        self.finishNetworkSettingsChange()
+                    }
+                }
+            }
+            return
+        }
+
         if messageData == Data("vbridge_provider_probe".utf8) {
             let response = "alive handle=\(vbridgeTunnelHandle)"
             completionHandler(Data(response.utf8))
@@ -1569,6 +1605,82 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private var lastAppliedNetworkSettings: NEPacketTunnelNetworkSettings?
+
+    // Keep an untouched copy of VPN routes and DNS. Every settings writer,
+    // including WireGuardAdapter and live DNS updates, passes through here.
+    private var tunnelRoutingSettings: NEPacketTunnelNetworkSettings?
+    private var bypassEnabled = false
+    private var networkSettingsChanges: [() -> Void] = []
+    private var applyingNetworkSettings = false
+
+    private func enqueueNetworkSettingsChange(_ operation: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            self.networkSettingsChanges.append(operation)
+            if !self.applyingNetworkSettings {
+                self.applyingNetworkSettings = true
+                self.networkSettingsChanges.removeFirst()()
+            }
+        }
+    }
+
+    private func finishNetworkSettingsChange() {
+        if networkSettingsChanges.isEmpty { applyingNetworkSettings = false }
+        else { networkSettingsChanges.removeFirst()() }
+    }
+
+    private func routingSettings(_ base: NEPacketTunnelNetworkSettings, bypass: Bool) -> NEPacketTunnelNetworkSettings {
+        VPNBypassRouting.settings(from: base, bypass: bypass)
+    }
+
+    private func currentTunnelInterfaceName() -> String? {
+        guard let descriptor = findTunFileDescriptor() else { return nil }
+        var name = [CChar](repeating: 0, count: Int(IFNAMSIZ))
+        var length = socklen_t(name.count)
+        guard getsockopt(descriptor, 2 /* SYSPROTO_CONTROL */, 2 /* UTUN_OPT_IFNAME */, &name, &length) == 0 else {
+            return nil
+        }
+        return String(cString: name)
+    }
+
+    private func applySystemNetworkSettings(_ settings: NEPacketTunnelNetworkSettings?, completion: @escaping (Error?) -> Void) {
+        // iOS occasionally omits this callback (WireGuardAdapter also guards
+        // against this). Do not strand subsequent routing/DNS operations.
+        var finished = false
+        let timeout = DispatchWorkItem {
+            guard !finished else { return }
+            finished = true
+            let error = NSError(domain: "VBridge.BypassTunnel", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Applying tunnel network settings timed out. Reconnect required."])
+            completion(error)
+            self.cancelTunnelWithError(error)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
+        super.setTunnelNetworkSettings(settings) { error in
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                finished = true
+                timeout.cancel()
+                completion(error)
+            }
+        }
+    }
+
+    override func setTunnelNetworkSettings(_ tunnelNetworkSettings: NETunnelNetworkSettings?, completionHandler: ((Error?) -> Void)? = nil) {
+        enqueueNetworkSettingsChange {
+            let base = tunnelNetworkSettings as? NEPacketTunnelNetworkSettings
+            let settings = base.map { self.routingSettings($0, bypass: self.bypassEnabled) }
+            self.applySystemNetworkSettings(settings) { error in
+                DispatchQueue.main.async {
+                    if error == nil {
+                        self.tunnelRoutingSettings = base.map { self.routingSettings($0, bypass: false) }
+                        VBridgeLiveActivityStore.update(bypassEnabled: self.bypassEnabled)
+                    }
+                    completionHandler?(error)
+                    self.finishNetworkSettingsChange()
+                }
+            }
+        }
+    }
 
     private struct DNSUpdateRequest: Decodable {
         let command: String

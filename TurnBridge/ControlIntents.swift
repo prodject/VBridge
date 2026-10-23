@@ -1,4 +1,5 @@
 #if !targetEnvironment(macCatalyst)
+import Foundation
 import AppIntents
 import WidgetKit
 
@@ -41,6 +42,54 @@ struct ToggleVPNControlIntent: SetValueIntent {
         await MainActor.run {
             PendingShortcutActionStore.store(value ? .connect : .disconnect)
         }
+        return .result()
+    }
+}
+// Shared with the widget; only the app installs the VPN control handler.
+@available(iOS 17.0, *)
+enum VBridgeLiveActivityAction {
+    case setBypass(Bool)
+    case disconnect
+}
+
+@available(iOS 17.0, *)
+@MainActor
+final class VBridgeLiveActivityActionRouter {
+    static let shared = VBridgeLiveActivityActionRouter()
+    var handler: ((VBridgeLiveActivityAction) async throws -> Void)?
+
+    func perform(_ action: VBridgeLiveActivityAction) async throws {
+        guard let handler else {
+            throw NSError(domain: "VBridge.LiveActivity", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "VPN controls are unavailable. Open VBridge and retry."])
+        }
+        try await handler(action)
+    }
+}
+
+@available(iOS 17.0, *)
+struct SetBypassTunnelIntent: LiveActivityIntent {
+    static var title: LocalizedStringResource = "Bypass VPN Tunnel"
+    static var isDiscoverable = false
+    static var openAppWhenRun = false
+
+    @Parameter(title: "Bypass VPN Tunnel") var enabled: Bool
+    init() {}
+    init(enabled: Bool) { self.enabled = enabled }
+
+    func perform() async throws -> some IntentResult {
+        try await VBridgeLiveActivityActionRouter.shared.perform(.setBypass(enabled))
+        return .result()
+    }
+}
+
+@available(iOS 17.0, *)
+struct DisconnectVBridgeLiveActivityIntent: LiveActivityIntent {
+    static var title: LocalizedStringResource = "Disconnect VBridge VPN"
+    static var isDiscoverable = false
+    static var openAppWhenRun = false
+    func perform() async throws -> some IntentResult {
+        try await VBridgeLiveActivityActionRouter.shared.perform(.disconnect)
         return .result()
     }
 }
