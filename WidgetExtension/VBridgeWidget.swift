@@ -1100,6 +1100,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                     }
+                    .padding(.leading, 10)
+                    .padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     clock(context)
@@ -1108,6 +1110,8 @@ private struct VBridgeLiveActivityWidget: Widget {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .frame(maxWidth: 90, alignment: .trailing)
+                        .padding(.trailing, 10)
+                        .padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1123,6 +1127,10 @@ private struct VBridgeLiveActivityWidget: Widget {
                         if context.state.phase == .connected { networkDetails(context.state) }
                         if #available(iOS 17.0, *) { controls(context) }
                     }
+                    // Keep the outer buttons inside the island's curved lower
+                    // corners instead of letting its capsule mask clip them.
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
                 }
             } compactLeading: {
                 shield(context)
