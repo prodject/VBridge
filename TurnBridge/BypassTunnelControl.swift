@@ -97,9 +97,10 @@ enum BypassTunnelControl {
             snapshot.content.bypassEnabled = enabled
             snapshot.content.updatedAt = .now
             VBridgeLiveActivityStore.save(snapshot)
+            let published = VBridgeLiveActivityStore.load() ?? snapshot
             for activity in Activity<VBridgeVPNLiveActivityAttributes>.activities {
                 if confirmedConnected {
-                    await activity.update(ActivityContent(state: snapshot.content, staleDate: Date().addingTimeInterval(120)))
+                    await activity.update(ActivityContent(state: published.content, staleDate: Date().addingTimeInterval(120)))
                 } else {
                     await activity.end(ActivityContent(state: snapshot.content, staleDate: nil), dismissalPolicy: .immediate)
                 }

@@ -657,6 +657,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         providerTraceBuffer.removeAll(keepingCapacity: true)
         providerTraceBufferLock.unlock()
 
+        VBridgeLiveActivityStore.clearConnectionTelemetry()
         func finishStartTunnel(_ error: Error?, stage: String) {
             if let error {
                 traceStartTunnel("completionHandler(error) stage=\(stage) error=\(error.localizedDescription)")
@@ -664,7 +665,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 traceStartTunnel("completionHandler(nil) stage=\(stage)")
             }
             if error == nil {
-                DispatchQueue.main.async { self.configureTrustedWiFiFlow() }
+                DispatchQueue.main.async {
+                    self.startConnectionTelemetry()
+                    self.configureTrustedWiFiFlow()
+                }
             }
             completionHandler(error)
         }
@@ -780,6 +784,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let requestedNValue = Int32(nValueInt)
         let useSingleProxyWorker = tunnelConfiguration.map(usesAmneziaObfuscation) ?? false
         let nValue = useSingleProxyWorker ? Int32(1) : requestedNValue
+        connectionTelemetryTarget = max(Int(nValue), 1)
         let turnHost = (providerConfiguration["turnHost"] as? String) ?? ""
         let turnPort = (providerConfiguration["turnPort"] as? String) ?? ""
         let listenAddr = (providerConfiguration["listenAddr"] as? String) ?? "127.0.0.1:9000"
@@ -1476,7 +1481,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         sharedLogger.log("Stopping tunnel")
         SharedLogger.info("Stopping tunnel (reason: \(reason.rawValue))", source: .tunnel)
         stopPathMonitoring()
-        DispatchQueue.main.async { self.trustedWiFiFlowMonitor.stop() }
+        DispatchQueue.main.async {
+            self.trustedWiFiFlowMonitor.stop()
+            self.connectionTelemetryTimer?.cancel()
+            self.connectionTelemetryTimer = nil
+            VBridgeLiveActivityStore.clearConnectionTelemetry()
+        }
         didPauseProxyForSleep = false
         activeTransportMode = "wg"
         let startedAt = Date()
@@ -1600,6 +1610,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private var lastAppliedNetworkSettings: NEPacketTunnelNetworkSettings?
+
+    private var connectionTelemetryTimer: DispatchSourceTimer?
+    private var connectionTelemetryTarget = 1
+
+    private func startConnectionTelemetry() {
+        connectionTelemetryTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: 2, leeway: .milliseconds(250))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.vbridgeTunnelHandle >= 0,
+                  let pointer = VBridgeWGGetStats(self.vbridgeTunnelHandle) else { return }
+            defer { VBridgeWGFreeCString(pointer) }
+            let data = Data(String(cString: pointer).utf8)
+            guard let stats = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let active = (stats["active_conns"] ?? stats["active_workers"]) as? Int else { return }
+            // total_conns is a cumulative reconnect counter, not the worker
+            // target. Keep the configured target as the denominator.
+            VBridgeLiveActivityStore.publishConnectionTelemetry(
+                active: max(active, 0), total: self.connectionTelemetryTarget
+            )
+        }
+        connectionTelemetryTimer = timer
+        timer.resume()
+    }
 
     // Keep an untouched copy of VPN routes and DNS. Every settings writer,
     // including WireGuardAdapter and live DNS updates, passes through here.

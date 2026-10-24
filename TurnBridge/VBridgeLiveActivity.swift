@@ -240,6 +240,35 @@ enum VBridgeWidgetSnapshotStore {
 @available(iOS 16.1, *)
 enum VBridgeLiveActivityStore {
     private static let snapshotKey = "vbridge.live.activity.snapshot"
+    private static let telemetryKey = "vbridge.runtime.connection.telemetry"
+
+    // Only the provider writes this record. UI status changes must not erase
+    // the actual worker count when an on-demand tunnel changes networks.
+    static func connectionTelemetry() -> (active: Int, total: Int)? {
+        guard let values = defaults.dictionary(forKey: telemetryKey),
+              let active = values["active"] as? Int,
+              let total = values["total"] as? Int,
+              let timestamp = values["updatedAt"] as? Double,
+              Date().timeIntervalSince1970 - timestamp < 15,
+              active >= 0, total > 0 else { return nil }
+        return (active, total)
+    }
+
+    static func publishConnectionTelemetry(active: Int, total: Int) {
+        let values: [String: Any] = ["active": active, "total": total, "updatedAt": Date().timeIntervalSince1970]
+        defaults.set(values, forKey: telemetryKey)
+        let previous = load()?.content
+        guard previous?.activeConnections != active || previous?.totalConnections != total || previous?.phase != .connected else { return }
+        update(phase: .connected, activeConnections: active, totalConnections: total)
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: "com.prodject.vbridge.live-routing.changed" as CFString), nil, nil, true
+        )
+    }
+
+    static func clearConnectionTelemetry() {
+        defaults.removeObject(forKey: telemetryKey)
+    }
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -273,6 +302,10 @@ enum VBridgeLiveActivityStore {
             snapshot.content.bypassEnabled = snapshot.content.bypassEnabled ?? previous?.content.bypassEnabled
             snapshot.content.trustedWiFiActive = snapshot.content.trustedWiFiActive ?? previous?.content.trustedWiFiActive
             if snapshot.content.phase == .connected {
+                if let telemetry = connectionTelemetry() {
+                    snapshot.content.activeConnections = telemetry.active
+                    snapshot.content.totalConnections = telemetry.total
+                }
                 snapshot.content.connectedSince = snapshot.content.connectedSince
                     ?? (previous?.profileName == snapshot.profileName ? previous?.content.connectedSince : nil)
                     ?? .now
@@ -763,6 +796,9 @@ enum VBridgeWidgetSnapshotStore {
 }
 
 enum VBridgeLiveActivityStore {
+    static func connectionTelemetry() -> (active: Int, total: Int)? { nil }
+    static func publishConnectionTelemetry(active: Int, total: Int) {}
+    static func clearConnectionTelemetry() {}
     static func load() -> VBridgeLiveActivitySnapshot? { nil }
     static func save(_ snapshot: VBridgeLiveActivitySnapshot) {}
     static func clear() {}

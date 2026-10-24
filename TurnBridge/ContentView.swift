@@ -2223,6 +2223,9 @@ struct ContentView: View {
     }
 
     private func latestConnectionProgressFromLogs() -> (active: Int, total: Int)? {
+        if let telemetry = VBridgeLiveActivityStore.connectionTelemetry() {
+            return telemetry
+        }
         guard let content = VBridgeLiveActivityStore.load()?.content,
               let active = content.activeConnections,
               let total = content.totalConnections else { return nil }

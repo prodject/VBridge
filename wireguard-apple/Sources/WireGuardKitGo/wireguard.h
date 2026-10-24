@@ -23,6 +23,7 @@ extern void wgDisableSomeRoamingForBrokenMobileSemantics(int handle);
 extern const char *wgVersion();
 
 extern int32_t VBridgeWGStartVKBootstrap(const char *jsonConfig);
+extern char *VBridgeWGGetStats(int32_t tunnelHandle);
 extern int32_t VBridgeWGWaitBootstrapReady(int32_t handle, int32_t timeoutMs);
 extern int32_t VBridgeWGAttachWireGuard(int32_t handle, const char *settings, int32_t tun_fd);
 extern void VBridgeWGTurnOff(int32_t handle);
