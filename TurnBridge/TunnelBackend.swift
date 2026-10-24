@@ -7,7 +7,6 @@ import WireGuardKit
 
 enum TunnelOnDemandController {
     static func refreshTrustedWiFiPreferences() {
-        let providerBundleIdentifier = VBridgeTunnelManagerStore.providerBundleIdentifier
         NETunnelProviderManager.loadAllFromPreferences { managers, error in
             if let error {
                 SharedLogger.error("Failed to load tunnel managers for trusted Wi-Fi refresh: \(error.localizedDescription)")
@@ -26,12 +25,31 @@ enum TunnelOnDemandController {
                     SharedLogger.error("Failed to save trusted Wi-Fi preferences: \(saveError.localizedDescription)")
                 } else {
                     SharedLogger.info("Trusted Wi-Fi on-demand preferences updated")
+                    if manager.connection.status == .connected,
+                       let session = manager.connection as? NETunnelProviderSession,
+                       let data = try? JSONSerialization.data(withJSONObject: [
+                           "command": "update_trusted_wifi",
+                           "settings": flowConfiguration()
+                       ]) {
+                        try? session.sendProviderMessage(data) { _ in }
+                    }
                 }
             }
         }
     }
 
+    static func flowConfiguration() -> [String: Any] {
+        let settings = TrustedWiFiStorage.load()
+        return ["enabled": settings.enabled, "flowConnect": settings.flowConnect,
+                "ssids": TrustedWiFiStorage.normalizedSSIDs(settings.ssids)]
+    }
+
     static func applyTrustedWiFiSettings(to manager: NETunnelProviderManager) {
+        if let configuration = manager.protocolConfiguration as? NETunnelProviderProtocol {
+            var values = configuration.providerConfiguration ?? [:]
+            values["trustedWiFi"] = flowConfiguration()
+            configuration.providerConfiguration = values
+        }
         let settings = TrustedWiFiStorage.load()
         let ssids = TrustedWiFiStorage.normalizedSSIDs(settings.ssids)
 
@@ -51,7 +69,10 @@ enum TunnelOnDemandController {
         let connectCellularRule = NEOnDemandRuleConnect()
         connectCellularRule.interfaceTypeMatch = .cellular
 
-        manager.onDemandRules = [trustedDisconnectRule, connectOtherWiFiRule, connectCellularRule]
+        // Flow mode must never install the trusted-network disconnect rule.
+        manager.onDemandRules = settings.flowConnect
+            ? [connectOtherWiFiRule, connectCellularRule]
+            : [trustedDisconnectRule, connectOtherWiFiRule, connectCellularRule]
         manager.isOnDemandEnabled = true
     }
 }

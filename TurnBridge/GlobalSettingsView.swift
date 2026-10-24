@@ -8,22 +8,25 @@ import NetworkExtension
 struct TrustedWiFiSettings: Equatable {
     var enabled: Bool
     var ssids: [String]
+    var flowConnect = false
 }
 
 enum TrustedWiFiStorage {
     static let enabledKey = "trustedWiFi.enabled"
     static let ssidsKey = "trustedWiFi.ssids"
+    static let flowConnectKey = "trustedWiFi.flowConnect"
 
     static func load() -> TrustedWiFiSettings {
         let defaults = UserDefaults.standard
         let enabled = defaults.bool(forKey: enabledKey)
         let ssids = normalizedSSIDs(defaults.stringArray(forKey: ssidsKey) ?? [])
-        return TrustedWiFiSettings(enabled: enabled, ssids: ssids)
+        return TrustedWiFiSettings(enabled: enabled, ssids: ssids, flowConnect: defaults.bool(forKey: flowConnectKey))
     }
 
     static func save(_ settings: TrustedWiFiSettings) {
         let defaults = UserDefaults.standard
         defaults.set(settings.enabled, forKey: enabledKey)
+        defaults.set(settings.flowConnect, forKey: flowConnectKey)
         defaults.set(normalizedSSIDs(settings.ssids), forKey: ssidsKey)
     }
 
@@ -742,17 +745,33 @@ struct TrustedWiFiSettingsView: View {
                 Toggle(isOn: enabledBinding) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Enabled")
-                        Text("When the device joins a trusted SSID, the VPN can stay disconnected and internet goes directly. Outside trusted Wi-Fi, on-demand rules reconnect the VPN automatically.")
+                        Text(settings.flowConnect ? "Trusted Wi-Fi controls traffic routing while keeping the VPN session active." : "When the device joins a trusted SSID, the VPN can stay disconnected and internet goes directly. Outside trusted Wi-Fi, on-demand rules reconnect the VPN automatically.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
 
+                Toggle(isOn: Binding(
+                    get: { settings.flowConnect },
+                    set: {
+                        settings.flowConnect = $0
+                        TrustedWiFiStorage.save(settings)
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Flow connect")
+                        Text("Keep the VPN session running. On trusted Wi-Fi, send traffic directly; when leaving, restore VPN routing. Requires Access Wi-Fi Information in the app signature.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .disabled(!settings.enabled)
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(TrustedWiFiStorage.summary(settings))
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text("Add exact SSID names manually. These rules are applied through the system VPN manager.")
+                    Text(settings.flowConnect ? "Add exact SSID names manually. If the current SSID cannot be read, traffic stays routed through the VPN." : "Add exact SSID names manually. These rules are applied through the system VPN manager.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -764,7 +783,7 @@ struct TrustedWiFiSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("No trusted SSIDs yet")
                             .font(.headline)
-                        Text("Add the Wi-Fi names where VBridge should stand by and let traffic go directly instead of keeping the VPN active.")
+                        Text(settings.flowConnect ? "Add the Wi-Fi names where traffic should go directly while the VPN session stays active." : "Add the Wi-Fi names where VBridge should stand by and let traffic go directly instead of keeping the VPN active.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

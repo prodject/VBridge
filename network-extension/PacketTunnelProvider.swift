@@ -663,6 +663,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             } else {
                 traceStartTunnel("completionHandler(nil) stage=\(stage)")
             }
+            if error == nil {
+                DispatchQueue.main.async { self.configureTrustedWiFiFlow() }
+            }
             completionHandler(error)
         }
 
@@ -704,6 +707,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         traceStartTunnel("providerConfiguration loaded keys=\(providerConfiguration.keys.sorted())")
         bypassEnabled = sharedDefaultsForTunnel()?.object(forKey: "bypassVPNTunnel") as? Bool
             ?? providerConfiguration["bypassVPNTunnel"] as? Bool ?? false
+        manualBypassEnabled = bypassEnabled
+        trustedWiFiSettings = providerConfiguration["trustedWiFi"] as? [String: Any] ?? [:]
 
         let rawTransportMode = (providerConfiguration["transportMode"] as? String) ?? "nil"
         let rawCSQTTPassword = ((providerConfiguration["csqttPassword"] as? String) ?? "").isEmpty ? "empty" : "set"
@@ -1471,6 +1476,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         sharedLogger.log("Stopping tunnel")
         SharedLogger.info("Stopping tunnel (reason: \(reason.rawValue))", source: .tunnel)
         stopPathMonitoring()
+        DispatchQueue.main.async { self.trustedWiFiFlowMonitor.stop() }
         didPauseProxyForSleep = false
         activeTransportMode = "wg"
         let startedAt = Date()
@@ -1529,38 +1535,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         guard let completionHandler = completionHandler else { return }
 
-        if let request = try? JSONSerialization.jsonObject(with: messageData) as? [String: Any],
-           request["command"] as? String == "set_bypass",
-           let enabled = request["enabled"] as? Bool {
-            enqueueNetworkSettingsChange {
-                guard let base = self.tunnelRoutingSettings else {
-                    completionHandler(nil)
-                    self.finishNetworkSettingsChange()
-                    return
+        if let request = try? JSONSerialization.jsonObject(with: messageData) as? [String: Any] {
+            if request["command"] as? String == "update_trusted_wifi",
+               let settings = request["settings"] as? [String: Any] {
+                DispatchQueue.main.async {
+                    self.trustedWiFiSettings = settings
+                    self.configureTrustedWiFiFlow()
+                    completionHandler(Data("ok".utf8))
                 }
-                let settings = self.routingSettings(base, bypass: enabled)
-                let interfaceName = self.currentTunnelInterfaceName()
-                self.applySystemNetworkSettings(settings) { error in
-                    DispatchQueue.main.async {
-                        let descriptorChanged = interfaceName == nil || interfaceName != self.currentTunnelInterfaceName()
-                        if error == nil && !descriptorChanged {
-                            self.bypassEnabled = enabled
-                            sharedDefaultsForTunnel()?.set(enabled, forKey: "bypassVPNTunnel")
-                            VBridgeLiveActivityStore.update(bypassEnabled: enabled)
-                        }
-                        completionHandler(try? JSONSerialization.data(withJSONObject: [
-                            "ok": error == nil && !descriptorChanged,
-                            "enabled": self.bypassEnabled
-                        ]))
-                        if descriptorChanged {
-                            self.cancelTunnelWithError(NSError(domain: "VBridge.BypassTunnel", code: 2,
-                                userInfo: [NSLocalizedDescriptionKey: "Tunnel interface changed while applying routing. Reconnect required."]))
-                        }
-                        self.finishNetworkSettingsChange()
-                    }
-                }
+                return
             }
-            return
+            if request["command"] as? String == "set_bypass",
+               let enabled = request["enabled"] as? Bool {
+                applyBypass(manualRequest: enabled) { error in
+                    completionHandler(try? JSONSerialization.data(withJSONObject: [
+                        "ok": error == nil,
+                        "enabled": self.bypassEnabled,
+                        "message": error?.localizedDescription ?? ""
+                    ]))
+                }
+                return
+            }
         }
 
         if messageData == Data("vbridge_provider_probe".utf8) {
@@ -1610,6 +1605,71 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // including WireGuardAdapter and live DNS updates, passes through here.
     private var tunnelRoutingSettings: NEPacketTunnelNetworkSettings?
     private var bypassEnabled = false
+    private var manualBypassEnabled = false
+    private var trustedWiFiBypass = false
+    private var trustedWiFiSettings: [String: Any] = [:]
+    private let trustedWiFiFlowMonitor = TrustedWiFiFlowMonitor()
+
+    private func configureTrustedWiFiFlow() {
+        trustedWiFiFlowMonitor.onTrustedNetwork = { [weak self] trusted in
+            guard let self else { return }
+            self.trustedWiFiBypass = trusted
+            self.applyBypass(manualRequest: nil) { error in
+                if let error {
+                    SharedLogger.warning("Flow connect routing failed: \(error.localizedDescription)", source: .tunnel)
+                }
+            }
+        }
+        trustedWiFiFlowMonitor.configure(trustedWiFiSettings)
+    }
+
+    private func applyBypass(manualRequest: Bool?, completion: @escaping (Error?) -> Void) {
+        enqueueNetworkSettingsChange {
+            if manualRequest == false && self.trustedWiFiBypass {
+                completion(NSError(domain: "VBridge.FlowConnect", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Flow connect is routing trusted Wi-Fi directly. Disable Flow connect to use the VPN on this network."
+                ]))
+                self.finishNetworkSettingsChange()
+                return
+            }
+            let desired = (manualRequest ?? self.manualBypassEnabled) || self.trustedWiFiBypass
+            guard desired != self.bypassEnabled else {
+                if let manualRequest { self.saveManualBypass(manualRequest) }
+                completion(nil)
+                self.finishNetworkSettingsChange()
+                return
+            }
+            guard let base = self.tunnelRoutingSettings else {
+                completion(NSError(domain: "VBridge.FlowConnect", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Tunnel routing is not ready."
+                ]))
+                self.finishNetworkSettingsChange()
+                return
+            }
+            let interfaceName = self.currentTunnelInterfaceName()
+            self.applySystemNetworkSettings(self.routingSettings(base, bypass: desired)) { error in
+                DispatchQueue.main.async {
+                    let moved = interfaceName == nil || interfaceName != self.currentTunnelInterfaceName()
+                    let resultError = error ?? (moved ? NSError(domain: "VBridge.FlowConnect", code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "Tunnel interface changed. Reconnect required."]) : nil)
+                    if resultError == nil {
+                        self.bypassEnabled = desired
+                        if let manualRequest { self.saveManualBypass(manualRequest) }
+                        VBridgeLiveActivityStore.update(bypassEnabled: desired)
+                        SharedLogger.info("Flow/bypass routing applied: direct=\(desired)", source: .tunnel)
+                    }
+                    completion(resultError)
+                    if moved { self.cancelTunnelWithError(resultError) }
+                    self.finishNetworkSettingsChange()
+                }
+            }
+        }
+    }
+
+    private func saveManualBypass(_ enabled: Bool) {
+        manualBypassEnabled = enabled
+        sharedDefaultsForTunnel()?.set(enabled, forKey: "bypassVPNTunnel")
+    }
     private var networkSettingsChanges: [() -> Void] = []
     private var applyingNetworkSettings = false
 

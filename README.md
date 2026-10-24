@@ -148,6 +148,16 @@ The individual-IP list is very large; prefer the CIDR list unless exact host rou
 
 ## Widget and Shortcuts
 
+**Settings → Trusted Wi-Fi → Flow connect** keeps the VPN session running on
+trusted SSIDs and temporarily routes traffic directly instead of disconnecting.
+When leaving trusted Wi-Fi, the tunnel routes and DNS are restored (unless manual
+**Bypass VPN Tunnel** is enabled). Both **Enabled** and **Flow connect** must be on.
+Changes apply when leaving the Trusted Wi-Fi settings screen. The packet tunnel
+monitors network changes and checks the SSID periodically, including while the
+app is in the background. SSID checks require **Access Wi-Fi Information** in the
+app/extension provisioning profiles; an unavailable SSID never enables automatic
+bypass. With Flow connect off, the original disconnect/reconnect rules apply.
+
 **Settings → Routing → Bypass VPN Tunnel** sends traffic directly while keeping the
 VPN session running. Turning it off restores the tunnel's routes and DNS, including
 split-tunneling rules. The preference also applies to the next connection.

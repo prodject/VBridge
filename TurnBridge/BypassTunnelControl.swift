@@ -75,10 +75,12 @@ enum BypassTunnelControl {
                 }
                 let data = try JSONSerialization.data(withJSONObject: ["command": "set_bypass", "enabled": enabled])
                 let reply = try await send(data, to: session)
-                guard let result = try JSONSerialization.jsonObject(with: reply) as? [String: Any],
-                      result["ok"] as? Bool == true,
+                guard let result = try JSONSerialization.jsonObject(with: reply) as? [String: Any] else {
+                    throw failure("The VPN extension returned an invalid routing confirmation.")
+                }
+                guard result["ok"] as? Bool == true,
                       result["enabled"] as? Bool == enabled else {
-                    throw failure("The VPN extension could not apply the routing change.")
+                    throw failure(result["message"] as? String ?? "The VPN extension could not apply the routing change.")
                 }
                 confirmedConnected = true
             case .disconnected, .invalid:
