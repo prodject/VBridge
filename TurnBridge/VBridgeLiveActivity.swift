@@ -1,6 +1,7 @@
 #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
 import ActivityKit
 import Foundation
+import CoreFoundation
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -98,6 +99,7 @@ struct VBridgeVPNLiveActivityAttributes: ActivityAttributes {
         var ispName: String?
         var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
+        var trustedWiFiActive: Bool? = nil
         var bypassEnabled: Bool? = nil
         var connectedSince: Date? = nil
         var updatedAt: Date
@@ -269,6 +271,7 @@ enum VBridgeLiveActivityStore {
         let previous = load()
         if snapshot.content.phase.isActiveSession {
             snapshot.content.bypassEnabled = snapshot.content.bypassEnabled ?? previous?.content.bypassEnabled
+            snapshot.content.trustedWiFiActive = snapshot.content.trustedWiFiActive ?? previous?.content.trustedWiFiActive
             if snapshot.content.phase == .connected {
                 snapshot.content.connectedSince = snapshot.content.connectedSince
                     ?? (previous?.profileName == snapshot.profileName ? previous?.content.connectedSince : nil)
@@ -278,6 +281,7 @@ enum VBridgeLiveActivityStore {
             }
         } else {
             snapshot.content.bypassEnabled = false
+            snapshot.content.trustedWiFiActive = false
             snapshot.content.connectedSince = nil
         }
         guard let data = try? encoder.encode(snapshot) else { return }
@@ -317,6 +321,7 @@ enum VBridgeLiveActivityStore {
         ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil,
         bypassEnabled: Bool? = nil,
+        trustedWiFiActive: Bool? = nil,
         updatedAt: Date = .now
     ) {
         var snapshot = load() ?? VBridgeLiveActivitySnapshot(
@@ -391,8 +396,16 @@ enum VBridgeLiveActivityStore {
             snapshot.content.pingSamples = pingSamples
         }
         if let bypassEnabled { snapshot.content.bypassEnabled = bypassEnabled }
+        if let trustedWiFiActive { snapshot.content.trustedWiFiActive = trustedWiFiActive }
         snapshot.content.updatedAt = updatedAt
         save(snapshot)
+        if bypassEnabled != nil || trustedWiFiActive != nil {
+            CFNotificationCenterPostNotification(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                CFNotificationName(rawValue: "com.prodject.vbridge.live-routing.changed" as CFString),
+                nil, nil, true
+            )
+        }
     }
 
     static func clear() {
@@ -420,6 +433,29 @@ final class VBridgeLiveActivityCoordinator {
 
     private init() {
         activity = Activity<VBridgeVPNLiveActivityAttributes>.activities.first
+        // A shared-defaults write alone does not update ActivityKit. Notify the
+        // app while it is running; iOS may defer this while the app is suspended.
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(), nil,
+            { _, _, _, _, _ in
+                Task { @MainActor in
+                    VBridgeLiveActivityCoordinator.shared.refreshRoutingState()
+                }
+            },
+            "com.prodject.vbridge.live-routing.changed" as CFString,
+            nil, .deliverImmediately
+        )
+    }
+
+    private func refreshRoutingState() {
+        guard let snapshot = VBridgeLiveActivityStore.load(),
+              snapshot.content.phase.isActiveSession else { return }
+        revision += 1
+        let currentRevision = revision
+        Task { @MainActor in
+            guard self.revision == currentRevision else { return }
+            await self.apply(snapshot: snapshot)
+        }
     }
 
     func sync(
@@ -454,7 +490,8 @@ final class VBridgeLiveActivityCoordinator {
             updatedAt: updatedAt
         )
 
-        if let existing = VBridgeLiveActivityStore.load(), existing.profileName == profileName {
+        if let existing = VBridgeLiveActivityStore.load(), existing.profileName == profileName,
+           phase != .connecting || existing.content.phase == .connecting {
             if content.activeConnections == nil {
                 content.activeConnections = existing.content.activeConnections
             }
@@ -484,11 +521,19 @@ final class VBridgeLiveActivityCoordinator {
             }
         }
 
-        if phase == .connecting || phase == .disconnecting || phase == .disconnected || phase == .unknown {
+        if phase == .disconnecting || phase == .disconnected || phase == .unknown {
             content.activeConnections = nil
             content.totalConnections = nil
             content.relayIP = nil
             content.estimatedRemainingSeconds = nil
+            content.downloadSpeedMbps = nil
+            content.uploadSpeedMbps = nil
+            content.ispName = nil
+            content.ipAddress = nil
+            content.pingSamples = nil
+        }
+
+        if phase == .connecting {
             content.downloadSpeedMbps = nil
             content.uploadSpeedMbps = nil
             content.ispName = nil
@@ -675,6 +720,7 @@ struct VBridgeVPNLiveActivityAttributes {
         var ispName: String?
         var ipAddress: String?
         var pingSamples: [VBridgePingSample]?
+        var trustedWiFiActive: Bool? = nil
         var bypassEnabled: Bool? = nil
         var connectedSince: Date? = nil
         var updatedAt: Date
@@ -734,6 +780,7 @@ enum VBridgeLiveActivityStore {
         ipAddress: String? = nil,
         pingSamples: [VBridgePingSample]? = nil,
         bypassEnabled: Bool? = nil,
+        trustedWiFiActive: Bool? = nil,
         updatedAt: Date = .now
     ) {}
 }

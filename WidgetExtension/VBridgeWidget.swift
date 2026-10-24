@@ -1062,8 +1062,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                 }
                 if context.isStale { freshnessRow(context) }
                 if context.state.phase == .connecting {
-                    ProgressView(value: context.state.progressFraction)
-                        .tint(accent(context))
+                    connectionBar(context.state)
                     HStack {
                         Text(context.state.progressText ?? "Preparing tunnel")
                         Spacer()
@@ -1122,7 +1121,7 @@ private struct VBridgeLiveActivityWidget: Widget {
                             .truncationMode(.middle)
                         if context.isStale { freshnessRow(context) }
                         if context.state.phase == .connecting {
-                            ProgressView(value: context.state.progressFraction).tint(accent(context))
+                            connectionBar(context.state)
                         }
                         if context.state.phase == .connected { networkDetails(context.state) }
                         if #available(iOS 17.0, *) { controls(context) }
@@ -1155,6 +1154,21 @@ private struct VBridgeLiveActivityWidget: Widget {
         }
     }
 
+    private func connectionBar(_ state: VBridgeVPNLiveActivityAttributes.ContentState) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.14))
+                Capsule()
+                    .fill(LinearGradient(colors: [.purple, .cyan], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geometry.size.width * (state.progressFraction ?? 0))
+            }
+        }
+        .frame(height: 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("VPN connection progress")
+        .accessibilityValue(state.progressText ?? "Preparing tunnel")
+    }
+
     @available(iOS 17.0, *)
     private func controls(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> some View {
         HStack(spacing: 6) {
@@ -1181,7 +1195,7 @@ private struct VBridgeLiveActivityWidget: Widget {
             .disabled(context.state.phase == .disconnecting)
 
             Button(intent: SetBypassTunnelIntent(enabled: context.state.bypassEnabled != true)) {
-                Label(context.state.bypassEnabled == true ? "Use VPN" : "Bypass",
+                Label(context.state.bypassEnabled == true ? "VPN" : "Bypass",
                       systemImage: context.state.bypassEnabled == true ? "lock.shield" : "arrow.triangle.branch")
                     .font(.system(size: 10, weight: .medium))
                     .lineLimit(1)
@@ -1223,6 +1237,9 @@ private struct VBridgeLiveActivityWidget: Widget {
     private func status(_ context: ActivityViewContext<VBridgeVPNLiveActivityAttributes>) -> String {
         // The leading island region is too narrow for a freshness qualifier.
         // Show that separately in the full-width bottom region.
+        if context.state.phase == .connected, context.state.trustedWiFiActive == true {
+            return "Trusted WiFi"
+        }
         return context.state.bypassEnabled == true && context.state.phase == .connected
             ? "Bypass active" : context.state.phase.displayTitle
     }

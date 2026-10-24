@@ -1607,12 +1607,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var bypassEnabled = false
     private var manualBypassEnabled = false
     private var trustedWiFiBypass = false
+    private var flowBypassOverride: Bool?
     private var trustedWiFiSettings: [String: Any] = [:]
     private let trustedWiFiFlowMonitor = TrustedWiFiFlowMonitor()
 
     private func configureTrustedWiFiFlow() {
         trustedWiFiFlowMonitor.onTrustedNetwork = { [weak self] trusted in
             guard let self else { return }
+            if self.trustedWiFiBypass != trusted { self.flowBypassOverride = nil }
             self.trustedWiFiBypass = trusted
             self.applyBypass(manualRequest: nil) { error in
                 if let error {
@@ -1625,16 +1627,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func applyBypass(manualRequest: Bool?, completion: @escaping (Error?) -> Void) {
         enqueueNetworkSettingsChange {
-            if manualRequest == false && self.trustedWiFiBypass {
-                completion(NSError(domain: "VBridge.FlowConnect", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Flow connect is routing trusted Wi-Fi directly. Disable Flow connect to use the VPN on this network."
-                ]))
-                self.finishNetworkSettingsChange()
-                return
-            }
-            let desired = (manualRequest ?? self.manualBypassEnabled) || self.trustedWiFiBypass
+            // A deliberate button tap overrides automatic routing until the
+            // trusted-network state changes; polling must not undo the tap.
+            let desired = manualRequest ?? self.flowBypassOverride
+                ?? (self.manualBypassEnabled || self.trustedWiFiBypass)
             guard desired != self.bypassEnabled else {
                 if let manualRequest { self.saveManualBypass(manualRequest) }
+                self.publishFlowRoutingState()
                 completion(nil)
                 self.finishNetworkSettingsChange()
                 return
@@ -1655,7 +1654,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     if resultError == nil {
                         self.bypassEnabled = desired
                         if let manualRequest { self.saveManualBypass(manualRequest) }
-                        VBridgeLiveActivityStore.update(bypassEnabled: desired)
+                        self.publishFlowRoutingState()
                         SharedLogger.info("Flow/bypass routing applied: direct=\(desired)", source: .tunnel)
                     }
                     completion(resultError)
@@ -1666,8 +1665,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    private func publishFlowRoutingState() {
+        let previous = VBridgeLiveActivityStore.load()?.content
+        guard previous?.bypassEnabled != bypassEnabled || previous?.trustedWiFiActive != trustedWiFiBypass else { return }
+        VBridgeLiveActivityStore.update(bypassEnabled: bypassEnabled, trustedWiFiActive: trustedWiFiBypass)
+    }
+
     private func saveManualBypass(_ enabled: Bool) {
         manualBypassEnabled = enabled
+        flowBypassOverride = trustedWiFiBypass ? enabled : nil
         sharedDefaultsForTunnel()?.set(enabled, forKey: "bypassVPNTunnel")
     }
     private var networkSettingsChanges: [() -> Void] = []

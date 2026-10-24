@@ -157,6 +157,12 @@ monitors network changes and checks the SSID periodically, including while the
 app is in the background. SSID checks require **Access Wi-Fi Information** in the
 app/extension provisioning profiles; an unavailable SSID never enables automatic
 bypass. With Flow connect off, the original disconnect/reconnect rules apply.
+With Flow connect, the Live Activity displays **Trusted WiFi** while a trusted
+SSID is detected and returns to **Connected** outside it. Its **Bypass / VPN**
+button can temporarily override automatic routing until the trusted-network state
+changes. Routing changes notify the running app to refresh ActivityKit; iOS may
+defer the display update while the app is fully suspended. Without Flow connect,
+trusted Wi-Fi disconnects the VPN and ends the Live Activity as before.
 
 **Settings → Routing → Bypass VPN Tunnel** sends traffic directly while keeping the
 VPN session running. Turning it off restores the tunnel's routes and DNS, including
