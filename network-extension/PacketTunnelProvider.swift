@@ -1613,15 +1613,28 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var connectionTelemetryTimer: DispatchSourceTimer?
     private var connectionTelemetryTarget = 1
+    private var lastRuntimeTickAt: Date?
 
     private func startConnectionTelemetry() {
         connectionTelemetryTimer?.cancel()
+        lastRuntimeTickAt = Date()
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: 2, leeway: .milliseconds(250))
         timer.setEventHandler { [weak self] in
             guard let self, self.vbridgeTunnelHandle >= 0,
                   let pointer = VBridgeWGGetStats(self.vbridgeTunnelHandle) else { return }
             defer { VBridgeWGFreeCString(pointer) }
+            let now = Date()
+            if let previousTick = self.lastRuntimeTickAt,
+               now.timeIntervalSince(previousTick) > 30,
+               self.usesProxyLifecycleHooks {
+                // A wall-clock gap detects freeze/thaw even if iOS omits wake().
+                // Probe existing connections first; don't churn valid TURN
+                // allocations just because the phone was idle or locked.
+                SharedLogger.info("Runtime resumed after a long scheduling gap; checking transport health", source: .tunnel)
+                VBridgeWGWakeHealthCheck(self.vbridgeTunnelHandle)
+            }
+            self.lastRuntimeTickAt = now
             let data = Data(String(cString: pointer).utf8)
             guard let stats = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let active = (stats["active_conns"] ?? stats["active_workers"]) as? Int else { return }
@@ -1874,18 +1887,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func sleep(completionHandler: @escaping () -> Void) {
+#if os(iOS)
+        // Locking an iPhone must not cancel all workers while leaving the VPN
+        // routes installed. The transport maintains its own refresh/keepalive
+        // and recovery loops; iOS may suspend and resume it independently.
+        SharedLogger.info("Extension sleep callback received; keeping VPN transport running", source: .tunnel)
+#else
         if usesProxyLifecycleHooks {
             SharedLogger.info("Extension sleep callback received; pausing proxy runtime", source: .tunnel)
             VBridgeWGPause(vbridgeTunnelHandle)
             didPauseProxyForSleep = true
         }
+#endif
         completionHandler()
     }
 
     override func wake() {
         guard usesProxyLifecycleHooks else { return }
 
-        SharedLogger.info("Extension wake callback received; resuming proxy runtime", source: .tunnel)
+        SharedLogger.info("Extension wake callback received; checking proxy runtime", source: .tunnel)
         if didPauseProxyForSleep {
             VBridgeWGResume(vbridgeTunnelHandle)
             didPauseProxyForSleep = false
